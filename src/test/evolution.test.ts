@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { BRICK_COLUMNS, BRICK_ROWS, CURSOR_MODEL, MAX_BRICKS, MIN_BRICKS, fallbackLevel, normalizeLevel, type LevelRequest } from "../shared/evolution";
 import { DEFAULT_SETTINGS, SAVE_VERSION, normalizeSaveState, normalizeSettings } from "../shared/saveState";
 import { buildPrompt, parseWorkerOutput, requestEvolution, summarizeLevelError } from "../server/cursorAgent";
-import { calculatePaddleRebound, trimComposerArchive, type ComposerGeneratedLevelEntry } from "../client/game/RicochetRushGame";
+import { calculatePaddleRebound, normalizeLoopRiskVelocity, trimComposerArchive, type ComposerGeneratedLevelEntry } from "../client/game/RicochetRushGame";
 
 const request: LevelRequest = {
   level: 4,
@@ -294,5 +294,35 @@ describe("Ricochet Rush paddle feel", () => {
     expect(right.vx).toBeGreaterThan(0);
     expect(Math.abs(left.vx)).toBeLessThan(left.speed * 0.84 + 0.001);
     expect(Math.abs(right.vx)).toBeLessThan(right.speed * 0.84 + 0.001);
+  });
+});
+
+describe("Ricochet Rush collision consistency", () => {
+  it("nudges near-vertical wall and brick bounces out of dead loops without changing speed", () => {
+    const corrected = normalizeLoopRiskVelocity({
+      vx: 0,
+      vy: 520,
+      minXRatio: 0.16,
+      fallbackXSign: -1
+    });
+
+    expect(corrected.changed).toBe(true);
+    expect(corrected.vx).toBeLessThan(0);
+    expect(Math.abs(corrected.vx)).toBeGreaterThanOrEqual(corrected.speed * 0.16);
+    expect(Math.hypot(corrected.vx, corrected.vy)).toBeCloseTo(corrected.speed, 5);
+  });
+
+  it("nudges near-horizontal side bounces out of dead loops without changing speed", () => {
+    const corrected = normalizeLoopRiskVelocity({
+      vx: -520,
+      vy: 3,
+      minYRatio: 0.16,
+      fallbackYSign: 1
+    });
+
+    expect(corrected.changed).toBe(true);
+    expect(corrected.vy).toBeGreaterThan(0);
+    expect(Math.abs(corrected.vy)).toBeGreaterThanOrEqual(corrected.speed * 0.16);
+    expect(Math.hypot(corrected.vx, corrected.vy)).toBeCloseTo(corrected.speed, 5);
   });
 });

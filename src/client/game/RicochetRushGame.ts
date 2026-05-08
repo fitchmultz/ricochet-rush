@@ -122,9 +122,32 @@ export interface PaddleRebound {
   speed: number;
 }
 
+export interface LoopRiskVelocityInput {
+  vx: number;
+  vy: number;
+  minXRatio?: number;
+  minYRatio?: number;
+  fallbackXSign?: number;
+  fallbackYSign?: number;
+}
+
+export interface LoopRiskVelocity {
+  vx: number;
+  vy: number;
+  speed: number;
+  changed: boolean;
+}
+
 interface PaddleHitDebug extends PaddleRebound {
   hitZone: number;
   paddleVelocityX: number;
+}
+
+interface LoopCorrectionDebug extends LoopRiskVelocity {
+  source: "wall" | "brick";
+  axis: "x" | "y";
+  beforeVx: number;
+  beforeVy: number;
 }
 
 type GamePhase = "loading" | "ready" | "playing" | "levelComplete" | "gameOver";
@@ -151,6 +174,8 @@ const MAX_BALL_SPEED = 860;
 const MAX_LAUNCH_SPEED = 760;
 const MIN_REBOUND_X_RATIO = 0.18;
 const MAX_REBOUND_X_RATIO = 0.84;
+const MIN_COLLISION_X_RATIO = 0.16;
+const MIN_COLLISION_Y_RATIO = 0.16;
 const POWERUP_ATLAS_COLUMNS = 5;
 const POWERUP_ATLAS_ROWS = 4;
 const SAVE_KEY = "ricochet-rush-save";
@@ -320,6 +345,7 @@ export class RicochetRushGame {
   private lastPointerAt = 0;
   private paddleVelocityX = 0;
   private lastPaddleHit: PaddleHitDebug | null = null;
+  private lastLoopCorrection: LoopCorrectionDebug | null = null;
   private nextFloatingTextId = 1;
   private boardShakeTimer = 0;
   private boardShakeStrength = 0;
@@ -380,6 +406,7 @@ export class RicochetRushGame {
       paddleWidth: this.paddleWidth,
       paddleVelocityX: this.paddleVelocityX,
       lastPaddleHit: this.lastPaddleHit,
+      lastLoopCorrection: this.lastLoopCorrection,
       hasSave: this.hasSave,
       settings: this.settings,
       recentEvents: this.recentEvents,
@@ -700,6 +727,8 @@ export class RicochetRushGame {
     this.grabTimer = 0;
     this.noBallTimer = 0;
     this.explosionScale = 1;
+    this.lastPaddleHit = null;
+    this.lastLoopCorrection = null;
     for (let row = 0; row < BRICK_ROWS; row += 1) {
       for (let column = 0; column < BRICK_COLUMNS; column += 1) {
         const spec = level.rows[row]?.[column];
@@ -756,6 +785,8 @@ export class RicochetRushGame {
     this.recentEvents = save.recentEvents.length > 0 ? [...save.recentEvents] : this.recentEvents;
     this.phase = "ready";
     this.hasSave = true;
+    this.lastPaddleHit = null;
+    this.lastLoopCorrection = null;
     this.laserTimer = save.laserTimer;
     this.grabTimer = save.grabTimer;
     this.explosionScale = clamp(save.explosionScale, 1, 2.5);
@@ -814,18 +845,25 @@ export class RicochetRushGame {
   }
 
   private collideWalls(ball: Ball) {
+    let hitSideWall = false;
+    let hitTopWall = false;
     if (ball.x - ball.radius < WALL) {
       ball.x = WALL + ball.radius;
       ball.vx = Math.abs(ball.vx);
+      hitSideWall = true;
     }
     if (ball.x + ball.radius > WIDTH - WALL) {
       ball.x = WIDTH - WALL - ball.radius;
       ball.vx = -Math.abs(ball.vx);
+      hitSideWall = true;
     }
     if (ball.y - ball.radius < WALL) {
       ball.y = WALL + ball.radius;
       ball.vy = Math.abs(ball.vy);
+      hitTopWall = true;
     }
+    if (hitSideWall) this.normalizeBallForLoopRisk(ball, "wall", { minYRatio: MIN_COLLISION_Y_RATIO, fallbackYSign: ball.vy || 1 });
+    if (hitTopWall) this.normalizeBallForLoopRisk(ball, "wall", { minXRatio: MIN_COLLISION_X_RATIO, fallbackXSign: ball.vx || 1 });
   }
 
   private collidePaddle(ball: Ball) {
@@ -869,13 +907,34 @@ export class RicochetRushGame {
       const overlapY = Math.min(ball.y + ball.radius - brick.y, brick.y + brick.height - (ball.y - ball.radius));
       const piercing = ball.thruTimer > 0 || ball.fireTimer > 0 || ball.megaTimer > 0;
       if (!piercing) {
-        if (overlapX < overlapY) ball.vx *= -1;
-        else ball.vy *= -1;
+        if (overlapX < overlapY) {
+          ball.vx *= -1;
+          this.normalizeBallForLoopRisk(ball, "brick", { minYRatio: MIN_COLLISION_Y_RATIO, fallbackYSign: ball.vy || 1 });
+        } else {
+          ball.vy *= -1;
+          this.normalizeBallForLoopRisk(ball, "brick", { minXRatio: MIN_COLLISION_X_RATIO, fallbackXSign: ball.vx || Math.sign(ball.x - (brick.x + brick.width / 2)) || 1 });
+        }
       }
       this.hitBrick(brick);
       if (ball.fireTimer > 0) this.explode(brick);
       if (!piercing) return;
     }
+  }
+
+  private normalizeBallForLoopRisk(ball: Ball, source: LoopCorrectionDebug["source"], input: Omit<LoopRiskVelocityInput, "vx" | "vy">) {
+    const beforeVx = ball.vx;
+    const beforeVy = ball.vy;
+    const corrected = normalizeLoopRiskVelocity({ ...input, vx: ball.vx, vy: ball.vy });
+    if (!corrected.changed) return;
+    ball.vx = corrected.vx;
+    ball.vy = corrected.vy;
+    this.lastLoopCorrection = {
+      ...corrected,
+      source,
+      axis: input.minXRatio ? "x" : "y",
+      beforeVx,
+      beforeVy
+    };
   }
 
   private hitBrick(brick: Brick) {
@@ -1653,6 +1712,39 @@ function upwardVelocity(speed: number, desiredVx: number, fallbackSign: number):
   const vx = sign * clamp(Math.abs(desiredVx), minVx, maxVx);
   const vy = -Math.sqrt(Math.max(0, speed * speed - vx * vx));
   return { vx, vy, speed };
+}
+
+export function normalizeLoopRiskVelocity(input: LoopRiskVelocityInput): LoopRiskVelocity {
+  const speed = Math.hypot(input.vx, input.vy);
+  if (speed <= 0) return { vx: input.vx, vy: input.vy, speed, changed: false };
+
+  let vx = input.vx;
+  let vy = input.vy;
+  let changed = false;
+
+  if (input.minXRatio !== undefined) {
+    const minAbsX = speed * input.minXRatio;
+    if (Math.abs(vx) < minAbsX) {
+      const sign = Math.sign(vx) || Math.sign(input.fallbackXSign ?? 0) || 1;
+      vx = sign * minAbsX;
+      const ySign = Math.sign(vy) || Math.sign(input.fallbackYSign ?? 0) || 1;
+      vy = ySign * Math.sqrt(Math.max(0, speed * speed - vx * vx));
+      changed = true;
+    }
+  }
+
+  if (input.minYRatio !== undefined) {
+    const minAbsY = speed * input.minYRatio;
+    if (Math.abs(vy) < minAbsY) {
+      const sign = Math.sign(vy) || Math.sign(input.fallbackYSign ?? 0) || 1;
+      vy = sign * minAbsY;
+      const xSign = Math.sign(vx) || Math.sign(input.fallbackXSign ?? 0) || 1;
+      vx = xSign * Math.sqrt(Math.max(0, speed * speed - vy * vy));
+      changed = true;
+    }
+  }
+
+  return { vx, vy, speed, changed };
 }
 
 function escapeHtml(value: string): string {
