@@ -172,9 +172,42 @@ Acceptance criteria:
 - The generated board remains playable after validation.
 - The app still falls back cleanly without `CURSOR_API_KEY`.
 
+### P3.5 - Sidebar And Game UI Simplification
+
+Goal: reduce sidebar clutter while keeping gameplay, board design, pack selection, and settings easy to reach. This is the next active priority.
+
+Problem:
+
+- The sidebar now has too many always-visible surfaces: run actions, Board Designer controls, generation summary, board packs, settings, legend, event log, and Composer trace.
+- The information is useful, but it competes with itself and makes the game feel more like a control panel than an arcade game.
+- Mobile makes this worse because every secondary surface becomes a long vertical stack.
+
+Likely directions:
+
+- Split the right rail into clear modes or tabs: Play, Designer, Packs, and Settings.
+- Keep only current board name, primary action, save/keep, and one compact designer or pack summary visible by default.
+- Move settings, legend, events, and Composer trace into collapsible details or a separate pause/options surface.
+- Show the generated-board summary only when the active board is generated, then collapse it to a one-line chip after launch.
+- Let pack selection use a dedicated picker or drawer instead of showing every pack card all the time.
+- Keep raw Composer trace as a developer/details panel, never part of the default play rail.
+
+Design constraints:
+
+- The first screen should read as a game, not a dashboard.
+- Desktop sidebar should fit the default viewport without nested-scroll fatigue.
+- Mobile should prioritize the board, current action, and one active secondary mode.
+- No user-facing functionality from P2 or P3 should disappear; it should be reorganized with better disclosure.
+
+Acceptance criteria:
+
+- A player can start, design/reroll, keep a generated board, pick a pack, change settings, and inspect trace without hunting.
+- The default desktop view has no obvious clutter or awkward nested scroll area.
+- The default mobile view feels intentionally stacked rather than like the desktop sidebar dumped into one column.
+- Screenshot review passes on desktop and mobile.
+
 ### P4 - Audio And Music Upgrade
 
-Goal: replace placeholder synthesized bleeps with a real arcade sound identity. This is the next active priority.
+Goal: replace placeholder synthesized bleeps with a real arcade sound identity.
 
 Deliverables:
 
@@ -241,4 +274,4 @@ Acceptance criteria:
 
 ## Begin Here
 
-Start with P4. The gameplay structure and visible board designer are in place, so the next best lift is making audio communicate hits, danger, rewards, and board clears.
+Start with P3.5. The gameplay structure and visible board designer are in place, but the sidebar needs a deliberate information architecture pass before adding more systems.
