@@ -21,6 +21,18 @@ interface DebugSnapshot {
   boardSource: "pack" | "generated";
   currentPackId: string | null;
   packBoardIndex: number;
+  designerIntent: {
+    style: string;
+    difficulty: number;
+    density: number;
+    specialBias: number;
+    seed: string;
+  };
+  currentBoardVote: "up" | "down" | null;
+  generationSummary?: {
+    title: string;
+    detail: string;
+  };
   settings: {
     ballSpeed: number;
     particles: boolean;
@@ -59,13 +71,24 @@ try {
   assert(await page.locator('[data-pack-id="starter"].is-active').count() === 1, "Expected Starter pack card to be active.");
   assert(await page.locator('[data-pack-id="saved-designs"]').isDisabled(), "Expected empty Saved Designs pack to be disabled.");
   assert(await page.locator('[data-action="save-board"]').isDisabled(), "Expected Keep board to be disabled for authored boards.");
+  assert(await page.locator(".designer-panel").count() === 1, "Expected Board Designer controls in the sidebar.");
   assert(await hasFocusedOverlayAction(page), "Expected ready overlay to focus its primary action.");
   const canvasLabel = await page.locator('[data-testid="ricochet-rush-canvas"]').getAttribute("aria-label");
   assert(canvasLabel?.includes("Level 1") === true, "Expected canvas to expose current game state.");
 
+  await page.selectOption('[data-designer="style"]', "bomb-chains");
+  await page.locator('[data-designer="seed"]').fill("smoke sparks");
+  assert(await hasLocalStorageKey(page, "ricochet-rush-designer-intent"), "Expected designer intent to persist.");
   await page.locator('[data-action="new-board"]').click();
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().boardSource === "generated");
+  const designed = await snapshot(page);
+  assert(designed.designerIntent.style === "bomb-chains", `Expected designer style to apply, got ${designed.designerIntent.style}.`);
+  assert(designed.generationSummary?.title === "Local fallback board", "Expected public generation summary for forced fallback.");
+  assert(await page.locator("[data-generation-summary]").isVisible(), "Expected visible public generation summary.");
   assert(await page.locator('[data-action="save-board"]').isEnabled(), "Expected generated boards to be keepable.");
+  await page.locator('[data-action="rate-up"]').click();
+  assert((await snapshot(page)).currentBoardVote === "up", "Expected generated board feedback to be captured.");
+  assert(await hasLocalStorageKey(page, "ricochet-rush-designer-feedback"), "Expected designer feedback to persist.");
   await page.locator('[data-action="save-board"]').click();
   assert(await hasLocalStorageKey(page, "ricochet-rush-saved-boards"), "Expected kept generated board to persist in Saved Designs.");
   assert(!(await page.locator('[data-pack-id="saved-designs"]').isDisabled()), "Expected Saved Designs to unlock after keeping a board.");

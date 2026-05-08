@@ -1,4 +1,11 @@
-import type { ComposerAgentTrace } from "../../shared/evolution";
+import {
+  DESIGNER_STYLES,
+  type BoardDesignerIntent,
+  type ComposerAgentTrace,
+  type DesignerVote,
+  type GenerationSummary,
+  designerStyleLabel
+} from "../../shared/evolution";
 
 export interface HudPackItem {
   id: string;
@@ -34,6 +41,14 @@ export interface HudState {
   activePowers: { label: string; seconds: number; maxSeconds: number }[];
   packs: HudPackItem[];
   canSaveBoard: boolean;
+  canRateBoard: boolean;
+  boardSource: "pack" | "generated";
+  designer: {
+    intent: BoardDesignerIntent;
+    feedbackCount: number;
+    currentVote: DesignerVote | null;
+    generationSummary?: GenerationSummary;
+  };
   events: string[];
   announcement: string;
   sidebarCollapsed?: boolean;
@@ -46,6 +61,8 @@ export interface HudActions {
   saveBoardToPack(): void;
   resetProgress(): void;
   selectPack(packId: string): void;
+  updateDesigner(intent: BoardDesignerIntent): void;
+  rateBoard(vote: DesignerVote): void;
   toggleSidebar(): void;
   updateSettings(settings: HudState["settings"]): void;
 }
@@ -76,7 +93,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
           </div>
           <div data-status class="status"></div>
         </div>
-        <div class="hint">A/D or arrows move - Space/Enter launch or continue - P/Escape pause - N generate a new board</div>
+        <div class="hint">A/D or arrows move - Space/Enter launch or continue - P/Escape pause - N design or reroll</div>
         <div data-live-announcement class="sr-only" aria-live="polite" aria-atomic="true"></div>
       </section>
       <aside class="panel">
@@ -87,11 +104,44 @@ export function createHud(root: HTMLDivElement | null): HudApi {
           <span data-hint>Keep the ball angled. Flat returns are a trap.</span>
         </div>
         <div class="actions" aria-label="Game actions">
-          <button type="button" data-action="new-board">New board</button>
+          <button type="button" data-action="new-board">Design board</button>
           <button type="button" data-action="save-board">Keep board</button>
           <button type="button" data-action="save">Save run</button>
           <button type="button" data-action="reset">Clear save</button>
         </div>
+        <section class="designer-panel" aria-label="Board designer">
+          <div class="panel-heading">Board Designer</div>
+          <div class="designer-controls">
+            <label>
+              <span>Style</span>
+              <select data-designer="style">
+                ${DESIGNER_STYLES.map((style) => `<option value="${style}">${designerStyleLabel(style)}</option>`).join("")}
+              </select>
+            </label>
+            <label>
+              <span>Difficulty <strong data-designer-difficulty-value>3</strong></span>
+              <input data-designer="difficulty" type="range" min="1" max="5" step="1" value="3" />
+            </label>
+            <label>
+              <span>Density <strong data-designer-density-value>52%</strong></span>
+              <input data-designer="density" type="range" min="0.34" max="0.82" step="0.04" value="0.52" />
+            </label>
+            <label>
+              <span>Specials <strong data-designer-special-value>45%</strong></span>
+              <input data-designer="specials" type="range" min="0" max="1" step="0.05" value="0.45" />
+            </label>
+            <label>
+              <span>Seed</span>
+              <input data-designer="seed" type="text" maxlength="36" value="fresh-angle" />
+            </label>
+          </div>
+          <div class="designer-feedback" aria-label="Generated board feedback">
+            <button type="button" data-action="rate-up">Good board</button>
+            <button type="button" data-action="rate-down">Needs work</button>
+            <span data-designer-feedback>0 notes</span>
+          </div>
+          <div data-generation-summary class="generation-summary" hidden></div>
+        </section>
         <section class="pack-browser" aria-label="Board packs">
           <div class="panel-heading">Board packs</div>
           <div data-pack-list class="pack-list"></div>
@@ -168,7 +218,19 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   const saveBoard = queryButton(root, '[data-action="save-board"]');
   const save = queryButton(root, '[data-action="save"]');
   const reset = queryButton(root, '[data-action="reset"]');
+  const rateUp = queryButton(root, '[data-action="rate-up"]');
+  const rateDown = queryButton(root, '[data-action="rate-down"]');
   const sidebarToggle = queryButton(root, '[data-action="toggle-sidebar"]');
+  const designerStyle = querySelect(root, '[data-designer="style"]');
+  const designerDifficulty = queryInput(root, '[data-designer="difficulty"]');
+  const designerDensity = queryInput(root, '[data-designer="density"]');
+  const designerSpecials = queryInput(root, '[data-designer="specials"]');
+  const designerSeed = queryInput(root, '[data-designer="seed"]');
+  const designerDifficultyValue = query(root, "[data-designer-difficulty-value]");
+  const designerDensityValue = query(root, "[data-designer-density-value]");
+  const designerSpecialValue = query(root, "[data-designer-special-value]");
+  const designerFeedback = query(root, "[data-designer-feedback]");
+  const generationSummary = query(root, "[data-generation-summary]");
   const ballSpeed = queryInput(root, '[data-setting="ball-speed"]');
   const particles = queryInput(root, '[data-setting="particles"]');
   const reducedMotion = queryInput(root, '[data-setting="reduced-motion"]');
@@ -198,6 +260,17 @@ export function createHud(root: HTMLDivElement | null): HudApi {
     });
   };
 
+  const emitDesigner = () => {
+    actions?.updateDesigner({
+      style: designerStyle.value as BoardDesignerIntent["style"],
+      difficulty: Number(designerDifficulty.value),
+      density: Number(designerDensity.value),
+      specialBias: Number(designerSpecials.value),
+      seed: designerSeed.value,
+      feedback: []
+    });
+  };
+
   const renderTrace = (trace?: ComposerAgentTrace) => {
     if (!trace) {
       traceStatus.textContent = "No composer trace yet.";
@@ -221,12 +294,19 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   saveBoard.addEventListener("click", () => actions?.saveBoardToPack());
   save.addEventListener("click", () => actions?.saveNow());
   reset.addEventListener("click", () => actions?.resetProgress());
+  rateUp.addEventListener("click", () => actions?.rateBoard("up"));
+  rateDown.addEventListener("click", () => actions?.rateBoard("down"));
   sidebarToggle.addEventListener("click", () => actions?.toggleSidebar());
   packList.addEventListener("click", (event) => {
     const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-pack-id]") : null;
     if (!button || button.disabled) return;
     actions?.selectPack(button.dataset.packId ?? "");
   });
+  designerStyle.addEventListener("change", emitDesigner);
+  designerDifficulty.addEventListener("input", emitDesigner);
+  designerDensity.addEventListener("input", emitDesigner);
+  designerSpecials.addEventListener("input", emitDesigner);
+  designerSeed.addEventListener("input", emitDesigner);
   ballSpeed.addEventListener("input", emitSettings);
   particles.addEventListener("change", emitSettings);
   reducedMotion.addEventListener("change", emitSettings);
@@ -247,12 +327,27 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       status.textContent = state.pending ? "Forging level..." : state.status;
       levelName.textContent = state.levelName;
       hint.textContent = state.hint;
+      newBoard.textContent = state.boardSource === "generated" ? "Reroll board" : "Design board";
       newBoard.disabled = state.pending;
       saveBoard.disabled = state.pending || !state.canSaveBoard;
       save.disabled = state.pending;
       reset.disabled = state.pending || !state.hasSave;
+      rateUp.disabled = state.pending || !state.canRateBoard;
+      rateDown.disabled = state.pending || !state.canRateBoard;
+      rateUp.classList.toggle("is-selected", state.designer.currentVote === "up");
+      rateDown.classList.toggle("is-selected", state.designer.currentVote === "down");
       sidebarToggle.textContent = state.sidebarCollapsed ? "⟩" : "⟨";
       sidebarToggle.setAttribute("aria-expanded", String(!state.sidebarCollapsed));
+      designerStyle.value = state.designer.intent.style;
+      designerDifficulty.value = String(state.designer.intent.difficulty);
+      designerDensity.value = String(state.designer.intent.density);
+      designerSpecials.value = String(state.designer.intent.specialBias);
+      designerSeed.value = state.designer.intent.seed;
+      designerDifficultyValue.textContent = String(state.designer.intent.difficulty);
+      designerDensityValue.textContent = `${Math.round(state.designer.intent.density * 100)}%`;
+      designerSpecialValue.textContent = `${Math.round(state.designer.intent.specialBias * 100)}%`;
+      designerFeedback.textContent = `${state.designer.feedbackCount} note${state.designer.feedbackCount === 1 ? "" : "s"}`;
+      renderSummary(generationSummary, state.designer.generationSummary);
       ballSpeed.value = String(state.settings.ballSpeed);
       particles.checked = state.settings.particles;
       reducedMotion.checked = state.settings.reducedMotion;
@@ -295,6 +390,12 @@ function queryInput(root: ParentNode, selector: string): HTMLInputElement {
   return element;
 }
 
+function querySelect(root: ParentNode, selector: string): HTMLSelectElement {
+  const element = root.querySelector<HTMLSelectElement>(selector);
+  if (!element) throw new Error(`Missing HUD select ${selector}`);
+  return element;
+}
+
 function queryCode(root: ParentNode, selector: string): HTMLPreElement {
   const element = root.querySelector<HTMLPreElement>(selector);
   if (!element) throw new Error(`Missing HUD code block ${selector}`);
@@ -312,6 +413,22 @@ function escapeAttribute(value: string): string {
 function renderPower(power: HudState["activePowers"][number]): string {
   const width = Math.round(Math.max(0, Math.min(1, power.seconds / power.maxSeconds)) * 100);
   return `<span class="power-timer"><span>${escapeHtml(power.label)}</span><strong>${power.seconds}s</strong><i style="width: ${width}%"></i></span>`;
+}
+
+function renderSummary(element: HTMLElement, summary?: GenerationSummary) {
+  if (!summary) {
+    element.hidden = true;
+    element.innerHTML = "";
+    return;
+  }
+  element.hidden = false;
+  const chips = summary.chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("");
+  element.innerHTML = `
+    <strong>${escapeHtml(summary.title)}</strong>
+    <p>${escapeHtml(summary.detail)}</p>
+    <div>${chips}</div>
+    ${summary.warning ? `<em>${escapeHtml(summary.warning)}</em>` : ""}
+  `;
 }
 
 function renderPack(pack: HudPackItem): string {

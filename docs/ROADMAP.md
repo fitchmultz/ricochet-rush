@@ -138,15 +138,33 @@ Acceptance criteria:
 
 ### P3 - Cursor SDK Board Designer Mode
 
-Goal: make Cursor SDK the core differentiator, not a hidden implementation detail. This is the next active priority.
+Goal: make Cursor SDK the core differentiator, not a hidden implementation detail.
+
+Status: complete as of May 8, 2026.
 
 Deliverables:
 
-- Add a "Board Designer" panel with style, difficulty, density, special-brick bias, and seed-like prompt controls.
-- Add reroll, keep, and save-to-pack actions.
-- Capture thumbs-up/down and recent events to guide later generation.
-- Show a concise public-friendly generation summary instead of raw trace by default.
-- Keep raw trace available behind a dev/details panel.
+- Add a "Board Designer" panel with style, difficulty, density, special-brick bias, and seed-like prompt controls: complete.
+- Add reroll, keep, and save-to-pack actions: complete.
+- Capture thumbs-up/down and recent events to guide later generation: complete.
+- Show a concise public-friendly generation summary instead of raw trace by default: complete.
+- Keep raw trace available behind a dev/details panel: complete.
+
+Implementation notes:
+
+- Added a shared board designer intent contract used by the HUD, local fallback generator, Cursor prompt, tests, and smoke path.
+- Added visible controls for style, difficulty, density, special-brick bias, and seed phrase.
+- Added generated-board feedback with Good board and Needs work actions. Feedback and recent events are included in later generation requests.
+- Updated local fallback generation so designer intent changes the generated wall even without `CURSOR_API_KEY`.
+- Added public generation summaries with source, intent chips, validation brick count, and warning text. Raw request, prompt, parsed response, output, and errors remain behind Composer trace details.
+- Existing Keep board behavior now acts as the save-to-pack path for generated designs.
+
+Verified:
+
+- `npm run ci` passes.
+- Unit coverage validates designer prompt content, designer intent normalization, fallback intent behavior, public generation summaries, and forced fallback summary behavior.
+- Playwright smoke coverage verifies designer control persistence, fallback generation summary visibility, generated-board feedback capture, Saved Designs unlock, settings persistence, save/clear flow, keyboard launch, pause, and responsive overflow checks.
+- Screenshot review passed for generated-board desktop `1280x820` and mobile `390x760`.
 
 Acceptance criteria:
 
@@ -156,7 +174,7 @@ Acceptance criteria:
 
 ### P4 - Audio And Music Upgrade
 
-Goal: replace placeholder synthesized bleeps with a real arcade sound identity.
+Goal: replace placeholder synthesized bleeps with a real arcade sound identity. This is the next active priority.
 
 Deliverables:
 
@@ -223,4 +241,4 @@ Acceptance criteria:
 
 ## Begin Here
 
-Start with P2. Build a small curated-board foundation before adding broader audio, visual polish, or demo collateral.
+Start with P4. The gameplay structure and visible board designer are in place, so the next best lift is making audio communicate hits, danger, rewards, and board clears.

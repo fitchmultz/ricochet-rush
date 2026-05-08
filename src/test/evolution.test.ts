@@ -1,6 +1,16 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { BRICK_COLUMNS, BRICK_ROWS, CURSOR_MODEL, MAX_BRICKS, MIN_BRICKS, fallbackLevel, normalizeLevel, type LevelRequest } from "../shared/evolution";
+import {
+  BRICK_COLUMNS,
+  BRICK_ROWS,
+  CURSOR_MODEL,
+  MAX_BRICKS,
+  MIN_BRICKS,
+  fallbackLevel,
+  normalizeDesignerIntent,
+  normalizeLevel,
+  type LevelRequest
+} from "../shared/evolution";
 import {
   BUILT_IN_PACKS,
   SAVED_DESIGNS_PACK_ID,
@@ -11,7 +21,7 @@ import {
   previewRowsFromLevel
 } from "../shared/boardPacks";
 import { DEFAULT_SETTINGS, SAVE_VERSION, normalizeSaveState, normalizeSettings } from "../shared/saveState";
-import { buildPrompt, parseWorkerOutput, requestEvolution, summarizeLevelError } from "../server/cursorAgent";
+import { buildGenerationSummary, buildPrompt, parseWorkerOutput, requestEvolution, summarizeLevelError } from "../server/cursorAgent";
 import { calculatePaddleRebound, normalizeLoopRiskVelocity, trimComposerArchive, type ComposerGeneratedLevelEntry } from "../client/game/RicochetRushGame";
 
 const request: LevelRequest = {
@@ -31,6 +41,55 @@ describe("Cursor SDK level generation contract", () => {
     expect(buildPrompt(request)).toContain("composer-2 in fast mode");
     expect(buildPrompt(request)).toContain("Ricochet Rush");
     expect(buildPrompt(request)).toContain(`${MIN_BRICKS} bricks and at most ${MAX_BRICKS} bricks`);
+  });
+
+  it("adds visible board designer intent and feedback to the Cursor prompt", () => {
+    const prompt = buildPrompt({
+      ...request,
+      designer: {
+        style: "bomb-chains",
+        difficulty: 5,
+        density: 0.7,
+        specialBias: 0.8,
+        seed: "left rail fireworks",
+        feedback: [
+          {
+            vote: "down",
+            levelName: "Flat Wall",
+            style: "balanced",
+            seed: "flat",
+            recentEvents: ["Ball looped."]
+          }
+        ]
+      }
+    });
+
+    expect(prompt).toContain("Style: Bomb chains");
+    expect(prompt).toContain("Difficulty: 5/5");
+    expect(prompt).toContain("Target density: 70%");
+    expect(prompt).toContain("Special-brick bias: 80%");
+    expect(prompt).toContain('Seed phrase: "left rail fireworks"');
+    expect(prompt).toContain("Rejected Flat Wall");
+  });
+
+  it("normalizes board designer controls into safe prompt bounds", () => {
+    expect(
+      normalizeDesignerIntent({
+        style: "bogus",
+        difficulty: 99,
+        density: 0.1,
+        specialBias: 3,
+        seed: "0123456789012345678901234567890123456789",
+        feedback: [{ vote: "up", levelName: "Good", style: "precision", seed: "needle", recentEvents: ["Saved."] }]
+      })
+    ).toMatchObject({
+      style: "balanced",
+      difficulty: 5,
+      density: 0.34,
+      specialBias: 1,
+      seed: "012345678901234567890123456789012345",
+      feedback: [{ vote: "up", levelName: "Good", style: "precision", seed: "needle", recentEvents: ["Saved."] }]
+    });
   });
 
   it("normalizes generated level JSON into a bounded brick grid", () => {
@@ -74,12 +133,34 @@ describe("Cursor SDK level generation contract", () => {
     expect(bricks.length).toBeLessThanOrEqual(MAX_BRICKS);
   });
 
+  it("lets fallback boards honor designer intent while staying playable", () => {
+    const level = fallbackLevel({
+      ...request,
+      designer: {
+        style: "boss-core",
+        difficulty: 5,
+        density: 0.78,
+        specialBias: 0.9,
+        seed: "center furnace",
+        feedback: []
+      }
+    });
+    const bricks = level.rows.flat().filter(Boolean);
+    expect(level.name).toBe("Boss core Sector 4");
+    expect(level.briefing).toContain("center furnace");
+    expect(bricks.length).toBeGreaterThanOrEqual(MIN_BRICKS);
+    expect(bricks.length).toBeLessThanOrEqual(MAX_BRICKS);
+    expect(level.rows.flat().some((brick) => brick?.kind === "boss")).toBe(true);
+  });
+
   it("can force local fallback for deterministic playability smoke tests", async () => {
     process.env.RICOCHET_RUSH_FORCE_FALLBACK = "1";
     try {
       const response = await requestEvolution(request);
       expect(response.source).toBe("fallback");
       expect(response.warning).toContain("RICOCHET_RUSH_FORCE_FALLBACK");
+      expect(response.summary?.title).toBe("Local fallback board");
+      expect(response.summary?.detail).toContain("Validation kept");
     } finally {
       delete process.env.RICOCHET_RUSH_FORCE_FALLBACK;
     }
@@ -182,6 +263,16 @@ describe("Cursor SDK level generation contract", () => {
     expect(bounded).toHaveLength(50);
     expect(bounded[0]).toEqual(entries[0]);
     expect(bounded.at(-1)?.level).toBe(50);
+  });
+
+  it("builds a public generation summary without raw trace text", () => {
+    const level = fallbackLevel(request);
+    const summary = buildGenerationSummary(request, level, "fallback", "Cursor SDK authentication is unavailable.");
+    expect(summary.title).toBe("Local fallback board");
+    expect(summary.detail).toContain(level.name);
+    expect(summary.detail).toContain("Validation kept");
+    expect(summary.warning).toBe("Cursor SDK authentication is unavailable.");
+    expect(summary.detail).not.toContain("node_modules");
   });
 
   it("normalizes local settings into safe gameplay bounds", () => {

@@ -4,10 +4,15 @@ import {
   BRICK_ROWS,
   CURSOR_MODEL,
   type ComposerAgentTrace,
+  type GenerationSummary,
+  type LevelBlueprint,
   type LevelRequest,
   type LevelResponse,
+  describeDesignerIntent,
   fallbackLevel,
-  normalizeLevel
+  normalizeDesignerIntent,
+  normalizeLevel,
+  designerStyleLabel
 } from "../shared/evolution.js";
 
 interface WorkerInvocationResult {
@@ -26,10 +31,12 @@ export async function requestEvolution(request: LevelRequest): Promise<LevelResp
   const prompt = buildPrompt(request);
 
   if (process.env.RICOCHET_RUSH_FORCE_FALLBACK === "1") {
+    const level = fallbackLevel(request);
     return {
-      level: fallbackLevel(request),
+      level,
       source: "fallback",
       model: CURSOR_MODEL,
+      summary: buildGenerationSummary(request, level, "fallback", "Fallback mode is enabled."),
       warning: "Fallback forced by RICOCHET_RUSH_FORCE_FALLBACK."
     };
   }
@@ -39,32 +46,45 @@ export async function requestEvolution(request: LevelRequest): Promise<LevelResp
     const trace = toTrace(request, requestJson, prompt, workerResult);
 
     if (workerResult.parseStatus === "success") {
+      const level = normalizeLevel(workerResult.parsed, request);
       return {
-        level: normalizeLevel(workerResult.parsed, request),
+        level,
         source: "cursor-sdk",
         model: CURSOR_MODEL,
+        summary: buildGenerationSummary(request, level, "cursor-sdk", undefined, trace),
         trace
       };
     }
+    const warning = summarizeLevelError(workerResult.parseError ?? "Cursor SDK worker failed.");
+    const level = fallbackLevel(request);
 
     return {
-      level: fallbackLevel(request),
+      level,
       source: "fallback",
       model: CURSOR_MODEL,
-      warning: summarizeLevelError(workerResult.parseError ?? "Cursor SDK worker failed."),
+      summary: buildGenerationSummary(request, level, "fallback", warning, trace),
+      warning,
       trace
     };
   } catch (error) {
+    const warning = summarizeLevelError(error);
+    const level = fallbackLevel(request);
     return {
-      level: fallbackLevel(request),
+      level,
       source: "fallback",
       model: CURSOR_MODEL,
-      warning: summarizeLevelError(error)
+      summary: buildGenerationSummary(request, level, "fallback", warning),
+      warning
     };
   }
 }
 
 export function buildPrompt(request: LevelRequest): string {
+  const designer = normalizeDesignerIntent(request.designer);
+  const feedbackLines =
+    designer.feedback.length > 0
+      ? designer.feedback.map((entry) => `- ${entry.vote === "up" ? "Liked" : "Rejected"} ${entry.levelName} (${designerStyleLabel(entry.style)}, seed "${entry.seed}")`).join("\n")
+      : "- No direct feedback yet.";
   return `You are the level designer for Ricochet Rush, a fast 3D brick-breaker with adaptive arcade boards.
 
 Model contract:
@@ -83,6 +103,17 @@ Game rules:
 - Use bombs sparingly. Use powerup bricks enough to be fun.
 - Leave some empty lanes for bank shots.
 
+Visible design intent:
+- Style: ${designerStyleLabel(designer.style)} (${designer.style}).
+- Difficulty: ${designer.difficulty}/5.
+- Target density: ${Math.round(designer.density * 100)}% of the board, still obeying the mandatory brick count.
+- Special-brick bias: ${Math.round(designer.specialBias * 100)}%.
+- Seed phrase: "${designer.seed}". Treat this as an arcade design motif, not random text to print.
+- Intent summary: ${describeDesignerIntent(designer)}.
+
+Recent player feedback:
+${feedbackLines}
+
 Current run:
 ${JSON.stringify(request, null, 2)}
 
@@ -96,6 +127,31 @@ Return this exact shape:
     [null, {"kind":"basic","hp":1}]
   ]
 }`;
+}
+
+export function buildGenerationSummary(
+  request: LevelRequest,
+  level: LevelBlueprint,
+  source: LevelResponse["source"],
+  warning?: string,
+  trace?: ComposerAgentTrace
+): GenerationSummary {
+  const designer = normalizeDesignerIntent(request.designer);
+  const brickCount = level.rows.flat().filter(Boolean).length;
+  const sourceLabel = source === "cursor-sdk" ? "Cursor SDK" : "Local fallback";
+  return {
+    source,
+    title: `${sourceLabel} board`,
+    detail: `${sourceLabel} built ${level.name} from ${describeDesignerIntent(designer)}. Validation kept ${brickCount} playable bricks.`,
+    chips: [
+      designerStyleLabel(designer.style),
+      `difficulty ${designer.difficulty}/5`,
+      `${Math.round(designer.density * 100)}% density`,
+      `${Math.round(designer.specialBias * 100)}% specials`,
+      trace ? `${trace.durationMs}ms` : "local"
+    ],
+    warning
+  };
 }
 
 export function summarizeLevelError(error: unknown): string {

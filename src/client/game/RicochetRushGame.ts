@@ -2,11 +2,17 @@ import * as THREE from "three";
 import {
   BRICK_COLUMNS,
   BRICK_ROWS,
+  DEFAULT_DESIGNER_INTENT,
+  type BoardDesignerFeedback,
+  type BoardDesignerIntent,
   type BrickKind,
+  type DesignerVote,
+  type GenerationSummary,
   type LevelBlueprint,
   type LevelRequest,
   type LevelResponse,
   fallbackLevel,
+  normalizeDesignerIntent,
   normalizeLevel
 } from "../../shared/evolution";
 import {
@@ -117,6 +123,7 @@ export interface ComposerGeneratedLevelEntry {
   levelName: string;
   model: LevelResponse["model"];
   levelBlueprint: LevelBlueprint;
+  summary?: GenerationSummary;
   trace?: LevelResponse["trace"];
 }
 
@@ -207,6 +214,9 @@ const COMPOSER_LEVEL_ARCHIVE_MAX = 50;
 const PACK_PROGRESS_KEY = "ricochet-rush-pack-progress";
 const SAVED_BOARDS_KEY = "ricochet-rush-saved-boards";
 const SAVED_BOARDS_MAX = 24;
+const DESIGNER_INTENT_KEY = "ricochet-rush-designer-intent";
+const DESIGNER_FEEDBACK_KEY = "ricochet-rush-designer-feedback";
+const DESIGNER_FEEDBACK_MAX = 8;
 const POWER_DURATIONS: Record<string, number> = {
   Laser: 8,
   Grab: 12,
@@ -380,6 +390,10 @@ export class RicochetRushGame {
   private savedBoards: SavedBoardEntry[] = [];
   private packProgress: PackProgressState = normalizePackProgress(null, 0);
   private boardContext: BoardContext = { source: "pack", packId: "starter", boardIndex: 0 };
+  private designerIntent: BoardDesignerIntent = DEFAULT_DESIGNER_INTENT;
+  private designerFeedback: BoardDesignerFeedback[] = [];
+  private currentBoardVote: DesignerVote | null = null;
+  private latestGenerationSummary?: GenerationSummary;
 
   constructor(mount: HTMLDivElement, hud: HudApi) {
     this.mount = mount;
@@ -388,6 +402,11 @@ export class RicochetRushGame {
     this.savedBoards = readJson(SAVED_BOARDS_KEY, normalizeSavedBoards) ?? [];
     this.packProgress =
       readJson(PACK_PROGRESS_KEY, (input) => normalizePackProgress(input, this.savedBoards.length)) ?? normalizePackProgress(null, this.savedBoards.length);
+    this.designerFeedback = readJson(DESIGNER_FEEDBACK_KEY, normalizeDesignerFeedbackList) ?? [];
+    this.designerIntent = {
+      ...(readJson(DESIGNER_INTENT_KEY, normalizeDesignerIntent) ?? DEFAULT_DESIGNER_INTENT),
+      feedback: this.designerFeedback
+    };
     this.sidebarCollapsed = readJson(SIDEBAR_COLLAPSED_KEY, normalizeBoolean) ?? false;
     this.bestScore = Math.max(readBestScore(), readSave()?.bestScore ?? 0);
     this.setupRenderer();
@@ -439,6 +458,10 @@ export class RicochetRushGame {
       currentPackId: this.boardContext.packId,
       packBoardIndex: this.boardContext.boardIndex,
       packProgress: this.packProgress,
+      designerIntent: this.designerIntent,
+      designerFeedback: this.designerFeedback,
+      currentBoardVote: this.currentBoardVote,
+      generationSummary: this.latestGenerationSummary,
       settings: this.settings,
       recentEvents: this.recentEvents,
       announcement: this.announcement
@@ -592,6 +615,12 @@ export class RicochetRushGame {
       },
       selectPack: (packId) => {
         this.selectPack(packId);
+      },
+      updateDesigner: (intent) => {
+        this.updateDesignerIntent(intent);
+      },
+      rateBoard: (vote) => {
+        this.rateCurrentBoard(vote);
       },
       updateSettings: (settings) => {
         this.settings = normalizeSettings(settings);
@@ -778,7 +807,7 @@ export class RicochetRushGame {
     this.level = boardIndex + 1;
     this.clearedLevels = boardIndex;
     this.latestAgentTrace = undefined;
-    this.loadLevel(level, event, undefined, { source: "pack", packId, boardIndex });
+    this.loadLevel(level, event, undefined, undefined, { source: "pack", packId, boardIndex });
   }
 
   private materializePackBoard(packId: string, boardIndex: number): LevelBlueprint | null {
@@ -820,8 +849,43 @@ export class RicochetRushGame {
     this.refreshHud("Board saved to Saved Designs.");
   }
 
-  private loadLevel(level: LevelBlueprint, event: string, trace?: LevelResponse["trace"], context: BoardContext = this.boardContext) {
+  private updateDesignerIntent(intent: BoardDesignerIntent) {
+    this.designerIntent = {
+      ...normalizeDesignerIntent(intent),
+      feedback: this.designerFeedback
+    };
+    writeJson(DESIGNER_INTENT_KEY, { ...this.designerIntent, feedback: [] });
+    this.refreshHud("Designer intent updated.");
+  }
+
+  private rateCurrentBoard(vote: DesignerVote) {
+    if (this.boardContext.source !== "generated" || this.loadingLevel) return;
+    const feedback: BoardDesignerFeedback = {
+      vote,
+      levelName: this.levelBlueprint.name,
+      style: this.designerIntent.style,
+      seed: this.designerIntent.seed,
+      recentEvents: this.recentEvents.slice(0, 4),
+      createdAt: new Date().toISOString()
+    };
+    this.currentBoardVote = vote;
+    this.designerFeedback = [feedback, ...this.designerFeedback.filter((entry) => entry.levelName !== feedback.levelName)].slice(0, DESIGNER_FEEDBACK_MAX);
+    this.designerIntent = { ...this.designerIntent, feedback: this.designerFeedback };
+    writeJson(DESIGNER_FEEDBACK_KEY, this.designerFeedback);
+    this.pushEvent(vote === "up" ? "Designer feedback saved: more like this." : "Designer feedback saved: avoid this shape.");
+    this.refreshHud(vote === "up" ? "Feedback saved for the next design." : "Designer will steer away next time.");
+  }
+
+  private loadLevel(
+    level: LevelBlueprint,
+    event: string,
+    trace?: LevelResponse["trace"],
+    summary?: GenerationSummary,
+    context: BoardContext = this.boardContext
+  ) {
     this.boardContext = context;
+    this.currentBoardVote = null;
+    this.latestGenerationSummary = context.source === "generated" ? summary : undefined;
     this.levelBlueprint = level;
     this.bricks = [];
     this.powerups.splice(0);
@@ -871,6 +935,7 @@ export class RicochetRushGame {
       levelName: result.level.name,
       model: result.model,
       levelBlueprint: result.level,
+      summary: result.summary,
       trace: result.trace
     };
     const updated = trimComposerArchive([next, ...archive]);
@@ -1371,15 +1436,17 @@ export class RicochetRushGame {
       });
       if (!response.ok) throw new Error(`Level generation failed with ${response.status}`);
       const result = (await response.json()) as LevelResponse;
+      const publicWarning = result.summary?.warning ?? result.warning;
       const sourceEvent =
         result.source === "cursor-sdk"
           ? `Generated ${result.level.name}.`
-          : `Local fallback generated ${result.level.name}${result.warning ? ` (${result.warning})` : ""}.`;
+          : `Local fallback generated ${result.level.name}${publicWarning ? ` (${publicWarning})` : ""}.`;
       if (result.source === "cursor-sdk") this.saveComposerGeneratedLevel(result);
-      this.loadLevel(result.level, sourceEvent, result.trace, { source: "generated", packId: null, boardIndex: 0 });
+      this.loadLevel(result.level, sourceEvent, result.trace, result.summary, { source: "generated", packId: null, boardIndex: 0 });
     } catch (error) {
       const reason = error instanceof Error ? error.message : "unknown error";
-      this.loadLevel(fallbackLevel(this.levelRequest()), `Local fallback generated a level after API failure (${reason}).`, undefined, {
+      const fallback = fallbackLevel(this.levelRequest());
+      this.loadLevel(fallback, "Local fallback generated a level after API failure.", undefined, this.localGenerationSummary(fallback, reason), {
         source: "generated",
         packId: null,
         boardIndex: 0
@@ -1396,7 +1463,27 @@ export class RicochetRushGame {
       score: this.score,
       lives: this.lives,
       clearedLevels: this.clearedLevels,
-      recentEvents: this.recentEvents.slice(0, 5)
+      recentEvents: this.recentEvents.slice(0, 5),
+      designer: {
+        ...this.designerIntent,
+        feedback: this.designerFeedback
+      }
+    };
+  }
+
+  private localGenerationSummary(level: LevelBlueprint, reason: string): GenerationSummary {
+    const brickCount = level.rows.flat().filter(Boolean).length;
+    return {
+      source: "fallback",
+      title: "Local fallback board",
+      detail: `Local fallback built ${level.name} from the current designer intent. Validation kept ${brickCount} playable bricks.`,
+      chips: [
+        this.designerIntent.style,
+        `difficulty ${this.designerIntent.difficulty}/5`,
+        `${Math.round(this.designerIntent.density * 100)}% density`,
+        `${Math.round(this.designerIntent.specialBias * 100)}% specials`
+      ],
+      warning: reason
     };
   }
 
@@ -1491,6 +1578,14 @@ export class RicochetRushGame {
       activePowers: this.collectActivePowers(),
       packs: this.collectPackItems(),
       canSaveBoard: this.boardContext.source === "generated" && this.bricks.length > 0,
+      canRateBoard: this.boardContext.source === "generated" && this.bricks.length > 0,
+      boardSource: this.boardContext.source,
+      designer: {
+        intent: this.designerIntent,
+        feedbackCount: this.designerFeedback.length,
+        currentVote: this.currentBoardVote,
+        generationSummary: this.latestGenerationSummary
+      },
       events: this.recentEvents
     });
   }
@@ -2029,7 +2124,20 @@ function normalizeComposerArchiveEntry(input: unknown): ComposerGeneratedLevelEn
     levelName,
     model,
     levelBlueprint,
+    summary: normalizeGenerationSummary(input.summary),
     trace
+  };
+}
+
+function normalizeGenerationSummary(input: unknown): GenerationSummary | undefined {
+  if (!isRecord(input)) return undefined;
+  const source = input.source === "cursor-sdk" || input.source === "fallback" ? input.source : "fallback";
+  return {
+    source,
+    title: typeof input.title === "string" ? input.title.slice(0, 80) : source === "cursor-sdk" ? "Cursor SDK board" : "Local fallback board",
+    detail: typeof input.detail === "string" ? input.detail.slice(0, 240) : "",
+    chips: Array.isArray(input.chips) ? input.chips.filter((chip): chip is string => typeof chip === "string").slice(0, 6) : [],
+    warning: typeof input.warning === "string" ? input.warning.slice(0, 140) : undefined
   };
 }
 
@@ -2091,6 +2199,11 @@ function prefersReducedMotion(): boolean {
 
 function normalizeBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+function normalizeDesignerFeedbackList(input: unknown): BoardDesignerFeedback[] {
+  const intent = normalizeDesignerIntent({ feedback: input });
+  return intent.feedback;
 }
 
 function readBestScore(): number {
