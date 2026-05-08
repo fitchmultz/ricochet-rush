@@ -68,11 +68,19 @@ try {
   assert(ready.balls.length === 1 && ready.balls[0]?.stuck, "Expected one stuck launch ball.");
   assert(ready.boardSource === "pack", `Expected first board to come from a curated pack, got ${ready.boardSource}.`);
   assert(ready.currentPackId === "starter", `Expected Starter pack on boot, got ${ready.currentPackId}.`);
+  assert(await page.locator(".play-console").count() === 1, "Expected a compact play console.");
+  assert(await page.locator(".play-console .designer-panel, .play-console .pack-browser, .play-console .settings, .play-console .agent-trace").count() === 0, "Expected heavy tools outside the play console.");
+  assert(await page.locator("[data-tool-surface]").isHidden(), "Expected tool panels to be closed by default.");
+  assert(await page.locator('[data-action="save-board"]').isDisabled(), "Expected Keep board to be disabled for authored boards.");
+  assert(await hasFocusedOverlayAction(page), "Expected ready overlay to focus its primary action.");
+  await page.locator('[data-tool-panel="packs"]').click();
+  assert(await page.locator("[data-tool-surface]").isVisible(), "Expected Board Select panel to open.");
+  assert((await page.locator("[data-tool-title]").innerText()) === "Board Select", "Expected Board Select title.");
   assert(await page.locator('[data-pack-id="starter"].is-active').count() === 1, "Expected Starter pack card to be active.");
   assert(await page.locator('[data-pack-id="saved-designs"]').isDisabled(), "Expected empty Saved Designs pack to be disabled.");
-  assert(await page.locator('[data-action="save-board"]').isDisabled(), "Expected Keep board to be disabled for authored boards.");
-  assert(await page.locator(".designer-panel").count() === 1, "Expected Board Designer controls in the sidebar.");
-  assert(await hasFocusedOverlayAction(page), "Expected ready overlay to focus its primary action.");
+  await page.locator('[data-tool-panel="designer"]').click();
+  assert((await page.locator("[data-tool-title]").innerText()) === "Board Designer", "Expected Board Designer title.");
+  assert(await page.locator(".designer-panel").isVisible(), "Expected Board Designer controls in a focused panel.");
   const canvasLabel = await page.locator('[data-testid="ricochet-rush-canvas"]').getAttribute("aria-label");
   assert(canvasLabel?.includes("Level 1") === true, "Expected canvas to expose current game state.");
 
@@ -85,6 +93,7 @@ try {
   assert(designed.designerIntent.style === "bomb-chains", `Expected designer style to apply, got ${designed.designerIntent.style}.`);
   assert(designed.generationSummary?.title === "Local fallback board", "Expected public generation summary for forced fallback.");
   assert(await page.locator("[data-generation-summary]").isVisible(), "Expected visible public generation summary.");
+  assert(await page.locator("[data-compact-generation-summary]").isVisible(), "Expected compact generated-board summary in the play console.");
   assert(await page.locator('[data-action="save-board"]').isEnabled(), "Expected generated boards to be keepable.");
   await page.locator('[data-action="rate-up"]').click();
   assert((await snapshot(page)).currentBoardVote === "up", "Expected generated board feedback to be captured.");
@@ -92,6 +101,8 @@ try {
   await page.locator('[data-action="save-board"]').click();
   assert(await hasLocalStorageKey(page, "ricochet-rush-saved-boards"), "Expected kept generated board to persist in Saved Designs.");
   assert(!(await page.locator('[data-pack-id="saved-designs"]').isDisabled()), "Expected Saved Designs to unlock after keeping a board.");
+  await page.locator('[data-action="close-tool-panel"]').click();
+  assert(await page.locator("[data-tool-surface]").isHidden(), "Expected tool panel close action to return to play.");
 
   await page.locator("[data-overlay-action]").click();
   await page.keyboard.down("ArrowRight");
@@ -116,6 +127,8 @@ try {
   assert(saved.hasSave, "Expected save action to mark a checkpoint.");
   assert(await hasLocalStorageKey(page, "ricochet-rush-save"), "Expected checkpoint in localStorage.");
 
+  await page.locator('[data-tool-panel="options"]').click();
+  assert((await page.locator("[data-tool-title]").innerText()) === "Options", "Expected Options panel title.");
   await page.locator('[data-setting="high-contrast"]').check();
   await page.locator('[data-setting="reduced-motion"]').check();
   await page.locator('[data-setting="sound"]').check();

@@ -72,6 +72,15 @@ export interface HudApi {
   setActions(actions: HudActions): void;
 }
 
+type HudToolPanel = "designer" | "packs" | "options" | "diagnostics";
+
+const TOOL_PANEL_LABELS: Record<HudToolPanel, string> = {
+  designer: "Board Designer",
+  packs: "Board Select",
+  options: "Options",
+  diagnostics: "Diagnostics"
+};
+
 export function createHud(root: HTMLDivElement | null): HudApi {
   if (!root) throw new Error("Missing #app root");
 
@@ -96,114 +105,149 @@ export function createHud(root: HTMLDivElement | null): HudApi {
         <div class="hint">A/D or arrows move - Space/Enter launch or continue - P/Escape pause - N design or reroll</div>
         <div data-live-announcement class="sr-only" aria-live="polite" aria-atomic="true"></div>
       </section>
-      <aside class="panel">
-        <button type="button" data-action="toggle-sidebar" class="sidebar-toggle" aria-label="Toggle sidebar">⟨</button>
-        <div class="brand">Ricochet Rush</div>
-        <div class="controls">
+      <aside class="panel play-console" aria-label="Play console">
+        <div class="console-head">
+          <button type="button" data-action="toggle-sidebar" class="sidebar-toggle" aria-label="Toggle play console">⟨</button>
+          <div class="brand-lockup">
+            <div class="brand">Ricochet Rush</div>
+            <div data-board-meta class="console-kicker">Starter pack</div>
+          </div>
+        </div>
+        <div class="controls board-card">
           <strong data-level-name>Starter Wall</strong>
           <span data-hint>Keep the ball angled. Flat returns are a trap.</span>
         </div>
+        <div data-compact-generation-summary class="compact-summary" hidden></div>
         <div class="actions" aria-label="Game actions">
           <button type="button" data-action="new-board">Design board</button>
           <button type="button" data-action="save-board">Keep board</button>
           <button type="button" data-action="save">Save run</button>
           <button type="button" data-action="reset">Clear save</button>
         </div>
-        <section class="designer-panel" aria-label="Board designer">
-          <div class="panel-heading">Board Designer</div>
-          <div class="designer-controls">
-            <label>
-              <span>Style</span>
-              <select data-designer="style">
-                ${DESIGNER_STYLES.map((style) => `<option value="${style}">${designerStyleLabel(style)}</option>`).join("")}
-              </select>
-            </label>
-            <label>
-              <span>Difficulty <strong data-designer-difficulty-value>3</strong></span>
-              <input data-designer="difficulty" type="range" min="1" max="5" step="1" value="3" />
-            </label>
-            <label>
-              <span>Density <strong data-designer-density-value>52%</strong></span>
-              <input data-designer="density" type="range" min="0.34" max="0.82" step="0.04" value="0.52" />
-            </label>
-            <label>
-              <span>Specials <strong data-designer-special-value>45%</strong></span>
-              <input data-designer="specials" type="range" min="0" max="1" step="0.05" value="0.45" />
-            </label>
-            <label>
-              <span>Seed</span>
-              <input data-designer="seed" type="text" maxlength="36" value="fresh-angle" />
-            </label>
-          </div>
-          <div class="designer-feedback" aria-label="Generated board feedback">
-            <button type="button" data-action="rate-up">Good board</button>
-            <button type="button" data-action="rate-down">Needs work</button>
-            <span data-designer-feedback>0 notes</span>
-          </div>
-          <div data-generation-summary class="generation-summary" hidden></div>
-        </section>
-        <section class="pack-browser" aria-label="Board packs">
-          <div class="panel-heading">Board packs</div>
-          <div data-pack-list class="pack-list"></div>
-        </section>
-        <form class="settings" aria-label="Settings">
-          <label>
-            <span>Ball speed</span>
-            <input data-setting="ball-speed" type="range" min="0.8" max="1.2" step="0.05" value="1" />
-          </label>
-          <label class="toggle">
-            <input data-setting="particles" type="checkbox" checked />
-            <span>Particles</span>
-          </label>
-          <label class="toggle">
-            <input data-setting="reduced-motion" type="checkbox" />
-            <span>Reduced motion</span>
-          </label>
-          <label class="toggle">
-            <input data-setting="high-contrast" type="checkbox" />
-            <span>High contrast</span>
-          </label>
-          <label class="toggle">
-            <input data-setting="sound" type="checkbox" />
-            <span>Sound</span>
-          </label>
-        </form>
-        <div class="legend">
-          <span><i class="basic" aria-hidden="true"></i>basic</span>
-          <span><i class="hard" aria-hidden="true"></i>hard</span>
-          <span><i class="bomb" aria-hidden="true"></i>bomb</span>
-          <span><i class="laser" aria-hidden="true"></i>laser</span>
-          <span><i class="fire" aria-hidden="true"></i>fire</span>
-          <span><i class="grab" aria-hidden="true"></i>grab</span>
-          <span><i class="split" aria-hidden="true"></i>multiball</span>
-          <span><i class="wide" aria-hidden="true"></i>wide</span>
-          <span><i class="slow" aria-hidden="true"></i>slow</span>
-          <span><i class="thru" aria-hidden="true"></i>thru</span>
-          <span><i class="prize" aria-hidden="true"></i>prize</span>
-          <span><i class="penalty" aria-hidden="true"></i>penalty</span>
-          <span><i class="boss" aria-hidden="true"></i>boss</span>
+        <nav class="tool-dock" aria-label="Game tools">
+          <button type="button" data-tool-panel="designer">Designer</button>
+          <button type="button" data-tool-panel="packs">Boards</button>
+          <button type="button" data-tool-panel="options">Options</button>
+          <button type="button" data-tool-panel="diagnostics">Details</button>
+        </nav>
+        <div class="console-status" aria-label="Latest event">
+          <strong>Latest</strong>
+          <span data-console-event>Break the wall. Catch powerups. Clear the board.</span>
         </div>
-        <ol data-events class="events"></ol>
-        <details class="agent-trace" data-agent-trace>
-          <summary>Composer trace</summary>
-          <div class="agent-trace-content">
-            <p data-trace-status class="agent-trace-status">No composer trace yet.</p>
-            <h4>Request JSON</h4>
-            <pre data-trace-input class="agent-trace-block"></pre>
-            <h4>Prompt</h4>
-            <pre data-trace-prompt class="agent-trace-block"></pre>
-            <h4>Parsed response</h4>
-            <pre data-trace-output class="agent-trace-block"></pre>
-            <h4>Raw output</h4>
-            <pre data-trace-raw class="agent-trace-block"></pre>
-            <h4>Raw errors</h4>
-            <pre data-trace-errors class="agent-trace-block"></pre>
-          </div>
-        </details>
       </aside>
+      <div class="tool-backdrop" data-tool-backdrop hidden></div>
+      <section class="tool-panel" data-tool-surface role="dialog" aria-modal="true" aria-label="Game tools" tabindex="-1" hidden>
+        <header class="tool-header">
+          <div>
+            <span class="tool-kicker">Ricochet Rush</span>
+            <h2 data-tool-title>Board Designer</h2>
+          </div>
+          <button type="button" data-action="close-tool-panel" class="tool-close" aria-label="Close tool panel">Close</button>
+        </header>
+        <div class="tool-body">
+          <section class="designer-panel tool-view" data-tool-view="designer" aria-label="Board designer">
+            <div class="panel-heading">Board Designer</div>
+            <div class="designer-controls">
+              <label>
+                <span>Style</span>
+                <select data-designer="style">
+                  ${DESIGNER_STYLES.map((style) => `<option value="${style}">${designerStyleLabel(style)}</option>`).join("")}
+                </select>
+              </label>
+              <label>
+                <span>Difficulty <strong data-designer-difficulty-value>3</strong></span>
+                <input data-designer="difficulty" type="range" min="1" max="5" step="1" value="3" />
+              </label>
+              <label>
+                <span>Density <strong data-designer-density-value>52%</strong></span>
+                <input data-designer="density" type="range" min="0.34" max="0.82" step="0.04" value="0.52" />
+              </label>
+              <label>
+                <span>Specials <strong data-designer-special-value>45%</strong></span>
+                <input data-designer="specials" type="range" min="0" max="1" step="0.05" value="0.45" />
+              </label>
+              <label>
+                <span>Seed</span>
+                <input data-designer="seed" type="text" maxlength="36" value="fresh-angle" />
+              </label>
+            </div>
+            <div class="designer-feedback" aria-label="Generated board feedback">
+              <button type="button" data-action="rate-up">Good board</button>
+              <button type="button" data-action="rate-down">Needs work</button>
+              <span data-designer-feedback>0 notes</span>
+            </div>
+            <div data-generation-summary class="generation-summary" hidden></div>
+          </section>
+          <section class="pack-browser tool-view" data-tool-view="packs" aria-label="Board packs" hidden>
+            <div class="panel-heading">Board Select</div>
+            <div data-pack-list class="pack-list"></div>
+          </section>
+          <section class="settings-panel tool-view" data-tool-view="options" aria-label="Options" hidden>
+            <div class="panel-heading">Options</div>
+            <form class="settings" aria-label="Settings">
+              <label>
+                <span>Ball speed</span>
+                <input data-setting="ball-speed" type="range" min="0.8" max="1.2" step="0.05" value="1" />
+              </label>
+              <label class="toggle">
+                <span>Particles</span>
+                <input data-setting="particles" type="checkbox" checked />
+              </label>
+              <label class="toggle">
+                <span>Reduced motion</span>
+                <input data-setting="reduced-motion" type="checkbox" />
+              </label>
+              <label class="toggle">
+                <span>High contrast</span>
+                <input data-setting="high-contrast" type="checkbox" />
+              </label>
+              <label class="toggle">
+                <span>Sound</span>
+                <input data-setting="sound" type="checkbox" />
+              </label>
+            </form>
+            <div class="legend">
+              <span><i class="basic" aria-hidden="true"></i>basic</span>
+              <span><i class="hard" aria-hidden="true"></i>hard</span>
+              <span><i class="bomb" aria-hidden="true"></i>bomb</span>
+              <span><i class="laser" aria-hidden="true"></i>laser</span>
+              <span><i class="fire" aria-hidden="true"></i>fire</span>
+              <span><i class="grab" aria-hidden="true"></i>grab</span>
+              <span><i class="split" aria-hidden="true"></i>multiball</span>
+              <span><i class="wide" aria-hidden="true"></i>wide</span>
+              <span><i class="slow" aria-hidden="true"></i>slow</span>
+              <span><i class="thru" aria-hidden="true"></i>thru</span>
+              <span><i class="prize" aria-hidden="true"></i>prize</span>
+              <span><i class="penalty" aria-hidden="true"></i>penalty</span>
+              <span><i class="boss" aria-hidden="true"></i>boss</span>
+            </div>
+          </section>
+          <section class="diagnostics-panel tool-view" data-tool-view="diagnostics" aria-label="Diagnostics" hidden>
+            <div class="panel-heading">Recent Events</div>
+            <ol data-events class="events"></ol>
+            <details class="agent-trace" data-agent-trace>
+              <summary>Composer trace</summary>
+              <div class="agent-trace-content">
+                <p data-trace-status class="agent-trace-status">No composer trace yet.</p>
+                <h4>Request JSON</h4>
+                <pre data-trace-input class="agent-trace-block"></pre>
+                <h4>Prompt</h4>
+                <pre data-trace-prompt class="agent-trace-block"></pre>
+                <h4>Parsed response</h4>
+                <pre data-trace-output class="agent-trace-block"></pre>
+                <h4>Raw output</h4>
+                <pre data-trace-raw class="agent-trace-block"></pre>
+                <h4>Raw errors</h4>
+                <pre data-trace-errors class="agent-trace-block"></pre>
+              </div>
+            </details>
+          </section>
+        </div>
+      </section>
     </main>
   `;
 
+  const shell = query(root, ".shell");
   const score = query(root, "[data-score]");
   const best = query(root, "[data-best]");
   const lives = query(root, "[data-lives]");
@@ -211,8 +255,10 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   const bricks = query(root, "[data-bricks]");
   const combo = query(root, "[data-combo]");
   const status = query(root, "[data-status]");
+  const boardMeta = query(root, "[data-board-meta]");
   const levelName = query(root, "[data-level-name]");
   const hint = query(root, "[data-hint]");
+  const consoleEvent = query(root, "[data-console-event]");
   const events = query(root, "[data-events]");
   const newBoard = queryButton(root, '[data-action="new-board"]');
   const saveBoard = queryButton(root, '[data-action="save-board"]');
@@ -221,6 +267,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   const rateUp = queryButton(root, '[data-action="rate-up"]');
   const rateDown = queryButton(root, '[data-action="rate-down"]');
   const sidebarToggle = queryButton(root, '[data-action="toggle-sidebar"]');
+  const toolClose = queryButton(root, '[data-action="close-tool-panel"]');
   const designerStyle = querySelect(root, '[data-designer="style"]');
   const designerDifficulty = queryInput(root, '[data-designer="difficulty"]');
   const designerDensity = queryInput(root, '[data-designer="density"]');
@@ -231,6 +278,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   const designerSpecialValue = query(root, "[data-designer-special-value]");
   const designerFeedback = query(root, "[data-designer-feedback]");
   const generationSummary = query(root, "[data-generation-summary]");
+  const compactGenerationSummary = query(root, "[data-compact-generation-summary]");
   const ballSpeed = queryInput(root, '[data-setting="ball-speed"]');
   const particles = queryInput(root, '[data-setting="particles"]');
   const reducedMotion = queryInput(root, '[data-setting="reduced-motion"]');
@@ -239,6 +287,11 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   const activePowersEl = query(root, "[data-active-powers]");
   const packList = query(root, "[data-pack-list]");
   const liveAnnouncement = query(root, "[data-live-announcement]");
+  const toolSurface = query(root, "[data-tool-surface]");
+  const toolBackdrop = query(root, "[data-tool-backdrop]");
+  const toolTitle = query(root, "[data-tool-title]");
+  const toolButtons = Array.from(root.querySelectorAll<HTMLButtonElement>("[data-tool-panel]"));
+  const toolViews = Array.from(root.querySelectorAll<HTMLElement>("[data-tool-view]"));
   const traceStatus = query(root, "[data-trace-status]");
   const traceInput = queryCode(root, "[data-trace-input]");
   const tracePrompt = queryCode(root, "[data-trace-prompt]");
@@ -249,6 +302,8 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   let actions: HudActions | null = null;
   let previousScore = 0;
   let previousCombo = 1;
+  let activeToolPanel: HudToolPanel | null = null;
+  let previousToolFocus: HTMLElement | null = null;
 
   const emitSettings = () => {
     actions?.updateSettings({
@@ -269,6 +324,35 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       seed: designerSeed.value,
       feedback: []
     });
+  };
+
+  const setToolPanel = (panel: HudToolPanel | null) => {
+    activeToolPanel = panel;
+    const isOpen = panel !== null;
+    shell.classList.toggle("is-tool-panel-open", isOpen);
+    toolSurface.hidden = !isOpen;
+    toolBackdrop.hidden = !isOpen;
+
+    for (const button of toolButtons) {
+      const isSelected = button.dataset.toolPanel === panel;
+      button.classList.toggle("is-selected", isSelected);
+      button.setAttribute("aria-expanded", String(isSelected));
+    }
+
+    for (const view of toolViews) {
+      view.hidden = view.dataset.toolView !== panel;
+    }
+
+    if (!panel) {
+      if (previousToolFocus?.isConnected) previousToolFocus.focus({ preventScroll: true });
+      previousToolFocus = null;
+      return;
+    }
+
+    previousToolFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    toolTitle.textContent = TOOL_PANEL_LABELS[panel];
+    toolSurface.setAttribute("aria-label", `${TOOL_PANEL_LABELS[panel]} panel`);
+    toolClose.focus({ preventScroll: true });
   };
 
   const renderTrace = (trace?: ComposerAgentTrace) => {
@@ -297,6 +381,25 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   rateUp.addEventListener("click", () => actions?.rateBoard("up"));
   rateDown.addEventListener("click", () => actions?.rateBoard("down"));
   sidebarToggle.addEventListener("click", () => actions?.toggleSidebar());
+  toolClose.addEventListener("click", () => setToolPanel(null));
+  toolBackdrop.addEventListener("click", () => setToolPanel(null));
+  for (const button of toolButtons) {
+    button.setAttribute("aria-expanded", "false");
+    button.addEventListener("click", () => {
+      const panel = normalizeToolPanel(button.dataset.toolPanel);
+      if (panel) setToolPanel(panel === activeToolPanel ? null : panel);
+    });
+  }
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      if (event.key !== "Escape" || !activeToolPanel) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setToolPanel(null);
+    },
+    true
+  );
   packList.addEventListener("click", (event) => {
     const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-pack-id]") : null;
     if (!button || button.disabled) return;
@@ -324,9 +427,11 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       level.textContent = `level ${state.level}`;
       bricks.textContent = `${state.bricks} bricks`;
       combo.textContent = `x${state.combo.toFixed(1)}`;
-      status.textContent = state.pending ? "Forging level..." : state.status;
+      status.textContent = state.pending ? "Designing board..." : state.status;
+      boardMeta.textContent = renderBoardMeta(state);
       levelName.textContent = state.levelName;
       hint.textContent = state.hint;
+      consoleEvent.textContent = state.pending ? "Designing the next board." : state.events[0] ?? state.status;
       newBoard.textContent = state.boardSource === "generated" ? "Reroll board" : "Design board";
       newBoard.disabled = state.pending;
       saveBoard.disabled = state.pending || !state.canSaveBoard;
@@ -348,6 +453,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       designerSpecialValue.textContent = `${Math.round(state.designer.intent.specialBias * 100)}%`;
       designerFeedback.textContent = `${state.designer.feedbackCount} note${state.designer.feedbackCount === 1 ? "" : "s"}`;
       renderSummary(generationSummary, state.designer.generationSummary);
+      renderCompactSummary(compactGenerationSummary, state);
       ballSpeed.value = String(state.settings.ballSpeed);
       particles.checked = state.settings.particles;
       reducedMotion.checked = state.settings.reducedMotion;
@@ -408,6 +514,38 @@ function escapeHtml(value: string): string {
 
 function escapeAttribute(value: string): string {
   return escapeHtml(value).replaceAll('"', "&quot;");
+}
+
+function normalizeToolPanel(value: string | undefined): HudToolPanel | null {
+  if (value === "designer" || value === "packs" || value === "options" || value === "diagnostics") return value;
+  return null;
+}
+
+function renderBoardMeta(state: HudState): string {
+  if (state.boardSource === "generated") return "Generated board";
+  const activePack = state.packs.find((pack) => pack.active);
+  if (!activePack) return "Curated board";
+  return `${activePack.name} - ${activePack.progressLabel}`;
+}
+
+function renderCompactSummary(element: HTMLElement, state: HudState) {
+  const summary = state.designer.generationSummary;
+  if (state.boardSource !== "generated" || !summary) {
+    element.hidden = true;
+    element.innerHTML = "";
+    return;
+  }
+
+  element.hidden = false;
+  const chips = summary.chips
+    .slice(0, 3)
+    .map((chip) => `<span>${escapeHtml(chip)}</span>`)
+    .join("");
+  element.innerHTML = `
+    <span>Generated</span>
+    <strong>${escapeHtml(summary.title)}</strong>
+    <div>${chips}</div>
+  `;
 }
 
 function renderPower(power: HudState["activePowers"][number]): string {

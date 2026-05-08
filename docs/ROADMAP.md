@@ -174,7 +174,9 @@ Acceptance criteria:
 
 ### P3.5 - Sidebar And Game UI Simplification
 
-Goal: reduce sidebar clutter while keeping gameplay, board design, pack selection, and settings easy to reach. This is the next active priority.
+Goal: reduce sidebar clutter while keeping gameplay, board design, pack selection, and settings easy to reach.
+
+Status: complete as of May 8, 2026.
 
 Problem:
 
@@ -190,6 +192,21 @@ Likely directions:
 - Show the generated-board summary only when the active board is generated, then collapse it to a one-line chip after launch.
 - Let pack selection use a dedicated picker or drawer instead of showing every pack card all the time.
 - Keep raw Composer trace as a developer/details panel, never part of the default play rail.
+
+Implementation notes:
+
+- Replaced the overloaded sidebar with a compact Play Console that keeps the current board, hint, primary run actions, tool launchers, and latest event visible.
+- Moved Board Designer, Board Select, Options, and Diagnostics into focused drawer panels opened from the Play Console.
+- Kept the playfield as the first read on desktop and mobile; secondary tools now dim the board only while intentionally open.
+- Moved settings, brick legend, event log, and Composer trace out of the default view.
+- Added a compact generated-board summary in the Play Console while the full generation summary stays in the Board Designer panel.
+- Updated the smoke path to prove players can open each focused tool surface and still complete the core run/save/settings flow.
+
+Verified:
+
+- `npm run ci` passes.
+- Playwright smoke coverage verifies compact Play Console defaults, focused Board Select and Board Designer panels, compact generated summaries, Options settings, save/clear flow, launch/pause behavior, and responsive overflow checks.
+- Screenshot review passed for desktop default, desktop Board Designer, desktop Board Select, mobile default, and mobile Options.
 
 Design constraints:
 
