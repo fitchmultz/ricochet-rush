@@ -6,8 +6,24 @@ import {
   type LevelBlueprint,
   type LevelRequest,
   type LevelResponse,
-  fallbackLevel
+  fallbackLevel,
+  normalizeLevel
 } from "../../shared/evolution";
+import {
+  BUILT_IN_PACKS,
+  SAVED_DESIGNS_PACK_ID,
+  type PackProgressState,
+  type SavedBoardEntry,
+  boardCountForPack,
+  getBuiltInPack,
+  getNextBuiltInPack,
+  markPackBoardCleared,
+  materializeAuthoredBoard,
+  normalizePackProgress,
+  normalizeSavedBoards,
+  previewRowsFromLevel,
+  trimSavedBoards
+} from "../../shared/boardPacks";
 import {
   DEFAULT_SETTINGS,
   SAVE_VERSION,
@@ -18,7 +34,7 @@ import {
   normalizeSaveState,
   normalizeSettings
 } from "../../shared/saveState";
-import type { HudApi } from "../ui/hud";
+import type { HudApi, HudPackItem } from "../ui/hud";
 import { createGameAudio } from "./gameAudio";
 
 interface Ball {
@@ -152,6 +168,10 @@ interface LoopCorrectionDebug extends LoopRiskVelocity {
 
 type GamePhase = "loading" | "ready" | "playing" | "levelComplete" | "gameOver";
 
+type BoardContext =
+  | { source: "pack"; packId: string; boardIndex: number }
+  | { source: "generated"; packId: null; boardIndex: 0 };
+
 const WIDTH = 960;
 const HEIGHT = 640;
 const WALL = 18;
@@ -184,6 +204,9 @@ const SIDEBAR_COLLAPSED_KEY = "ricochet-rush-sidebar-collapsed";
 const BEST_SCORE_KEY = "ricochet-rush-best-score";
 const COMPOSER_LEVEL_ARCHIVE_KEY = "ricochet-rush-composer-level-archive";
 const COMPOSER_LEVEL_ARCHIVE_MAX = 50;
+const PACK_PROGRESS_KEY = "ricochet-rush-pack-progress";
+const SAVED_BOARDS_KEY = "ricochet-rush-saved-boards";
+const SAVED_BOARDS_MAX = 24;
 const POWER_DURATIONS: Record<string, number> = {
   Laser: 8,
   Grab: 12,
@@ -354,11 +377,17 @@ export class RicochetRushGame {
   private lifeFlashTimer = 0;
   private previouslyFocusedElement: HTMLElement | null = null;
   private readonly audio = createGameAudio();
+  private savedBoards: SavedBoardEntry[] = [];
+  private packProgress: PackProgressState = normalizePackProgress(null, 0);
+  private boardContext: BoardContext = { source: "pack", packId: "starter", boardIndex: 0 };
 
   constructor(mount: HTMLDivElement, hud: HudApi) {
     this.mount = mount;
     this.hud = hud;
     this.settings = readSettings();
+    this.savedBoards = readJson(SAVED_BOARDS_KEY, normalizeSavedBoards) ?? [];
+    this.packProgress =
+      readJson(PACK_PROGRESS_KEY, (input) => normalizePackProgress(input, this.savedBoards.length)) ?? normalizePackProgress(null, this.savedBoards.length);
     this.sidebarCollapsed = readJson(SIDEBAR_COLLAPSED_KEY, normalizeBoolean) ?? false;
     this.bestScore = Math.max(readBestScore(), readSave()?.bestScore ?? 0);
     this.setupRenderer();
@@ -385,9 +414,7 @@ export class RicochetRushGame {
       this.pushEvent("Saved run restored.");
       this.showLevelReadyOverlay("Saved run restored.");
     } else {
-      this.loadLevel(this.levelBlueprint, "Local starter wall loaded.");
-      this.showLoadingOverlay("Generating Level 1", "A playable wall is being prepared. Local fallback stays ready if generation is unavailable.");
-      void this.fetchLevel("Preparing the first custom board.");
+      this.startPack("starter", "Starter pack loaded.");
     }
     this.applySettingsClass();
     window.requestAnimationFrame(this.loop);
@@ -408,6 +435,10 @@ export class RicochetRushGame {
       lastPaddleHit: this.lastPaddleHit,
       lastLoopCorrection: this.lastLoopCorrection,
       hasSave: this.hasSave,
+      boardSource: this.boardContext.source,
+      currentPackId: this.boardContext.packId,
+      packBoardIndex: this.boardContext.boardIndex,
+      packProgress: this.packProgress,
       settings: this.settings,
       recentEvents: this.recentEvents,
       announcement: this.announcement
@@ -550,11 +581,17 @@ export class RicochetRushGame {
   private bindHudActions() {
     this.hud.setActions({
       requestBoard: () => void this.fetchLevel("You asked composer-2 to redesign this board."),
+      saveBoardToPack: () => {
+        this.saveCurrentBoardToPack();
+      },
       saveNow: () => {
         this.saveCheckpoint("Run saved.");
       },
       resetProgress: () => {
         this.confirmClearSave();
+      },
+      selectPack: (packId) => {
+        this.selectPack(packId);
       },
       updateSettings: (settings) => {
         this.settings = normalizeSettings(settings);
@@ -715,7 +752,76 @@ export class RicochetRushGame {
     );
   }
 
-  private loadLevel(level: LevelBlueprint, event: string, trace?: LevelResponse["trace"]) {
+  private startPack(packId: string, event: string) {
+    if (!this.canPlayPack(packId)) return;
+    this.level = 1;
+    this.clearedLevels = 0;
+    this.score = 0;
+    this.lives = 3;
+    this.combo = 1;
+    this.latestAgentTrace = undefined;
+    localStorage.removeItem(SAVE_KEY);
+    this.hasSave = false;
+    const nextIndex = this.nextBoardIndexForPack(packId);
+    this.loadPackBoard(packId, nextIndex, event);
+  }
+
+  private selectPack(packId: string) {
+    if (this.loadingLevel || !this.canPlayPack(packId)) return;
+    const packName = this.packNameFor(packId);
+    this.startPack(packId, `${packName} loaded.`);
+  }
+
+  private loadPackBoard(packId: string, boardIndex: number, event: string) {
+    const level = this.materializePackBoard(packId, boardIndex);
+    if (!level) return;
+    this.level = boardIndex + 1;
+    this.clearedLevels = boardIndex;
+    this.latestAgentTrace = undefined;
+    this.loadLevel(level, event, undefined, { source: "pack", packId, boardIndex });
+  }
+
+  private materializePackBoard(packId: string, boardIndex: number): LevelBlueprint | null {
+    const request = { ...this.levelRequest(), level: boardIndex + 1, clearedLevels: boardIndex };
+    if (packId === SAVED_DESIGNS_PACK_ID) {
+      const saved = this.savedBoards[boardIndex];
+      return saved ? normalizeLevel(saved.levelBlueprint, request) : null;
+    }
+    return materializeAuthoredBoard(packId, boardIndex, request);
+  }
+
+  private canPlayPack(packId: string): boolean {
+    const total = boardCountForPack(packId, this.savedBoards.length);
+    return total > 0 && this.packProgress[packId]?.unlocked === true;
+  }
+
+  private nextBoardIndexForPack(packId: string): number {
+    const total = boardCountForPack(packId, this.savedBoards.length);
+    if (total <= 0) return 0;
+    const cleared = this.packProgress[packId]?.cleared ?? 0;
+    return cleared >= total ? 0 : clamp(Math.floor(cleared), 0, total - 1);
+  }
+
+  private saveCurrentBoardToPack() {
+    if (this.boardContext.source !== "generated" || this.loadingLevel) return;
+    const levelBlueprint = normalizeLevel(this.levelBlueprint, this.levelRequest());
+    const now = new Date();
+    const entry: SavedBoardEntry = {
+      id: `saved-${now.getTime()}`,
+      createdAt: now.toISOString(),
+      levelName: levelBlueprint.name,
+      levelBlueprint
+    };
+    this.savedBoards = trimSavedBoards([entry, ...this.savedBoards], SAVED_BOARDS_MAX);
+    writeJson(SAVED_BOARDS_KEY, this.savedBoards);
+    this.packProgress = normalizePackProgress(this.packProgress, this.savedBoards.length);
+    writeJson(PACK_PROGRESS_KEY, this.packProgress);
+    this.pushEvent(`${levelBlueprint.name} saved to Saved Designs.`);
+    this.refreshHud("Board saved to Saved Designs.");
+  }
+
+  private loadLevel(level: LevelBlueprint, event: string, trace?: LevelResponse["trace"], context: BoardContext = this.boardContext) {
+    this.boardContext = context;
     this.levelBlueprint = level;
     this.bricks = [];
     this.powerups.splice(0);
@@ -747,7 +853,7 @@ export class RicochetRushGame {
     this.phase = "ready";
     this.resetBall();
     this.pushEvent(event);
-    this.saveCheckpoint();
+    this.saveCheckpoint(undefined, true);
     this.showLevelReadyOverlay(event);
     this.latestAgentTrace = trace;
     this.refreshHud(level.briefing);
@@ -773,6 +879,10 @@ export class RicochetRushGame {
 
   private restoreSave(save: GameSave) {
     this.latestAgentTrace = undefined;
+    this.boardContext =
+      save.boardSource === "pack" && save.packId
+        ? { source: "pack", packId: save.packId, boardIndex: save.packBoardIndex }
+        : { source: "generated", packId: null, boardIndex: 0 };
     this.level = save.level;
     this.clearedLevels = save.clearedLevels;
     this.score = save.score;
@@ -1181,12 +1291,17 @@ export class RicochetRushGame {
 
   private completeLevel() {
     if (this.phase === "levelComplete" || this.phase === "loading" || this.phase === "gameOver") return;
+    const completedContext = this.boardContext;
     this.phase = "levelComplete";
     this.clearedLevels += 1;
     const bonus = 500 + this.lives * 100 + Math.round(this.combo * 60);
     this.score += bonus;
     this.bestScore = Math.max(this.bestScore, this.score);
     writeBestScore(this.bestScore);
+    if (completedContext.source === "pack") {
+      this.packProgress = markPackBoardCleared(this.packProgress, completedContext.packId, completedContext.boardIndex, this.score, this.savedBoards.length);
+      writeJson(PACK_PROGRESS_KEY, this.packProgress);
+    }
     this.powerups.splice(0);
     this.laserBeams.splice(0);
     this.pushEvent(`Level ${this.level} cleared. Bonus ${bonus} pts.`);
@@ -1196,22 +1311,38 @@ export class RicochetRushGame {
     this.audio.play("levelClear", this.settings.sound);
     this.shakeBoard(0.28, 2.6);
     this.saveCheckpoint("Level checkpoint saved.");
+    const nextStep = this.nextLevelCompleteStep(completedContext);
     this.showOverlay(
       "Level Cleared",
-      `The board is frozen. Continue when you want composer-2 to generate Level ${this.level + 1}.`,
-      "Continue",
+      nextStep.body,
+      nextStep.actionLabel,
       () => void this.continueToNextLevel()
     );
-    this.refreshHud("Level cleared. Continue when ready.");
+    this.refreshHud(nextStep.status);
   }
 
   private async continueToNextLevel() {
     if (this.phase !== "levelComplete") return;
+    if (this.boardContext.source === "pack") {
+      const { packId, boardIndex } = this.boardContext;
+      const nextIndex = boardIndex + 1;
+      const total = boardCountForPack(packId, this.savedBoards.length);
+      if (nextIndex < total) {
+        this.loadPackBoard(packId, nextIndex, `${this.packNameFor(packId)} board ${nextIndex + 1} loaded.`);
+        return;
+      }
+      const nextPack = getNextBuiltInPack(packId);
+      if (nextPack && this.packProgress[nextPack.id]?.unlocked) {
+        this.startPack(nextPack.id, `${nextPack.name} unlocked.`);
+        return;
+      }
+    }
     this.level += 1;
     await this.fetchLevel("Wall cleared. Designing the next board.");
   }
 
   private async restartRun() {
+    const activePackId = this.boardContext.source === "pack" ? this.boardContext.packId : null;
     this.level = 1;
     this.clearedLevels = 0;
     this.score = 0;
@@ -1219,6 +1350,10 @@ export class RicochetRushGame {
     this.combo = 1;
     localStorage.removeItem(SAVE_KEY);
     this.hasSave = false;
+    if (activePackId && this.canPlayPack(activePackId)) {
+      this.startPack(activePackId, `New run. Replaying ${this.packNameFor(activePackId)}.`);
+      return;
+    }
     await this.fetchLevel("New run. Rebuilding Level 1.");
   }
 
@@ -1241,10 +1376,14 @@ export class RicochetRushGame {
           ? `Generated ${result.level.name}.`
           : `Local fallback generated ${result.level.name}${result.warning ? ` (${result.warning})` : ""}.`;
       if (result.source === "cursor-sdk") this.saveComposerGeneratedLevel(result);
-      this.loadLevel(result.level, sourceEvent, result.trace);
+      this.loadLevel(result.level, sourceEvent, result.trace, { source: "generated", packId: null, boardIndex: 0 });
     } catch (error) {
       const reason = error instanceof Error ? error.message : "unknown error";
-      this.loadLevel(fallbackLevel(this.levelRequest()), `Local fallback generated a level after API failure (${reason}).`);
+      this.loadLevel(fallbackLevel(this.levelRequest()), `Local fallback generated a level after API failure (${reason}).`, undefined, {
+        source: "generated",
+        packId: null,
+        boardIndex: 0
+      });
     } finally {
       this.loadingLevel = false;
       this.refreshHud();
@@ -1259,6 +1398,76 @@ export class RicochetRushGame {
       clearedLevels: this.clearedLevels,
       recentEvents: this.recentEvents.slice(0, 5)
     };
+  }
+
+  private nextLevelCompleteStep(context: BoardContext): { body: string; actionLabel: string; status: string } {
+    if (context.source === "pack") {
+      const total = boardCountForPack(context.packId, this.savedBoards.length);
+      if (context.boardIndex + 1 < total) {
+        return {
+          body: `Continue to board ${context.boardIndex + 2} in ${this.packNameFor(context.packId)}.`,
+          actionLabel: "Next Board",
+          status: "Level cleared. Next pack board is ready."
+        };
+      }
+      const nextPack = getNextBuiltInPack(context.packId);
+      if (nextPack && this.packProgress[nextPack.id]?.unlocked) {
+        return {
+          body: `${this.packNameFor(context.packId)} complete. Continue into ${nextPack.name}.`,
+          actionLabel: "Next Pack",
+          status: `${nextPack.name} unlocked.`
+        };
+      }
+      return {
+        body: `${this.packNameFor(context.packId)} complete. Continue to a generated board.`,
+        actionLabel: "Generate Board",
+        status: `${this.packNameFor(context.packId)} complete.`
+      };
+    }
+    return {
+      body: `The board is frozen. Continue when you want composer-2 to generate Level ${this.level + 1}.`,
+      actionLabel: "Continue",
+      status: "Level cleared. Continue when ready."
+    };
+  }
+
+  private packNameFor(packId: string): string {
+    if (packId === SAVED_DESIGNS_PACK_ID) return "Saved Designs";
+    return getBuiltInPack(packId)?.name ?? "Board Pack";
+  }
+
+  private collectPackItems(): HudPackItem[] {
+    const builtInItems = BUILT_IN_PACKS.map((pack) => {
+      const progress = this.packProgress[pack.id] ?? { cleared: 0, bestScore: 0, unlocked: pack.id === "starter" };
+      const previewIndex = progress.cleared >= pack.boards.length ? 0 : clamp(progress.cleared, 0, pack.boards.length - 1);
+      return {
+        id: pack.id,
+        name: pack.name,
+        description: pack.description,
+        progressLabel: progress.unlocked ? `${progress.cleared}/${pack.boards.length} cleared` : "locked",
+        bestScore: progress.bestScore,
+        unlocked: progress.unlocked,
+        active: this.boardContext.source === "pack" && this.boardContext.packId === pack.id,
+        empty: false,
+        previewRows: [...pack.boards[previewIndex].pattern]
+      };
+    });
+    const savedProgress = this.packProgress[SAVED_DESIGNS_PACK_ID] ?? { cleared: 0, bestScore: 0, unlocked: this.savedBoards.length > 0 };
+    const savedPreview = this.savedBoards[0] ? previewRowsFromLevel(this.savedBoards[0].levelBlueprint) : [];
+    return [
+      ...builtInItems,
+      {
+        id: SAVED_DESIGNS_PACK_ID,
+        name: "Saved Designs",
+        description: "Generated boards you kept for replay.",
+        progressLabel: this.savedBoards.length > 0 ? `${savedProgress.cleared}/${this.savedBoards.length} cleared` : "empty",
+        bestScore: savedProgress.bestScore,
+        unlocked: this.savedBoards.length > 0,
+        active: this.boardContext.source === "pack" && this.boardContext.packId === SAVED_DESIGNS_PACK_ID,
+        empty: this.savedBoards.length === 0,
+        previewRows: savedPreview
+      }
+    ];
   }
 
   private refreshHud(status?: string) {
@@ -1280,6 +1489,8 @@ export class RicochetRushGame {
       sidebarCollapsed: this.sidebarCollapsed,
       settings: this.settings,
       activePowers: this.collectActivePowers(),
+      packs: this.collectPackItems(),
+      canSaveBoard: this.boardContext.source === "generated" && this.bricks.length > 0,
       events: this.recentEvents
     });
   }
@@ -1315,9 +1526,9 @@ export class RicochetRushGame {
     this.announcement = message;
   }
 
-  private saveCheckpoint(event?: string) {
+  private saveCheckpoint(event?: string, force = false) {
     const now = performance.now();
-    if (!event && now - this.lastCheckpointAt < 1000) return;
+    if (!force && !event && now - this.lastCheckpointAt < 1000) return;
     this.lastCheckpointAt = now;
     this.bestScore = Math.max(this.bestScore, this.score);
     writeBestScore(this.bestScore);
@@ -1326,6 +1537,9 @@ export class RicochetRushGame {
       savedAt: new Date().toISOString(),
       level: this.level,
       clearedLevels: this.clearedLevels,
+      boardSource: this.boardContext.source,
+      packId: this.boardContext.packId,
+      packBoardIndex: this.boardContext.boardIndex,
       score: this.score,
       bestScore: this.bestScore,
       lives: this.lives,

@@ -1,5 +1,17 @@
 import type { ComposerAgentTrace } from "../../shared/evolution";
 
+export interface HudPackItem {
+  id: string;
+  name: string;
+  description: string;
+  progressLabel: string;
+  bestScore: number;
+  unlocked: boolean;
+  active: boolean;
+  empty: boolean;
+  previewRows: string[];
+}
+
 export interface HudState {
   score: number;
   bestScore: number;
@@ -20,6 +32,8 @@ export interface HudState {
     sound: boolean;
   };
   activePowers: { label: string; seconds: number; maxSeconds: number }[];
+  packs: HudPackItem[];
+  canSaveBoard: boolean;
   events: string[];
   announcement: string;
   sidebarCollapsed?: boolean;
@@ -29,7 +43,9 @@ export interface HudState {
 export interface HudActions {
   requestBoard(): void;
   saveNow(): void;
+  saveBoardToPack(): void;
   resetProgress(): void;
+  selectPack(packId: string): void;
   toggleSidebar(): void;
   updateSettings(settings: HudState["settings"]): void;
 }
@@ -72,9 +88,14 @@ export function createHud(root: HTMLDivElement | null): HudApi {
         </div>
         <div class="actions" aria-label="Game actions">
           <button type="button" data-action="new-board">New board</button>
+          <button type="button" data-action="save-board">Keep board</button>
           <button type="button" data-action="save">Save run</button>
           <button type="button" data-action="reset">Clear save</button>
         </div>
+        <section class="pack-browser" aria-label="Board packs">
+          <div class="panel-heading">Board packs</div>
+          <div data-pack-list class="pack-list"></div>
+        </section>
         <form class="settings" aria-label="Settings">
           <label>
             <span>Ball speed</span>
@@ -144,6 +165,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   const hint = query(root, "[data-hint]");
   const events = query(root, "[data-events]");
   const newBoard = queryButton(root, '[data-action="new-board"]');
+  const saveBoard = queryButton(root, '[data-action="save-board"]');
   const save = queryButton(root, '[data-action="save"]');
   const reset = queryButton(root, '[data-action="reset"]');
   const sidebarToggle = queryButton(root, '[data-action="toggle-sidebar"]');
@@ -153,6 +175,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   const highContrast = queryInput(root, '[data-setting="high-contrast"]');
   const sound = queryInput(root, '[data-setting="sound"]');
   const activePowersEl = query(root, "[data-active-powers]");
+  const packList = query(root, "[data-pack-list]");
   const liveAnnouncement = query(root, "[data-live-announcement]");
   const traceStatus = query(root, "[data-trace-status]");
   const traceInput = queryCode(root, "[data-trace-input]");
@@ -195,9 +218,15 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   };
 
   newBoard.addEventListener("click", () => actions?.requestBoard());
+  saveBoard.addEventListener("click", () => actions?.saveBoardToPack());
   save.addEventListener("click", () => actions?.saveNow());
   reset.addEventListener("click", () => actions?.resetProgress());
   sidebarToggle.addEventListener("click", () => actions?.toggleSidebar());
+  packList.addEventListener("click", (event) => {
+    const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-pack-id]") : null;
+    if (!button || button.disabled) return;
+    actions?.selectPack(button.dataset.packId ?? "");
+  });
   ballSpeed.addEventListener("input", emitSettings);
   particles.addEventListener("change", emitSettings);
   reducedMotion.addEventListener("change", emitSettings);
@@ -219,6 +248,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       levelName.textContent = state.levelName;
       hint.textContent = state.hint;
       newBoard.disabled = state.pending;
+      saveBoard.disabled = state.pending || !state.canSaveBoard;
       save.disabled = state.pending;
       reset.disabled = state.pending || !state.hasSave;
       sidebarToggle.textContent = state.sidebarCollapsed ? "⟩" : "⟨";
@@ -240,6 +270,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
         activePowersEl.innerHTML = "";
       }
       liveAnnouncement.textContent = state.announcement;
+      packList.innerHTML = state.packs.map(renderPack).join("");
       events.innerHTML = state.events.map((event) => `<li>${escapeHtml(event)}</li>`).join("");
       renderTrace(state.agentTrace);
     }
@@ -274,9 +305,59 @@ function escapeHtml(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
+function escapeAttribute(value: string): string {
+  return escapeHtml(value).replaceAll('"', "&quot;");
+}
+
 function renderPower(power: HudState["activePowers"][number]): string {
   const width = Math.round(Math.max(0, Math.min(1, power.seconds / power.maxSeconds)) * 100);
   return `<span class="power-timer"><span>${escapeHtml(power.label)}</span><strong>${power.seconds}s</strong><i style="width: ${width}%"></i></span>`;
+}
+
+function renderPack(pack: HudPackItem): string {
+  const classes = ["pack-card"];
+  if (pack.active) classes.push("is-active");
+  if (pack.empty) classes.push("is-empty");
+  const disabled = !pack.unlocked || pack.empty;
+  const previewRows = pack.previewRows.length > 0 ? pack.previewRows : ["..............", "..............", ".............."];
+  const preview = previewRows
+    .slice(0, 9)
+    .map((row) =>
+      row
+        .slice(0, 14)
+        .padEnd(14, ".")
+        .split("")
+        .map((glyph) => `<i class="mini-brick mini-${glyphClass(glyph)}"></i>`)
+        .join("")
+    )
+    .join("");
+  return `
+    <button type="button" class="${classes.join(" ")}" data-pack-id="${escapeAttribute(pack.id)}" ${disabled ? "disabled" : ""}>
+      <span class="pack-preview" aria-hidden="true">${preview}</span>
+      <span class="pack-copy">
+        <strong>${escapeHtml(pack.name)}</strong>
+        <span>${escapeHtml(pack.description)}</span>
+        <em>${escapeHtml(pack.progressLabel)} · best ${pack.bestScore}</em>
+      </span>
+    </button>
+  `;
+}
+
+function glyphClass(glyph: string): string {
+  if (glyph === ".") return "empty";
+  if (glyph === "B") return "boss";
+  if (glyph === "o") return "bomb";
+  if (glyph === "h") return "hard";
+  if (glyph === "p") return "prize";
+  if (glyph === "x") return "penalty";
+  if (glyph === "l") return "laser";
+  if (glyph === "f") return "fire";
+  if (glyph === "g") return "grab";
+  if (glyph === "s") return "split";
+  if (glyph === "w") return "wide";
+  if (glyph === "c") return "slow";
+  if (glyph === "t") return "thru";
+  return "basic";
 }
 
 function prettyJson(value: unknown): string {

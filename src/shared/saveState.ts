@@ -1,6 +1,6 @@
 import type { BrickKind, LevelBlueprint } from "./evolution";
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export interface GameSettings {
   ballSpeed: number;
@@ -38,6 +38,9 @@ export interface GameSave {
   savedAt: string;
   level: number;
   clearedLevels: number;
+  boardSource: "pack" | "generated";
+  packId: string | null;
+  packBoardIndex: number;
   score: number;
   bestScore: number;
   lives: number;
@@ -76,30 +79,33 @@ export function normalizeSettings(input: unknown): GameSettings {
 export function normalizeSaveState(input: unknown): GameSave | null {
   if (!isRecord(input) || !isRecord(input.levelBlueprint) || !Array.isArray(input.bricks)) return null;
   const rawVersion = input.version;
-  if (rawVersion !== SAVE_VERSION && rawVersion !== 1) return null;
+  if (rawVersion !== SAVE_VERSION && rawVersion !== 2 && rawVersion !== 1) return null;
 
   const level = positiveInteger(input.level);
   const score = nonNegativeInteger(input.score);
   const lives = positiveInteger(input.lives);
   if (level === null || score === null || lives === null) return null;
 
-  const laserTimer =
-    rawVersion === SAVE_VERSION ? clamp(numberValue(input.laserTimer, 0), 0, 120) : 0;
-  const grabTimer = rawVersion === SAVE_VERSION ? clamp(numberValue(input.grabTimer, 0), 0, 120) : 0;
-  const explosionScale =
-    rawVersion === SAVE_VERSION ? clamp(numberValue(input.explosionScale, 1), 1, 2.5) : 1;
+  const hasPowerSnapshot = rawVersion === SAVE_VERSION || rawVersion === 2;
+  const laserTimer = hasPowerSnapshot ? clamp(numberValue(input.laserTimer, 0), 0, 120) : 0;
+  const grabTimer = hasPowerSnapshot ? clamp(numberValue(input.grabTimer, 0), 0, 120) : 0;
+  const explosionScale = hasPowerSnapshot ? clamp(numberValue(input.explosionScale, 1), 1, 2.5) : 1;
 
   let balls: SavedBallState[] | null = null;
-  if (rawVersion === SAVE_VERSION && Array.isArray(input.balls)) {
+  if (hasPowerSnapshot && Array.isArray(input.balls)) {
     const parsed = input.balls.map(normalizeSavedBall).filter((b): b is SavedBallState => b !== null);
     balls = parsed.length > 0 ? parsed.slice(0, 10) : null;
   }
+  const boardSource = rawVersion === SAVE_VERSION && input.boardSource === "pack" ? "pack" : "generated";
 
   return {
     version: SAVE_VERSION,
     savedAt: stringValue(input.savedAt, new Date(0).toISOString()),
     level,
     clearedLevels: nonNegativeInteger(input.clearedLevels) ?? Math.max(0, level - 1),
+    boardSource,
+    packId: boardSource === "pack" && typeof input.packId === "string" && input.packId.trim().length > 0 ? input.packId.trim().slice(0, 80) : null,
+    packBoardIndex: boardSource === "pack" ? nonNegativeInteger(input.packBoardIndex) ?? 0 : 0,
     score,
     bestScore: Math.max(score, nonNegativeInteger(input.bestScore) ?? score),
     lives,

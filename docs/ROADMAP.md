@@ -18,7 +18,7 @@ Use this positioning in public docs:
 
 > An original 3D browser brick-breaker where an AI board designer creates, validates, and evolves playable arcade layouts.
 
-Public docs should keep the game identity simple and direct. Do not lead with clone language or AI-demo framing.
+Public docs should keep the game identity simple and direct. Do not lead with comparison language or AI-demo framing.
 
 ## Naming Direction
 
@@ -104,14 +104,32 @@ Acceptance criteria:
 
 ### P2 - Curated Board Packs
 
-Goal: add the replayable structure that made classic brick-breakers sticky. This is the next active priority.
+Goal: add the replayable structure that makes brick-breakers sticky.
+
+Status: complete as of May 8, 2026.
 
 Deliverables:
 
-- Create authored packs such as Starter, Classic, Chaos, Precision, and Boss Rush.
-- Add board thumbnails or preview cards.
-- Add pack progression, unlock state, and best score by pack.
-- Let generated boards be promoted into a curated local pack.
+- Create authored packs such as Starter, Classic, Chaos, Precision, and Boss Rush: complete.
+- Add board thumbnails or preview cards: complete.
+- Add pack progression, unlock state, and best score by pack: complete.
+- Let generated boards be promoted into a curated local pack: complete.
+
+Implementation notes:
+
+- Added five built-in packs with three named boards each: Starter, Classic, Chaos, Precision, and Boss Rush.
+- Boot now starts on the Starter pack instead of immediately generating the first board.
+- Board pack cards show compact previews, active/locked/empty state, cleared count, and best score.
+- Pack progress persists locally, unlocks the next built-in pack when the previous pack is cleared, and resumes from the next uncleared board.
+- Generated boards can be kept in the local Saved Designs pack.
+- Authored boards and saved generated boards both pass through the shared level validation path before play.
+
+Verified:
+
+- `npm run ci` passes.
+- Unit coverage validates authored boards, unlock progression, saved-board shape, and current/v1/v2 save-state migration.
+- Playwright smoke coverage verifies Starter boot, pack cards, Saved Designs unlock after keeping a generated board, settings persistence, save/clear flow, keyboard launch, pause, and responsive overflow checks.
+- Screenshot review passed for desktop `1280x820` and mobile `390x760`.
 
 Acceptance criteria:
 
@@ -120,7 +138,7 @@ Acceptance criteria:
 
 ### P3 - Cursor SDK Board Designer Mode
 
-Goal: make Cursor SDK the core differentiator, not a hidden implementation detail.
+Goal: make Cursor SDK the core differentiator, not a hidden implementation detail. This is the next active priority.
 
 Deliverables:
 

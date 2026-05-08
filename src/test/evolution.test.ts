@@ -1,6 +1,15 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { BRICK_COLUMNS, BRICK_ROWS, CURSOR_MODEL, MAX_BRICKS, MIN_BRICKS, fallbackLevel, normalizeLevel, type LevelRequest } from "../shared/evolution";
+import {
+  BUILT_IN_PACKS,
+  SAVED_DESIGNS_PACK_ID,
+  markPackBoardCleared,
+  materializeAuthoredBoard,
+  normalizePackProgress,
+  normalizeSavedBoards,
+  previewRowsFromLevel
+} from "../shared/boardPacks";
 import { DEFAULT_SETTINGS, SAVE_VERSION, normalizeSaveState, normalizeSettings } from "../shared/saveState";
 import { buildPrompt, parseWorkerOutput, requestEvolution, summarizeLevelError } from "../server/cursorAgent";
 import { calculatePaddleRebound, normalizeLoopRiskVelocity, trimComposerArchive, type ComposerGeneratedLevelEntry } from "../client/game/RicochetRushGame";
@@ -217,6 +226,9 @@ describe("Cursor SDK level generation contract", () => {
     expect(save?.grabTimer).toBe(0);
     expect(save?.explosionScale).toBe(1);
     expect(save?.balls).toBeNull();
+    expect(save?.boardSource).toBe("generated");
+    expect(save?.packId).toBeNull();
+    expect(save?.packBoardIndex).toBe(0);
     expect(save?.bricks).toEqual([{ x: 10, y: 20, width: 30, height: 12, kind: "basic", hp: 1, maxHp: 1 }]);
     expect(save?.recentEvents).toEqual(["Saved", "Restored"]);
   });
@@ -260,6 +272,82 @@ describe("Cursor SDK level generation contract", () => {
     expect(save?.balls).toHaveLength(1);
     expect(save?.balls?.[0]?.radius).toBe(20);
     expect(save?.balls?.[0]?.fireTimer).toBe(120);
+    expect(save?.boardSource).toBe("generated");
+  });
+
+  it("normalizes current checkpoints with pack board context", () => {
+    const level = fallbackLevel(request);
+    const save = normalizeSaveState({
+      version: SAVE_VERSION,
+      savedAt: "2026-05-08T16:00:00.000Z",
+      level: 2,
+      clearedLevels: 1,
+      boardSource: "pack",
+      packId: "classic",
+      packBoardIndex: 1,
+      score: 900,
+      bestScore: 900,
+      lives: 3,
+      combo: 1,
+      paddleWidth: 116,
+      levelBlueprint: level,
+      bricks: [{ x: 10, y: 20, width: 30, height: 12, kind: "basic", hp: 1, maxHp: 1 }],
+      recentEvents: [],
+      laserTimer: 0,
+      grabTimer: 0,
+      explosionScale: 1,
+      balls: null
+    });
+
+    expect(save?.boardSource).toBe("pack");
+    expect(save?.packId).toBe("classic");
+    expect(save?.packBoardIndex).toBe(1);
+  });
+});
+
+describe("Ricochet Rush curated board packs", () => {
+  it("materializes every authored board through the shared level validator", () => {
+    for (const pack of BUILT_IN_PACKS) {
+      expect(pack.boards.length).toBeGreaterThanOrEqual(3);
+      for (let index = 0; index < pack.boards.length; index += 1) {
+        const level = materializeAuthoredBoard(pack.id, index, { ...request, level: index + 1, clearedLevels: index });
+        expect(level, `${pack.id} board ${index + 1}`).toBeTruthy();
+        const brickCount = level?.rows.flat().filter(Boolean).length ?? 0;
+        expect(level?.rows).toHaveLength(BRICK_ROWS);
+        expect(level?.rows[0]).toHaveLength(BRICK_COLUMNS);
+        expect(brickCount).toBeGreaterThanOrEqual(MIN_BRICKS);
+        expect(brickCount).toBeLessThanOrEqual(MAX_BRICKS);
+      }
+    }
+  });
+
+  it("unlocks the next built-in pack after the previous pack is cleared", () => {
+    let progress = normalizePackProgress(null, 0);
+    expect(progress.starter?.unlocked).toBe(true);
+    expect(progress.classic?.unlocked).toBe(false);
+
+    progress = markPackBoardCleared(progress, "starter", 2, 3200, 0);
+
+    expect(progress.starter?.cleared).toBe(3);
+    expect(progress.starter?.bestScore).toBe(3200);
+    expect(progress.classic?.unlocked).toBe(true);
+  });
+
+  it("keeps generated board saves in a replayable local pack shape", () => {
+    const level = fallbackLevel(request);
+    const saved = normalizeSavedBoards([
+      {
+        id: "kept-board",
+        createdAt: "2026-05-08T17:00:00.000Z",
+        levelName: "Kept Board",
+        levelBlueprint: level
+      }
+    ]);
+    const progress = normalizePackProgress({ [SAVED_DESIGNS_PACK_ID]: { cleared: 0, bestScore: 0, unlocked: false } }, saved.length);
+
+    expect(saved).toHaveLength(1);
+    expect(progress[SAVED_DESIGNS_PACK_ID]?.unlocked).toBe(true);
+    expect(previewRowsFromLevel(saved[0]!.levelBlueprint)).toHaveLength(BRICK_ROWS);
   });
 });
 

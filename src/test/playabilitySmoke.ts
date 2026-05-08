@@ -18,6 +18,9 @@ interface DebugSnapshot {
   paddleVelocityX: number;
   lastPaddleHit: { hitZone: number; paddleVelocityX: number; vx: number; vy: number; speed: number } | null;
   hasSave: boolean;
+  boardSource: "pack" | "generated";
+  currentPackId: string | null;
+  packBoardIndex: number;
   settings: {
     ballSpeed: number;
     particles: boolean;
@@ -51,9 +54,21 @@ try {
   assert(ready.phase === "ready", `Expected ready phase, got ${ready.phase}.`);
   assert(ready.bricks >= 34, `Expected a playable board, got ${ready.bricks} bricks.`);
   assert(ready.balls.length === 1 && ready.balls[0]?.stuck, "Expected one stuck launch ball.");
+  assert(ready.boardSource === "pack", `Expected first board to come from a curated pack, got ${ready.boardSource}.`);
+  assert(ready.currentPackId === "starter", `Expected Starter pack on boot, got ${ready.currentPackId}.`);
+  assert(await page.locator('[data-pack-id="starter"].is-active').count() === 1, "Expected Starter pack card to be active.");
+  assert(await page.locator('[data-pack-id="saved-designs"]').isDisabled(), "Expected empty Saved Designs pack to be disabled.");
+  assert(await page.locator('[data-action="save-board"]').isDisabled(), "Expected Keep board to be disabled for authored boards.");
   assert(await hasFocusedOverlayAction(page), "Expected ready overlay to focus its primary action.");
   const canvasLabel = await page.locator('[data-testid="ricochet-rush-canvas"]').getAttribute("aria-label");
   assert(canvasLabel?.includes("Level 1") === true, "Expected canvas to expose current game state.");
+
+  await page.locator('[data-action="new-board"]').click();
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().boardSource === "generated");
+  assert(await page.locator('[data-action="save-board"]').isEnabled(), "Expected generated boards to be keepable.");
+  await page.locator('[data-action="save-board"]').click();
+  assert(await hasLocalStorageKey(page, "ricochet-rush-saved-boards"), "Expected kept generated board to persist in Saved Designs.");
+  assert(!(await page.locator('[data-pack-id="saved-designs"]').isDisabled()), "Expected Saved Designs to unlock after keeping a board.");
 
   await page.locator("[data-overlay-action]").click();
   await page.keyboard.down("ArrowRight");
