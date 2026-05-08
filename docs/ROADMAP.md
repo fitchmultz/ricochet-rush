@@ -2,7 +2,7 @@
 
 This is the canonical product roadmap for the project. The public goal is an original browser arcade game inspired by the brick-breaker genre, with adaptive board design powered by the Cursor SDK through a local server route.
 
-Working title: `Ricochet Rush`.
+Product name: `Ricochet Rush`.
 
 ## Product Goals
 
@@ -14,7 +14,7 @@ Working title: `Ricochet Rush`.
 
 ## Public Positioning
 
-Use this positioning in public docs until the project is renamed:
+Use this positioning in public docs:
 
 > An original 3D browser brick-breaker where an AI board designer creates, validates, and evolves playable arcade layouts.
 
@@ -24,48 +24,35 @@ Public docs should keep the game identity simple and direct. Do not lead with cl
 
 The settled product name is `Ricochet Rush`.
 
-Use this name in public UI, README copy, demo scripts, screenshots, and future repository metadata. Keep the current local directory name for now.
+Use this name in public UI, README copy, demo scripts, screenshots, and repository metadata. Keep the current local directory name for now.
 
-Future repo name: `ricochet-rush`.
+Public repo: `https://github.com/fitchmultz/ricochet-rush`.
 
 ## Priority Roadmap
 
-### P0 - Identity Cutover
+### Done - Identity Cutover
 
-Goal: give the game a clear original name and consistent public identity.
+Status: complete as of May 8, 2026.
 
-Deliverables:
+Completed:
 
-- Rename the game title, package metadata, README, UI brand, local storage keys, and docs to `Ricochet Rush`.
-- Add a README with one-command setup and a short "AI board designer" explanation.
-- Keep private strategy out of tracked files.
+- Renamed the game title, package metadata, README, UI brand, local storage keys, test IDs, prompts, server logs, and docs to `Ricochet Rush`.
+- Added a README with one-command setup and a short Cursor SDK level-designer explanation.
+- Kept private strategy out of tracked files.
+- Published the public GitHub repository as `fitchmultz/ricochet-rush`.
+- Rewrote the new public repo to a single clean initial commit.
 
-Acceptance criteria:
+Verified:
 
 - Public docs and UI use the new name consistently.
-- `npm run ci` passes.
-
-### P0.5 - Public Repository Readiness
-
-Goal: create the public GitHub repository only after the working tree is ready to represent the project.
-
-Deliverables:
-
-- Complete the `Ricochet Rush` identity cutover.
-- Remove or rewrite old working-name references in README, UI, package metadata, prompts, server logs, and tests.
-- Keep `.scratchpad.md` and any private strategy out of tracked files.
-- Run a public-surface scan before creating the remote.
-- Create a new public GitHub repo named `ricochet-rush` only after the scan and `npm run ci` pass.
-
-Acceptance criteria:
-
-- The repo can be opened by a reviewer or player without private context.
+- Public surface scan found no tracked old-name or private-strategy references.
 - `git check-ignore -v .scratchpad.md` confirms private notes stay ignored.
 - `npm run ci` passes.
+- `npm audit --audit-level=moderate` passes. Remaining audit items are low-severity transitive `@cursor/sdk`/`sqlite3` chain findings with no available fix.
 
 ### P1 - Game Feel And Physics
 
-Goal: make the core loop feel sharp before adding more surface area.
+Goal: make the core loop feel sharp before adding more surface area. This is the next active priority.
 
 Deliverables:
 
@@ -74,6 +61,14 @@ Deliverables:
 - Add anti-flat-loop protection so the ball does not get trapped in boring horizontal or vertical paths.
 - Tune speed ramping so difficulty rises without turning into unreadable chaos.
 - Add a small debug overlay or test hook for ball speed, angle, paddle hit zone, and collision events.
+
+Start slice:
+
+- Track paddle velocity each frame.
+- Feed paddle velocity into paddle collision so moving into the ball adds controlled spin.
+- Clamp launch and rebound angles to avoid boring vertical/horizontal loops.
+- Add a focused unit test or smoke assertion for minimum horizontal velocity after paddle hits.
+- Playtest the first board and tune constants until edge hits feel intentional.
 
 Acceptance criteria:
 
@@ -184,4 +179,4 @@ Acceptance criteria:
 
 ## Begin Here
 
-Start with P0, then immediately do the smallest P1 game-feel pass. After the rename, tune paddle/ball feel before expanding board packs or demo collateral.
+Start with the P1 start slice. Do not build board packs, audio, visual polish, or demo collateral until the paddle/ball loop feels good enough that a player can aim intentionally.
