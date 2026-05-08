@@ -1,4 +1,8 @@
 :root {
+  --scrollbar-size: 10px;
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(126, 241, 255, 0.34);
+  --scrollbar-thumb-hover: rgba(255, 224, 102, 0.66);
   color: #edf4ef;
   background: #080d14;
   font-family:
@@ -8,6 +12,34 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  min-height: 42px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 body {
@@ -35,6 +67,11 @@ body {
 
 .shell.is-sidebar-collapsed {
   --active-panel-width: var(--panel-collapsed-width);
+}
+
+.shell.is-high-contrast {
+  --scrollbar-thumb: rgba(255, 224, 102, 0.58);
+  --scrollbar-thumb-hover: rgba(126, 241, 255, 0.72);
 }
 
 .stage {
@@ -371,6 +408,7 @@ body {
   gap: 12px;
   min-height: 0;
   overflow: auto;
+  scrollbar-gutter: stable;
   padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
@@ -538,6 +576,7 @@ body {
   gap: 5px;
   max-height: 138px;
   overflow: auto;
+  scrollbar-gutter: stable;
   padding: 8px;
   border-radius: 8px;
   background: rgba(6, 10, 17, 0.58);
@@ -588,6 +627,7 @@ body {
   display: grid;
   gap: 8px;
   overflow: auto;
+  scrollbar-gutter: stable;
   padding-right: 2px;
 }
 
@@ -860,6 +900,7 @@ body {
   margin: 0;
   padding: 0 0 0 20px;
   overflow: auto;
+  scrollbar-gutter: stable;
   color: #c8d4d1;
   font-size: 0.86rem;
   line-height: 1.45;
@@ -922,6 +963,7 @@ body {
   max-height: min(45vh, 260px);
   padding: 8px 12px 12px;
   overflow: auto;
+  scrollbar-gutter: stable;
   border-top: 1px solid rgba(255, 255, 255, 0.12);
 }
 
@@ -942,6 +984,7 @@ body {
   padding: 8px;
   max-height: 84px;
   overflow: auto;
+  scrollbar-gutter: stable;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   background: rgba(6, 10, 17, 0.75);
