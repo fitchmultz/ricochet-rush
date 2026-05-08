@@ -24,7 +24,15 @@ import {
 } from "../shared/boardPacks";
 import { DEFAULT_SETTINGS, SAVE_VERSION, normalizeSaveState, normalizeSettings } from "../shared/saveState";
 import { buildGenerationSummary, buildPrompt, parseWorkerOutput, requestEvolution, summarizeLevelError } from "../server/cursorAgent";
-import { calculatePaddleRebound, normalizeLoopRiskVelocity, trimComposerArchive, type ComposerGeneratedLevelEntry } from "../client/game/RicochetRushGame";
+import {
+  calculatePaddleRebound,
+  normalizeLoopRiskVelocity,
+  penaltyPowerupPool,
+  powerupToneFor,
+  prizePowerupPool,
+  trimComposerArchive,
+  type ComposerGeneratedLevelEntry
+} from "../client/game/RicochetRushGame";
 
 const request: LevelRequest = {
   level: 4,
@@ -561,5 +569,36 @@ describe("Ricochet Rush collision consistency", () => {
     expect(corrected.vy).toBeGreaterThan(0);
     expect(Math.abs(corrected.vy)).toBeGreaterThanOrEqual(corrected.speed * 0.16);
     expect(Math.hypot(corrected.vx, corrected.vy)).toBeCloseTo(corrected.speed, 5);
+  });
+});
+
+describe("Ricochet Rush power-up balance", () => {
+  it("keeps early prize and penalty pools readable, then opens risk as boards progress", () => {
+    const earlyPrize = prizePowerupPool({ level: 1, clearedLevels: 0, combo: 1 });
+    const latePrize = prizePowerupPool({ level: 7, clearedLevels: 4, combo: 1 });
+    const earlyPenalty = penaltyPowerupPool({ level: 1, clearedLevels: 0, combo: 1 });
+    const latePenalty = penaltyPowerupPool({ level: 7, clearedLevels: 4, combo: 1 });
+
+    expect(earlyPrize).toContain("expandPaddle");
+    expect(earlyPrize).not.toContain("levelWarp");
+    expect(latePrize).toContain("levelWarp");
+    expect(earlyPenalty).toContain("shrinkPaddle");
+    expect(earlyPenalty).not.toContain("killPaddle");
+    expect(latePenalty).toContain("killPaddle");
+  });
+
+  it("adds stronger prize options for high-combo play", () => {
+    const lowCombo = prizePowerupPool({ level: 2, clearedLevels: 0, combo: 1 });
+    const highCombo = prizePowerupPool({ level: 2, clearedLevels: 0, combo: 3.2 });
+
+    expect(lowCombo).not.toContain("megaBall");
+    expect(highCombo).toContain("megaBall");
+    expect(highCombo).not.toContain("eightBall");
+  });
+
+  it("classifies power-ups into readable reward, hazard, and volatile tones", () => {
+    expect(powerupToneFor("expandPaddle")).toBe("reward");
+    expect(powerupToneFor("shrinkPaddle")).toBe("hazard");
+    expect(powerupToneFor("eightBall")).toBe("volatile");
   });
 });

@@ -261,13 +261,29 @@ Acceptance criteria:
 
 Goal: turn a big power-up list into legible strategy.
 
+Status: implemented; pending user playtest as of May 8, 2026.
+
 Deliverables:
 
-- Strong visual distinction between positive, negative, and high-risk power-ups.
-- Floating pickup labels for short-lived clarity.
-- Level-aware drop rates.
-- Combo or streak rewards that bias toward skillful play.
-- Clearer timers and stacking rules for active powers.
+- Strong visual distinction between positive, negative, and high-risk power-ups: implemented.
+- Floating pickup labels for short-lived clarity: implemented.
+- Level-aware drop rates: implemented.
+- Combo or streak rewards that bias toward skillful play: implemented.
+- Clearer timers and stacking rules for active powers: implemented.
+
+Implementation notes:
+
+- Added reward, hazard, and volatile power-up tones. Falling items now use distinct tint, pulse, scale, and motion treatment by tone.
+- Added short pickup labels such as `+Expand paddle`, `-Shrink paddle`, and `! Eight ball` so catches explain themselves without opening a panel.
+- Prize and penalty pools now change with board progression. Early boards avoid volatile rewards and hard hazards; later boards introduce more risk.
+- High-combo play adds stronger reward options before volatile options enter the early-game pool.
+- Timed powers refresh to at least their full duration on repeat pickup and active timer chips now inherit tone colors.
+
+Verified:
+
+- Unit coverage validates early/late prize and penalty pools, high-combo reward bias, and tone classification.
+- Build and smoke coverage remain part of the project `npm run ci` gate.
+- Screenshot review passed for reward, hazard, and volatile falling items plus pickup labels and active timer chips.
 
 Acceptance criteria:
 

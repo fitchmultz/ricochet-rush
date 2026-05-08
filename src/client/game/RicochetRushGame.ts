@@ -112,7 +112,7 @@ interface FloatingText {
   text: string;
   life: number;
   duration: number;
-  kind: "score" | "combo" | "status";
+  kind: "score" | "combo" | "status" | "powerupReward" | "powerupHazard" | "powerupVolatile";
 }
 
 export interface ComposerGeneratedLevelEntry {
@@ -288,23 +288,40 @@ const POWERUP_NAMES: Record<PowerupKind, string> = {
   shrinkBall: "Shrink ball"
 };
 
-const POSITIVE_POWERUPS: PowerupKind[] = [
+type PowerupTone = "reward" | "hazard" | "volatile";
+
+const SAFE_REWARD_POWERUPS: PowerupKind[] = [
   "expandPaddle",
   "splitBall",
-  "eightBall",
-  "megaBall",
   "slowBall",
   "fireball",
   "thruBrick",
   "shootingPaddle",
   "grabPaddle",
-  "extraLife",
+  "extraLife"
+];
+const SKILL_REWARD_POWERUPS: PowerupKind[] = ["megaBall", "zapBricks"];
+const VOLATILE_REWARD_POWERUPS: PowerupKind[] = [
+  "eightBall",
   "levelWarp",
-  "zapBricks",
   "setOffExploding",
   "expandExploding"
 ];
-const NEGATIVE_POWERUPS: PowerupKind[] = ["shrinkPaddle", "superShrink", "fastBall", "fallingBricks", "killPaddle", "shrinkBall"];
+const MILD_HAZARD_POWERUPS: PowerupKind[] = ["shrinkPaddle", "fastBall", "shrinkBall"];
+const HARD_HAZARD_POWERUPS: PowerupKind[] = ["superShrink", "fallingBricks", "killPaddle"];
+const NEGATIVE_POWERUPS: PowerupKind[] = [...MILD_HAZARD_POWERUPS, ...HARD_HAZARD_POWERUPS];
+const VOLATILE_POWERUPS = new Set<PowerupKind>(VOLATILE_REWARD_POWERUPS);
+const POWERUP_VISUALS: Record<PowerupTone, { tint: string; emissive: string; spark: string; floatingKind: FloatingText["kind"] }> = {
+  reward: { tint: "#7bf1a8", emissive: "#28e68a", spark: "#7bf1a8", floatingKind: "powerupReward" },
+  hazard: { tint: "#ff5c7a", emissive: "#ff244c", spark: "#ff5c7a", floatingKind: "powerupHazard" },
+  volatile: { tint: "#ffe066", emissive: "#ff9f43", spark: "#ffe066", floatingKind: "powerupVolatile" }
+};
+
+interface PowerupPoolInput {
+  level: number;
+  clearedLevels: number;
+  combo: number;
+}
 
 export class RicochetRushGame {
   private readonly mount: HTMLDivElement;
@@ -338,17 +355,11 @@ export class RicochetRushGame {
   private readonly fallbackPowerupGeometry = new THREE.BoxGeometry(38, 24, 10, 2, 1, 1);
   private readonly brickMaterials = new Map<BrickKind, THREE.MeshStandardMaterial>();
   private readonly powerupMaterials = new Map<PowerupKind, THREE.SpriteMaterial>();
+  private readonly fallbackPowerupMaterials = new Map<PowerupTone, THREE.MeshStandardMaterial>();
   private readonly paddleMesh = new THREE.Mesh(
     this.paddleGeometry,
     new THREE.MeshStandardMaterial({ color: "#e9ffff", emissive: "#35f3ff", emissiveIntensity: 0.45, metalness: 0.82, roughness: 0.18 })
   );
-  private readonly fallbackPowerupMaterial = new THREE.MeshStandardMaterial({
-    color: "#ffe066",
-    emissive: "#ff5c5c",
-    emissiveIntensity: 0.45,
-    metalness: 0.5,
-    roughness: 0.25
-  });
   private sparksPoints: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial> | null = null;
   private bricks: Brick[] = [];
   private levelBlueprint: LevelBlueprint = fallbackLevel({ level: 1, score: 0, lives: 3, clearedLevels: 0, recentEvents: [] });
@@ -450,6 +461,13 @@ export class RicochetRushGame {
       level: this.level,
       bricks: this.bricks.length,
       balls: this.balls.map((ball) => ({ x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy, stuck: ball.stuck })),
+      powerups: this.powerups.map((powerup) => ({
+        x: powerup.x,
+        y: powerup.y,
+        kind: powerup.kind,
+        tone: powerupToneFor(powerup.kind),
+        label: POWERUP_NAMES[powerup.kind]
+      })),
       paddleX: this.paddleX,
       paddleWidth: this.paddleWidth,
       paddleVelocityX: this.paddleVelocityX,
@@ -546,14 +564,14 @@ export class RicochetRushGame {
       "/assets/powerups.png",
       (texture) => {
         texture.colorSpace = THREE.SRGBColorSpace;
-        for (const kind of POWERUP_ORDER) {
-          const index = POWERUP_ORDER.indexOf(kind);
+        for (const [index, kind] of POWERUP_ORDER.entries()) {
           const map = texture.clone();
+          const visual = powerupVisualFor(kind);
           map.colorSpace = THREE.SRGBColorSpace;
           map.repeat.set(1 / POWERUP_ATLAS_COLUMNS, 1 / POWERUP_ATLAS_ROWS);
           map.offset.set((index % POWERUP_ATLAS_COLUMNS) / POWERUP_ATLAS_COLUMNS, 1 - (Math.floor(index / POWERUP_ATLAS_COLUMNS) + 1) / POWERUP_ATLAS_ROWS);
           map.needsUpdate = true;
-          this.powerupMaterials.set(kind, new THREE.SpriteMaterial({ map, color: "#ffffff", transparent: false }));
+          this.powerupMaterials.set(kind, new THREE.SpriteMaterial({ map, color: visual.tint, transparent: true }));
         }
         this.pushEvent("Generated power-up atlas loaded.");
       },
@@ -1148,8 +1166,8 @@ export class RicochetRushGame {
     if (brick.kind === "grab") this.dropPowerup(brick, "grabPaddle");
     if (brick.kind === "fire") this.dropPowerup(brick, "fireball");
     if (brick.kind === "thru") this.dropPowerup(brick, "thruBrick");
-    if (brick.kind === "prize") this.dropPowerup(brick, pick(POSITIVE_POWERUPS));
-    if (brick.kind === "penalty") this.dropPowerup(brick, pick(NEGATIVE_POWERUPS));
+    if (brick.kind === "prize") this.dropPowerup(brick, pick(prizePowerupPool(this.powerupPoolInput())));
+    if (brick.kind === "penalty") this.dropPowerup(brick, pick(penaltyPowerupPool(this.powerupPoolInput())));
     if (brick.kind === "boss") this.dropPowerup(brick, pick(["shootingPaddle", "megaBall", "eightBall"]));
   }
 
@@ -1171,7 +1189,8 @@ export class RicochetRushGame {
   }
 
   private dropPowerup(brick: Brick, kind: PowerupKind) {
-    this.powerups.push({ x: brick.x + brick.width / 2, y: brick.y + brick.height / 2, vy: 150, kind });
+    const speed = 138 + Math.min(42, this.level * 4 + this.clearedLevels * 2);
+    this.powerups.push({ x: brick.x + brick.width / 2, y: brick.y + brick.height / 2, vy: speed, kind });
   }
 
   private updatePowerups(delta: number) {
@@ -1179,14 +1198,24 @@ export class RicochetRushGame {
       powerup.y += powerup.vy * delta;
       const caught = powerup.y > PADDLE_Y - 16 && powerup.y < PADDLE_Y + 24 && Math.abs(powerup.x - this.paddleX) < this.paddleWidth / 2 + 18;
       if (caught) {
-        this.emitSparks(this.paddleX, PADDLE_Y - 6, "#ffe066", 10);
+        const visual = powerupVisualFor(powerup.kind);
+        this.emitSparks(this.paddleX, PADDLE_Y - 6, visual.spark, 12);
         this.audio.play(soundForPowerup(powerup.kind), this.settings.sfx);
         this.paddleFlashTimer = 0.2;
+        this.addFloatingText(powerup.x, PADDLE_Y - 34, pickupLabelFor(powerup.kind), visual.floatingKind);
         this.applyPowerup(powerup.kind);
         powerup.y = HEIGHT + 100;
       }
     }
     this.powerups.splice(0, this.powerups.length, ...this.powerups.filter((powerup) => powerup.y < HEIGHT + 60));
+  }
+
+  private powerupPoolInput(): PowerupPoolInput {
+    return {
+      level: this.level,
+      clearedLevels: this.clearedLevels,
+      combo: this.combo
+    };
   }
 
   private applyPowerup(kind: PowerupKind) {
@@ -1220,25 +1249,25 @@ export class RicochetRushGame {
     }
     if (kind === "megaBall") {
       for (const ball of this.balls) {
-        ball.megaTimer = 12;
+        ball.megaTimer = Math.max(ball.megaTimer, POWER_DURATIONS.Mega);
         ball.radius = 14;
       }
       this.pushEvent("Mega ball armed.");
     }
     if (kind === "fireball") {
-      for (const ball of this.balls) ball.fireTimer = 10;
+      for (const ball of this.balls) ball.fireTimer = Math.max(ball.fireTimer, POWER_DURATIONS.Fire);
       this.pushEvent("Fireball burns through the wall.");
     }
     if (kind === "thruBrick") {
-      for (const ball of this.balls) ball.thruTimer = 10;
+      for (const ball of this.balls) ball.thruTimer = Math.max(ball.thruTimer, POWER_DURATIONS.Thru);
       this.pushEvent("Thru-brick ball enabled.");
     }
     if (kind === "shootingPaddle") {
-      this.laserTimer = 8;
+      this.laserTimer = Math.max(this.laserTimer, POWER_DURATIONS.Laser);
       this.pushEvent("Shooting paddle armed.");
     }
     if (kind === "grabPaddle") {
-      this.grabTimer = 12;
+      this.grabTimer = Math.max(this.grabTimer, POWER_DURATIONS.Grab);
       this.pushEvent("Grab paddle online.");
     }
     if (kind === "extraLife") {
@@ -1602,17 +1631,17 @@ export class RicochetRushGame {
     );
   }
 
-  private collectActivePowers(): { label: string; seconds: number; maxSeconds: number }[] {
-    const rows: { label: string; seconds: number; maxSeconds: number }[] = [];
-    if (this.laserTimer > 0) rows.push({ label: "Laser", seconds: Math.ceil(this.laserTimer), maxSeconds: POWER_DURATIONS.Laser });
-    if (this.grabTimer > 0) rows.push({ label: "Grab", seconds: Math.ceil(this.grabTimer), maxSeconds: POWER_DURATIONS.Grab });
+  private collectActivePowers(): { label: string; seconds: number; maxSeconds: number; tone: PowerupTone }[] {
+    const rows: { label: string; seconds: number; maxSeconds: number; tone: PowerupTone }[] = [];
+    if (this.laserTimer > 0) rows.push({ label: "Laser", seconds: Math.ceil(this.laserTimer), maxSeconds: POWER_DURATIONS.Laser, tone: powerupToneFor("shootingPaddle") });
+    if (this.grabTimer > 0) rows.push({ label: "Grab", seconds: Math.ceil(this.grabTimer), maxSeconds: POWER_DURATIONS.Grab, tone: powerupToneFor("grabPaddle") });
     if (this.balls.length > 0) {
       const fire = Math.max(0, ...this.balls.map((ball) => ball.fireTimer));
       const thru = Math.max(0, ...this.balls.map((ball) => ball.thruTimer));
       const mega = Math.max(0, ...this.balls.map((ball) => ball.megaTimer));
-      if (fire > 0) rows.push({ label: "Fire", seconds: Math.ceil(fire), maxSeconds: POWER_DURATIONS.Fire });
-      if (thru > 0) rows.push({ label: "Thru", seconds: Math.ceil(thru), maxSeconds: POWER_DURATIONS.Thru });
-      if (mega > 0) rows.push({ label: "Mega", seconds: Math.ceil(mega), maxSeconds: POWER_DURATIONS.Mega });
+      if (fire > 0) rows.push({ label: "Fire", seconds: Math.ceil(fire), maxSeconds: POWER_DURATIONS.Fire, tone: powerupToneFor("fireball") });
+      if (thru > 0) rows.push({ label: "Thru", seconds: Math.ceil(thru), maxSeconds: POWER_DURATIONS.Thru, tone: powerupToneFor("thruBrick") });
+      if (mega > 0) rows.push({ label: "Mega", seconds: Math.ceil(mega), maxSeconds: POWER_DURATIONS.Mega, tone: powerupToneFor("megaBall") });
     }
     return rows.slice(0, 5);
   }
@@ -1776,15 +1805,37 @@ export class RicochetRushGame {
       let object = this.powerupObjects.get(powerup);
       if (!object) {
         const material = this.powerupMaterials.get(powerup.kind);
-        object = material ? new THREE.Sprite(material) : new THREE.Mesh(this.fallbackPowerupGeometry, this.fallbackPowerupMaterial);
+        object = material ? new THREE.Sprite(material) : new THREE.Mesh(this.fallbackPowerupGeometry, this.fallbackMaterialForPowerup(powerup.kind));
         object.userData.label = POWERUP_NAMES[powerup.kind];
         this.powerupObjects.set(powerup, object);
         this.powerupsGroup.add(object);
       }
+      const tone = powerupToneFor(powerup.kind);
+      const pulse = this.settings.reducedMotion ? 0 : Math.sin(performance.now() / 150 + powerup.x) * 0.07;
       object.position.copy(toWorld(powerup.x, powerup.y, 62));
-      object.scale.set(object instanceof THREE.Sprite ? 44 : 1, object instanceof THREE.Sprite ? 30 : 1, 1);
-      object.rotation.z = this.settings.reducedMotion ? 0 : Math.sin(performance.now() / 200 + powerup.x) * 0.08;
+      const spriteWidth = tone === "volatile" ? 50 : 44;
+      const spriteHeight = tone === "hazard" ? 36 : 30;
+      object.scale.set(object instanceof THREE.Sprite ? spriteWidth * (1 + pulse) : 1, object instanceof THREE.Sprite ? spriteHeight * (1 + pulse) : 1, 1);
+      object.rotation.z = this.settings.reducedMotion
+        ? 0
+        : Math.sin(performance.now() / (tone === "hazard" ? 130 : 200) + powerup.x) * (tone === "hazard" ? 0.18 : 0.08);
     }
+  }
+
+  private fallbackMaterialForPowerup(kind: PowerupKind): THREE.MeshStandardMaterial {
+    const tone = powerupToneFor(kind);
+    const existing = this.fallbackPowerupMaterials.get(tone);
+    if (existing) return existing;
+    const visual = POWERUP_VISUALS[tone];
+    const material = new THREE.MeshStandardMaterial({
+      color: visual.tint,
+      emissive: visual.emissive,
+      emissiveIntensity: tone === "hazard" ? 0.72 : 0.52,
+      metalness: 0.5,
+      roughness: 0.25
+    });
+    this.fallbackPowerupMaterials.set(tone, material);
+    return material;
   }
 
   private syncLasers() {
@@ -1994,6 +2045,40 @@ export class RicochetRushGame {
 
 function pick<T>(items: readonly T[]): T {
   return items[Math.floor(Math.random() * items.length)] ?? items[0];
+}
+
+export function prizePowerupPool(input: PowerupPoolInput): readonly PowerupKind[] {
+  const progress = powerupPressure(input);
+  if (input.combo >= 3 && progress >= 0.55) return [...SAFE_REWARD_POWERUPS, ...SKILL_REWARD_POWERUPS, ...VOLATILE_REWARD_POWERUPS];
+  if (input.combo >= 3) return [...SAFE_REWARD_POWERUPS, ...SKILL_REWARD_POWERUPS];
+  if (progress >= 0.55) return [...SAFE_REWARD_POWERUPS, ...VOLATILE_REWARD_POWERUPS];
+  return SAFE_REWARD_POWERUPS;
+}
+
+export function penaltyPowerupPool(input: PowerupPoolInput): readonly PowerupKind[] {
+  if (powerupPressure(input) >= 0.45) return [...MILD_HAZARD_POWERUPS, ...HARD_HAZARD_POWERUPS];
+  return MILD_HAZARD_POWERUPS;
+}
+
+export function powerupToneFor(kind: PowerupKind): PowerupTone {
+  if (NEGATIVE_POWERUPS.includes(kind)) return "hazard";
+  if (VOLATILE_POWERUPS.has(kind)) return "volatile";
+  return "reward";
+}
+
+function powerupVisualFor(kind: PowerupKind): (typeof POWERUP_VISUALS)[PowerupTone] {
+  return POWERUP_VISUALS[powerupToneFor(kind)];
+}
+
+function pickupLabelFor(kind: PowerupKind): string {
+  const tone = powerupToneFor(kind);
+  if (tone === "hazard") return `-${POWERUP_NAMES[kind]}`;
+  if (tone === "volatile") return `! ${POWERUP_NAMES[kind]}`;
+  return `+${POWERUP_NAMES[kind]}`;
+}
+
+function powerupPressure(input: PowerupPoolInput): number {
+  return clamp((input.level + input.clearedLevels - 1) / 10, 0, 1);
 }
 
 function soundForBrickDestroy(kind: BrickKind): GameSoundKind {

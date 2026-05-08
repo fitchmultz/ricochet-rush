@@ -41,7 +41,7 @@ export interface HudState {
     sfx: boolean;
     music: boolean;
   };
-  activePowers: { label: string; seconds: number; maxSeconds: number }[];
+  activePowers: { label: string; seconds: number; maxSeconds: number; tone: "reward" | "hazard" | "volatile" }[];
   packs: HudPackItem[];
   canSaveBoard: boolean;
   canRateBoard: boolean;
@@ -580,7 +580,7 @@ function renderCompactSummary(element: HTMLElement, state: HudState) {
 
 function renderPower(power: HudState["activePowers"][number]): string {
   const width = Math.round(Math.max(0, Math.min(1, power.seconds / power.maxSeconds)) * 100);
-  return `<span class="power-timer"><span>${escapeHtml(power.label)}</span><strong>${power.seconds}s</strong><i style="width: ${width}%"></i></span>`;
+  return `<span class="power-timer is-${power.tone}"><span>${escapeHtml(power.label)}</span><strong>${power.seconds}s</strong><i style="width: ${width}%"></i></span>`;
 }
 
 function renderSummary(element: HTMLElement, summary?: GenerationSummary) {

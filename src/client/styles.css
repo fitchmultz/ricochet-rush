@@ -208,6 +208,18 @@ body {
   font-size: 1rem;
 }
 
+.floating-text.is-powerupReward {
+  color: #7bf1a8;
+}
+
+.floating-text.is-powerupHazard {
+  color: #ff8aa0;
+}
+
+.floating-text.is-powerupVolatile {
+  color: #ffe066;
+}
+
 .game-overlay {
   position: absolute;
   inset: 0;
@@ -388,6 +400,21 @@ body {
   background: rgba(126, 241, 255, 0.08);
 }
 
+.power-timer.is-reward {
+  background: rgba(123, 241, 168, 0.11);
+  color: #7bf1a8;
+}
+
+.power-timer.is-hazard {
+  background: rgba(255, 92, 122, 0.12);
+  color: #ff8aa0;
+}
+
+.power-timer.is-volatile {
+  background: rgba(255, 224, 102, 0.12);
+  color: #ffe066;
+}
+
 .power-timer span,
 .power-timer strong {
   position: relative;
@@ -405,6 +432,18 @@ body {
   bottom: 0;
   height: 2px;
   background: #7ef1ff;
+}
+
+.power-timer.is-reward i {
+  background: #7bf1a8;
+}
+
+.power-timer.is-hazard i {
+  background: #ff5c7a;
+}
+
+.power-timer.is-volatile i {
+  background: #ffe066;
 }
 
 .hint {
