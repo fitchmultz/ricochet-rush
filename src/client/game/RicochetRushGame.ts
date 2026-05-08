@@ -180,6 +180,14 @@ type BoardContext =
   | { source: "pack"; packId: string; boardIndex: number }
   | { source: "generated"; packId: null; boardIndex: 0 };
 
+interface BoardTheme {
+  scene: string;
+  floor: string;
+  wall: string;
+  wallGlow: string;
+  rim: string;
+}
+
 const WIDTH = 960;
 const HEIGHT = 640;
 const WALL = 18;
@@ -224,6 +232,15 @@ const POWER_DURATIONS: Record<string, number> = {
   Fire: 10,
   Thru: 10,
   Mega: 12
+};
+const BOARD_THEMES: Record<string, BoardTheme> = {
+  starter: { scene: "#050910", floor: "#07111d", wall: "#183a3d", wallGlow: "#4ecdc4", rim: "#7ef1ff" },
+  classic: { scene: "#090b13", floor: "#0e1320", wall: "#222d48", wallGlow: "#8e7dff", rim: "#d6ff4d" },
+  chaos: { scene: "#11080c", floor: "#180f15", wall: "#3a1621", wallGlow: "#ff5c7a", rim: "#ffe066" },
+  precision: { scene: "#06100f", floor: "#081816", wall: "#173d38", wallGlow: "#b6fffa", rim: "#7bf1a8" },
+  "boss-rush": { scene: "#120b06", floor: "#1b100a", wall: "#4a260d", wallGlow: "#ff9f43", rim: "#ff5c7a" },
+  "saved-designs": { scene: "#080b14", floor: "#101521", wall: "#26314b", wallGlow: "#ffe066", rim: "#7ef1ff" },
+  generated: { scene: "#070912", floor: "#0d1320", wall: "#142a44", wallGlow: "#7ef1ff", rim: "#ff4d8d" }
 };
 
 const COLORS: Record<BrickKind, string> = {
@@ -353,9 +370,12 @@ export class RicochetRushGame {
   private readonly paddleGeometry = new THREE.BoxGeometry(1, 1, 1, 3, 1, 1);
   private readonly ballGeometry = new THREE.SphereGeometry(1, 28, 18);
   private readonly fallbackPowerupGeometry = new THREE.BoxGeometry(38, 24, 10, 2, 1, 1);
+  private readonly floorMaterial = new THREE.MeshStandardMaterial({ color: "#07111d", metalness: 0.35, roughness: 0.58 });
+  private readonly wallMaterial = new THREE.MeshStandardMaterial({ color: "#18263a", emissive: "#4ecdc4", emissiveIntensity: 0.22, metalness: 0.74, roughness: 0.2 });
   private readonly brickMaterials = new Map<BrickKind, THREE.MeshStandardMaterial>();
   private readonly powerupMaterials = new Map<PowerupKind, THREE.SpriteMaterial>();
   private readonly fallbackPowerupMaterials = new Map<PowerupTone, THREE.MeshStandardMaterial>();
+  private readonly rimLight = new THREE.PointLight("#ff4d8d", 1.6, 900);
   private readonly paddleMesh = new THREE.Mesh(
     this.paddleGeometry,
     new THREE.MeshStandardMaterial({ color: "#e9ffff", emissive: "#35f3ff", emissiveIntensity: 0.45, metalness: 0.82, roughness: 0.18 })
@@ -477,6 +497,7 @@ export class RicochetRushGame {
       boardSource: this.boardContext.source,
       currentPackId: this.boardContext.packId,
       packBoardIndex: this.boardContext.boardIndex,
+      boardTheme: boardThemeFor(this.boardContext),
       packProgress: this.packProgress,
       designerIntent: this.designerIntent,
       designerFeedback: this.designerFeedback,
@@ -509,26 +530,21 @@ export class RicochetRushGame {
     key.castShadow = true;
     key.shadow.mapSize.width = 1024;
     key.shadow.mapSize.height = 1024;
-    const rim = new THREE.PointLight("#ff4d8d", 1.6, 900);
-    rim.position.set(460, 120, 320);
-    this.scene.add(ambient, key, rim);
+    this.rimLight.position.set(460, 120, 320);
+    this.scene.add(ambient, key, this.rimLight);
 
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(WIDTH - WALL * 2, HEIGHT - WALL * 2),
-      new THREE.MeshStandardMaterial({ color: "#07111d", metalness: 0.35, roughness: 0.58 })
-    );
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(WIDTH - WALL * 2, HEIGHT - WALL * 2), this.floorMaterial);
     floor.position.set(0, 0, -20);
     floor.receiveShadow = true;
     this.board.add(floor);
 
-    const wallMaterial = new THREE.MeshStandardMaterial({ color: "#18263a", emissive: "#4ecdc4", emissiveIntensity: 0.22, metalness: 0.74, roughness: 0.2 });
-    const topWall = new THREE.Mesh(new THREE.BoxGeometry(WIDTH, 18, 34), wallMaterial);
+    const topWall = new THREE.Mesh(new THREE.BoxGeometry(WIDTH, 18, 34), this.wallMaterial);
     topWall.position.copy(toWorld(WIDTH / 2, WALL / 2, 4));
-    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(18, HEIGHT - WALL, 34), wallMaterial);
+    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(18, HEIGHT - WALL, 34), this.wallMaterial);
     leftWall.position.copy(toWorld(WALL / 2, HEIGHT / 2, 4));
-    const rightWall = new THREE.Mesh(new THREE.BoxGeometry(18, HEIGHT - WALL, 34), wallMaterial);
+    const rightWall = new THREE.Mesh(new THREE.BoxGeometry(18, HEIGHT - WALL, 34), this.wallMaterial);
     rightWall.position.copy(toWorld(WIDTH - WALL / 2, HEIGHT / 2, 4));
-    const bottomWall = new THREE.Mesh(new THREE.BoxGeometry(WIDTH, 18, 18), wallMaterial);
+    const bottomWall = new THREE.Mesh(new THREE.BoxGeometry(WIDTH, 18, 18), this.wallMaterial);
     bottomWall.position.copy(toWorld(WIDTH / 2, HEIGHT - WALL / 2, -2));
     this.board.add(topWall, leftWall, rightWall, bottomWall);
 
@@ -905,6 +921,7 @@ export class RicochetRushGame {
     context: BoardContext = this.boardContext
   ) {
     this.boardContext = context;
+    this.applyBoardTheme();
     this.currentBoardVote = null;
     this.latestGenerationSummary = context.source === "generated" ? summary : undefined;
     this.levelBlueprint = level;
@@ -969,6 +986,7 @@ export class RicochetRushGame {
       save.boardSource === "pack" && save.packId
         ? { source: "pack", packId: save.packId, boardIndex: save.packBoardIndex }
         : { source: "generated", packId: null, boardIndex: 0 };
+    this.applyBoardTheme();
     this.level = save.level;
     this.clearedLevels = save.clearedLevels;
     this.score = save.score;
@@ -1693,6 +1711,17 @@ export class RicochetRushGame {
     shell?.classList.toggle("is-reduced-motion", this.settings.reducedMotion);
   }
 
+  private applyBoardTheme() {
+    const theme = boardThemeFor(this.boardContext);
+    this.scene.background = new THREE.Color(theme.scene);
+    this.floorMaterial.color.set(theme.floor);
+    this.wallMaterial.color.set(theme.wall);
+    this.wallMaterial.emissive.set(theme.wallGlow);
+    this.rimLight.color.set(theme.rim);
+    const stage = this.mount.closest<HTMLElement>(".stage");
+    stage?.style.setProperty("--stage-border-color", `${theme.wallGlow}66`);
+  }
+
   private setSidebarCollapsed(collapsed: boolean) {
     this.sidebarCollapsed = collapsed;
     this.applySidebarClass();
@@ -2079,6 +2108,11 @@ function pickupLabelFor(kind: PowerupKind): string {
 
 function powerupPressure(input: PowerupPoolInput): number {
   return clamp((input.level + input.clearedLevels - 1) / 10, 0, 1);
+}
+
+function boardThemeFor(context: BoardContext): BoardTheme {
+  if (context.source === "generated") return BOARD_THEMES.generated;
+  return BOARD_THEMES[context.packId] ?? BOARD_THEMES.starter;
 }
 
 function soundForBrickDestroy(kind: BrickKind): GameSoundKind {

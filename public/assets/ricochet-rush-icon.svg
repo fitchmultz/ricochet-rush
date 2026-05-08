@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Ricochet Rush icon</title>
+  <desc id="desc">A neon ball banking between brick rows above a paddle.</desc>
+  <rect width="128" height="128" rx="24" fill="#070b12"/>
+  <path d="M19 23h90v66H19z" fill="#0d1823" stroke="#2dd4bf" stroke-width="3"/>
+  <path d="M31 35h19v12H31zM55 35h19v12H55zM79 35h19v12H79z" fill="#4ecdc4"/>
+  <path d="M31 52h19v12H31zM55 52h19v12H55zM79 52h19v12H79z" fill="#ffe066"/>
+  <path d="M31 69h19v12H31zM55 69h19v12H55zM79 69h19v12H79z" fill="#ff5c7a"/>
+  <path d="M41 96h46" stroke="#7ef1ff" stroke-width="10" stroke-linecap="round"/>
+  <path d="M39 86 83 42" stroke="#edf4ef" stroke-width="4" stroke-linecap="round" stroke-dasharray="8 8"/>
+  <circle cx="83" cy="42" r="10" fill="#edf4ef"/>
+  <circle cx="83" cy="42" r="5" fill="#ffe066"/>
+  <path d="M23 23h82" stroke="#7ef1ff" stroke-width="3" stroke-linecap="round"/>
+</svg>

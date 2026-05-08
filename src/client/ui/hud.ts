@@ -111,6 +111,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       <aside class="panel play-console" aria-label="Play console">
         <div class="console-head">
           <button type="button" data-action="toggle-sidebar" class="sidebar-toggle" aria-label="Toggle play console">⟨</button>
+          <img class="brand-mark" src="/assets/ricochet-rush-icon.svg" alt="" width="38" height="38" aria-hidden="true" />
           <div class="brand-lockup">
             <div class="brand">Ricochet Rush</div>
             <div data-board-meta class="console-kicker">Starter pack</div>

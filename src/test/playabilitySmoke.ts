@@ -13,6 +13,7 @@ interface DebugSnapshot {
   level: number;
   bricks: number;
   balls: Array<{ x: number; y: number; vx: number; vy: number; stuck: boolean }>;
+  powerups: Array<{ x: number; y: number; kind: string; tone: "reward" | "hazard" | "volatile"; label: string }>;
   paddleX: number;
   paddleWidth: number;
   paddleVelocityX: number;
@@ -21,6 +22,13 @@ interface DebugSnapshot {
   boardSource: "pack" | "generated";
   currentPackId: string | null;
   packBoardIndex: number;
+  boardTheme: {
+    scene: string;
+    floor: string;
+    wall: string;
+    wallGlow: string;
+    rim: string;
+  };
   designerIntent: {
     style: string;
     difficulty: number;
@@ -62,6 +70,10 @@ try {
   await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
   await page.waitForSelector('[data-action="save"]');
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
+  await page.waitForFunction(() => {
+    const mark = document.querySelector<HTMLImageElement>(".brand-mark");
+    return mark && mark.complete && mark.naturalWidth > 0;
+  });
 
   const ready = await snapshot(page);
   assert(ready.phase === "ready", `Expected ready phase, got ${ready.phase}.`);
@@ -69,11 +81,16 @@ try {
   assert(ready.balls.length === 1 && ready.balls[0]?.stuck, "Expected one stuck launch ball.");
   assert(ready.boardSource === "pack", `Expected first board to come from a curated pack, got ${ready.boardSource}.`);
   assert(ready.currentPackId === "starter", `Expected Starter pack on boot, got ${ready.currentPackId}.`);
+  assert(ready.boardTheme.wallGlow === "#4ecdc4", `Expected Starter board theme, got ${ready.boardTheme.wallGlow}.`);
+  assert((await page.locator('link[rel="icon"][href="/assets/ricochet-rush-icon.svg"]').count()) === 1, "Expected branded favicon asset.");
   assert(await page.locator(".play-console").count() === 1, "Expected a compact play console.");
+  assert((await page.locator(".brand-mark").count()) === 1, "Expected the original brand mark in the Play Console.");
   assert(await page.locator(".play-console .designer-panel, .play-console .pack-browser, .play-console .settings, .play-console .agent-trace").count() === 0, "Expected heavy tools outside the play console.");
   assert(await page.locator("[data-tool-surface]").isHidden(), "Expected tool panels to be closed by default.");
   assert(await page.locator('[data-action="save-board"]').isDisabled(), "Expected Keep board to be disabled for authored boards.");
   assert(await hasFocusedOverlayAction(page), "Expected ready overlay to focus its primary action.");
+  assert(await canvasHasVisiblePixels(page), "Expected the WebGL canvas to render nonblank gameplay pixels.");
+  assert(!(await stageOverlapsPlayConsole(page)), "Expected desktop playfield and Play Console not to overlap.");
   await page.locator('[data-tool-panel="packs"]').click();
   assert(await page.locator("[data-tool-surface]").isVisible(), "Expected Board Select panel to open.");
   assert((await page.locator("[data-tool-title]").innerText()) === "Board Select", "Expected Board Select title.");
@@ -93,6 +110,7 @@ try {
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().boardSource === "generated");
   const designed = await snapshot(page);
   assert(designed.designerIntent.style === "bomb-chains", `Expected designer style to apply, got ${designed.designerIntent.style}.`);
+  assert(designed.boardTheme.wallGlow === "#7ef1ff", `Expected generated board theme, got ${designed.boardTheme.wallGlow}.`);
   assert(designed.generationSummary?.title === "Local fallback board", "Expected public generation summary for forced fallback.");
   assert(await page.locator("[data-generation-summary]").isVisible(), "Expected visible public generation summary.");
   assert(await page.locator("[data-compact-generation-summary]").isVisible(), "Expected compact generated-board summary in the play console.");
@@ -134,6 +152,13 @@ try {
   const pauseText = await page.locator(".overlay-card").innerText();
   assert(pauseText.includes("Paused"), "Expected Escape to pause into an overlay.");
   assert(await hasFocusedOverlayAction(page), "Expected pause overlay to focus its primary action.");
+  await injectPowerupClarityState(page);
+  const powerupClarity = await snapshot(page);
+  assert(powerupClarity.powerups.map((powerup) => powerup.tone).join(",") === "reward,hazard,volatile", "Expected reward, hazard, and volatile power-up tones.");
+  assert((await page.locator(".floating-text.is-powerupReward").count()) === 1, "Expected reward pickup label.");
+  assert((await page.locator(".floating-text.is-powerupHazard").count()) === 1, "Expected hazard pickup label.");
+  assert((await page.locator(".floating-text.is-powerupVolatile").count()) === 1, "Expected volatile pickup label.");
+  assert((await page.locator(".power-timer.is-reward").count()) >= 2, "Expected active power timers to use reward tone styling.");
 
   await page.locator('[data-action="save"]').click();
   const saved = await snapshot(page);
@@ -185,6 +210,7 @@ try {
   await page.setViewportSize({ width: 390, height: 760 });
   const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   assert(!mobileOverflow, "Expected narrow layout without horizontal overflow.");
+  assert(await canvasHasVisiblePixels(page), "Expected mobile viewport to keep rendering the game canvas.");
 } finally {
   await browser.close();
   await new Promise<void>((resolveClose, rejectClose) => {
@@ -209,6 +235,61 @@ async function hasLocalStorageKey(page: { evaluate: <T>(callback: (key: string) 
 
 async function hasFocusedOverlayAction(page: { evaluate: <T>(callback: () => T) => Promise<T> }): Promise<boolean> {
   return page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.hasAttribute("data-overlay-action"));
+}
+
+async function canvasHasVisiblePixels(page: { evaluate: <T>(callback: () => T) => Promise<T> }): Promise<boolean> {
+  return page.evaluate(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="ricochet-rush-canvas"]');
+    if (!canvas || canvas.width === 0 || canvas.height === 0) return false;
+    const probe = document.createElement("canvas");
+    probe.width = 64;
+    probe.height = 64;
+    const context = probe.getContext("2d", { willReadFrequently: true });
+    if (!context) return false;
+    context.drawImage(canvas, 0, 0, probe.width, probe.height);
+    const pixels = context.getImageData(0, 0, probe.width, probe.height).data;
+    let litPixels = 0;
+    for (let index = 0; index < pixels.length; index += 4) {
+      if (pixels[index] + pixels[index + 1] + pixels[index + 2] > 36) litPixels += 1;
+    }
+    return litPixels > 300;
+  });
+}
+
+async function stageOverlapsPlayConsole(page: { evaluate: <T>(callback: () => T) => Promise<T> }): Promise<boolean> {
+  return page.evaluate(() => {
+    const stage = document.querySelector<HTMLElement>(".stage")?.getBoundingClientRect();
+    const consolePanel = document.querySelector<HTMLElement>(".play-console")?.getBoundingClientRect();
+    if (!stage || !consolePanel) return true;
+    return stage.right > consolePanel.left && consolePanel.right > stage.left && stage.bottom > consolePanel.top && consolePanel.bottom > stage.top;
+  });
+}
+
+async function injectPowerupClarityState(page: { evaluate: <T>(callback: () => T) => Promise<T> }): Promise<void> {
+  await page.evaluate(() => {
+    const game = window.__ricochetRushGame as unknown as {
+      powerups: Array<{ x: number; y: number; vy: number; kind: string }>;
+      balls: Array<{ fireTimer: number }>;
+      laserTimer: number;
+      grabTimer: number;
+      addFloatingText: (x: number, y: number, text: string, kind: string) => void;
+      refreshHud: () => void;
+    };
+    game.powerups.splice(
+      0,
+      game.powerups.length,
+      { x: 320, y: 330, vy: 0, kind: "expandPaddle" },
+      { x: 480, y: 330, vy: 0, kind: "shrinkPaddle" },
+      { x: 640, y: 330, vy: 0, kind: "eightBall" }
+    );
+    game.laserTimer = 7;
+    game.grabTimer = 10;
+    if (game.balls[0]) game.balls[0].fireTimer = 8;
+    game.addFloatingText(320, 430, "+Expand paddle", "powerupReward");
+    game.addFloatingText(480, 430, "-Shrink paddle", "powerupHazard");
+    game.addFloatingText(640, 430, "! Eight ball", "powerupVolatile");
+    game.refreshHud();
+  });
 }
 
 function assert(condition: boolean, message: string): asserts condition {

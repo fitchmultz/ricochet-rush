@@ -1,8 +1,14 @@
 # Ricochet Rush
 
+<p>
+  <img src="public/assets/ricochet-rush-logo.svg" alt="Ricochet Rush logo" width="520" />
+</p>
+
 Ricochet Rush is a fast 3D browser brick-breaker with a sharp paddle, angled rebounds, lives, score, multiball, laser and grab paddles, bomb chains, boss bricks, and a power-up atlas.
 
 The game includes curated board packs for repeatable runs, plus a visible board designer for generated walls. The server asks Cursor SDK `composer-2` for new playable wall layouts from the selected design intent, then validates the response into a bounded brick grid. If Cursor auth is missing or the SDK fails, the local fallback generator immediately keeps the run playable.
+
+![Ricochet Rush desktop gameplay](docs/media/ricochet-rush-desktop.png)
 
 ## Run
 
@@ -33,7 +39,8 @@ Open `http://127.0.0.1:4177`.
 - Local fallback levels for offline or unauthenticated play
 - Local run checkpoints, restore, clear-save confirmation, and best score
 - Settings for ball speed, particles, reduced motion, and high contrast
-- Power-ups and penalties covering the classic brick-breaker loop
+- Reward, hazard, and volatile power-up categories with readable pickup labels
+- Pack/source board theme tints and original Ricochet Rush logo/icon assets
 - Responsive desktop and mobile layout
 
 ## Verification
@@ -42,6 +49,12 @@ Open `http://127.0.0.1:4177`.
 npm run ci
 ```
 
-The CI gate builds the app, runs unit tests for level/save/pack/designer contracts, and runs a Playwright smoke against the production preview. The smoke verifies curated-pack boot, designer intent persistence, fallback generation summaries, saved generated boards, feedback capture, paddle movement, save/clear behavior, settings persistence, and layout overflow.
+The CI gate builds the app, runs unit tests for level/save/pack/designer/power-up contracts, and runs a Playwright smoke against the production preview. The smoke verifies curated-pack boot, designer intent persistence, fallback generation summaries, saved generated boards, feedback capture, board selection, paddle movement, save/clear behavior, settings persistence, canvas rendering, and layout overflow.
 
 Set `CURSOR_API_KEY` to enable live Cursor SDK level generation. Set `RICOCHET_RUSH_FORCE_FALLBACK=1` when deterministic fallback generation is desired.
+
+## Demo And QA
+
+- [Playtest checklist](docs/PLAYTEST_CHECKLIST.md)
+- [Demo script](docs/DEMO_SCRIPT.md)
+- [Known limitations](docs/KNOWN_LIMITATIONS.md)

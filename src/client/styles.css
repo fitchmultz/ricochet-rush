@@ -139,6 +139,10 @@ body {
   display: none;
 }
 
+.shell.is-sidebar-collapsed .brand-mark {
+  display: none;
+}
+
 .shell.is-high-contrast .stage,
 .shell.is-high-contrast .panel,
 .shell.is-high-contrast .tool-panel,
@@ -477,9 +481,16 @@ body {
 
 .console-head {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto auto minmax(0, 1fr);
   gap: 10px;
-  align-items: start;
+  align-items: center;
+}
+
+.brand-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  box-shadow: 0 0 0 1px rgba(126, 241, 255, 0.28), 0 10px 24px rgba(0, 0, 0, 0.28);
 }
 
 .brand-lockup {

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 180" role="img" aria-labelledby="title desc">
+  <title id="title">Ricochet Rush</title>
+  <desc id="desc">Ricochet Rush wordmark with a neon brick-breaker icon.</desc>
+  <rect width="720" height="180" rx="22" fill="#070b12"/>
+  <g transform="translate(24 26)">
+    <rect width="128" height="128" rx="24" fill="#0d1823" stroke="#2dd4bf" stroke-width="3"/>
+    <path d="M22 24h84v60H22z" fill="#111c28" stroke="#2dd4bf" stroke-width="3"/>
+    <path d="M32 36h18v11H32zM55 36h18v11H55zM78 36h18v11H78z" fill="#4ecdc4"/>
+    <path d="M32 52h18v11H32zM55 52h18v11H55zM78 52h18v11H78z" fill="#ffe066"/>
+    <path d="M32 68h18v11H32zM55 68h18v11H55zM78 68h18v11H78z" fill="#ff5c7a"/>
+    <path d="M41 101h46" stroke="#7ef1ff" stroke-width="10" stroke-linecap="round"/>
+    <path d="M39 90 83 46" stroke="#edf4ef" stroke-width="4" stroke-linecap="round" stroke-dasharray="8 8"/>
+    <circle cx="83" cy="46" r="10" fill="#edf4ef"/>
+    <circle cx="83" cy="46" r="5" fill="#ffe066"/>
+  </g>
+  <g transform="translate(180 48)">
+    <text x="0" y="42" fill="#edf4ef" font-family="Inter, Arial, sans-serif" font-size="42" font-weight="900" letter-spacing="1.5">RICOCHET</text>
+    <text x="0" y="96" fill="#ffe066" font-family="Inter, Arial, sans-serif" font-size="52" font-weight="900" letter-spacing="2">RUSH</text>
+    <path d="M0 112h360" stroke="#2dd4bf" stroke-width="4" stroke-linecap="round"/>
+    <path d="M376 112h72" stroke="#ff5c7a" stroke-width="4" stroke-linecap="round"/>
+  </g>
+</svg>

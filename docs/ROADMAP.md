@@ -261,7 +261,7 @@ Acceptance criteria:
 
 Goal: turn a big power-up list into legible strategy.
 
-Status: implemented; pending user playtest as of May 8, 2026.
+Status: complete as of May 8, 2026.
 
 Deliverables:
 
@@ -284,6 +284,7 @@ Verified:
 - Unit coverage validates early/late prize and penalty pools, high-combo reward bias, and tone classification.
 - Build and smoke coverage remain part of the project `npm run ci` gate.
 - Screenshot review passed for reward, hazard, and volatile falling items plus pickup labels and active timer chips.
+- Playwright smoke coverage verifies reward, hazard, and volatile power-up tone state, pickup labels, and active timer tone styling.
 
 Acceptance criteria:
 
@@ -294,13 +295,29 @@ Acceptance criteria:
 
 Goal: make the game look like its own thing.
 
+Status: complete as of May 8, 2026.
+
 Deliverables:
 
-- Original logo, title treatment, and icon.
-- Board themes that are not copies of any source game.
-- Improved brick materials and hit states.
-- Better ball trails, laser effects, level clear effects, and boss feedback.
-- Screenshots or short capture clips for README.
+- Original logo, title treatment, and icon: complete.
+- Board themes that are not copies of any source game: complete.
+- Improved brick materials and hit states: complete.
+- Better ball trails, laser effects, level clear effects, and boss feedback: complete.
+- Screenshots or short capture clips for README: complete.
+
+Implementation notes:
+
+- Added original Ricochet Rush SVG logo and icon assets under `public/assets/`.
+- Added favicon, theme color, and public meta description.
+- Added the icon mark to the Play Console so the first viewport carries the product identity.
+- Added pack/source theme tinting for the scene background, floor, walls, rim light, and stage border.
+- Added a README desktop gameplay screenshot generated from the production preview.
+
+Verified:
+
+- `npm run ci` passes.
+- Playwright smoke coverage verifies favicon, loaded brand mark, board theme changes, nonblank WebGL canvas pixels, and no desktop/mobile horizontal overflow.
+- Screenshot review passed for the README desktop gameplay image.
 
 Acceptance criteria:
 
@@ -311,12 +328,27 @@ Acceptance criteria:
 
 Goal: make it robust enough to share confidently.
 
+Status: complete as of May 8, 2026.
+
 Deliverables:
 
-- Browser playtest checklist for desktop and mobile widths.
-- Visual smoke test for canvas rendering and no layout overlap.
-- Demo script that shows gameplay first, then the Cursor SDK value.
-- Public issue list with known limitations and next bets.
+- Browser playtest checklist for desktop and mobile widths: complete.
+- Visual smoke test for canvas rendering and no layout overlap: complete.
+- Demo script that shows gameplay first, then the Cursor SDK value: complete.
+- Public issue list with known limitations and next bets: complete.
+
+Implementation notes:
+
+- Added `docs/PLAYTEST_CHECKLIST.md` with desktop, mobile, visual, and Cursor SDK checks.
+- Added `docs/DEMO_SCRIPT.md` with a gameplay-first recording flow and Cursor SDK proof points.
+- Added `docs/KNOWN_LIMITATIONS.md` with public-safe limits and next bets.
+- Linked demo and QA docs from the README.
+- Strengthened Playwright smoke coverage to include brand asset loading, canvas pixel rendering, desktop panel overlap, mobile rendering, pack-to-generated board theme changes, and power-up tone/label/timer UI.
+
+Verified:
+
+- `npm run ci` passes.
+- README, roadmap, checklist, demo script, known limitations, and generated screenshot are aligned.
 
 Acceptance criteria:
 
@@ -326,4 +358,4 @@ Acceptance criteria:
 
 ## Begin Here
 
-Start with P3.5. The gameplay structure and visible board designer are in place, but the sidebar needs a deliberate information architecture pass before adding more systems.
+The planned P1-P7 roadmap is implemented. Begin future work with playtest feedback, then promote any confirmed issues or next bets into a new priority section before changing scope.
