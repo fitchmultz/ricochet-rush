@@ -103,8 +103,19 @@ try {
   await page.locator('[data-action="save-board"]').click();
   assert(await hasLocalStorageKey(page, "ricochet-rush-saved-boards"), "Expected kept generated board to persist in Saved Designs.");
   assert(!(await page.locator('[data-pack-id="saved-designs"]').isDisabled()), "Expected Saved Designs to unlock after keeping a board.");
-  await page.locator('[data-action="close-tool-panel"]').click();
-  assert(await page.locator("[data-tool-surface]").isHidden(), "Expected tool panel close action to return to play.");
+  await page.locator('[data-tool-panel="packs"]').click();
+  assert((await page.locator("[data-tool-title]").innerText()) === "Board Select", "Expected Board Select title after switching tools.");
+  await page.locator('[data-pack-id="starter"]').click();
+  await page.waitForFunction(() => {
+    const snapshot = window.__ricochetRushGame?.debugSnapshot();
+    return snapshot?.phase === "ready" && snapshot.boardSource === "pack" && snapshot.currentPackId === "starter";
+  });
+  const selectedStarter = await snapshot(page);
+  assert(selectedStarter.packBoardIndex === 0, `Expected Starter to restart at board 1, got board index ${selectedStarter.packBoardIndex}.`);
+  assert(await page.locator("[data-tool-surface]").isHidden(), "Expected Board Select to close after choosing a pack.");
+  assert((await page.locator("[data-level-name]").innerText()) === "Starter Gates", "Expected Starter Gates after selecting Starter.");
+  assert(await page.locator("[data-compact-generation-summary]").isHidden(), "Expected generated-board summary to clear after selecting Starter.");
+  assert(await page.locator('[data-action="save-board"]').isDisabled(), "Expected authored boards not to be keepable.");
 
   await page.locator("[data-overlay-action]").click();
   await page.keyboard.down("ArrowRight");

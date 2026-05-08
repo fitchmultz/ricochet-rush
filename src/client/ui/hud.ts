@@ -318,6 +318,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   let previousCombo = 1;
   let activeToolPanel: HudToolPanel | null = null;
   let previousToolFocus: HTMLElement | null = null;
+  let previousPackListMarkup = "";
 
   const emitSettings = () => {
     actions?.updateSettings({
@@ -418,6 +419,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   packList.addEventListener("click", (event) => {
     const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("[data-pack-id]") : null;
     if (!button || button.disabled) return;
+    setToolPanel(null);
     actions?.selectPack(button.dataset.packId ?? "");
   });
   designerStyle.addEventListener("change", emitDesigner);
@@ -490,7 +492,11 @@ export function createHud(root: HTMLDivElement | null): HudApi {
         activePowersEl.innerHTML = "";
       }
       liveAnnouncement.textContent = state.announcement;
-      packList.innerHTML = state.packs.map(renderPack).join("");
+      const packListMarkup = state.packs.map((pack) => renderPack(pack, state.pending)).join("");
+      if (packListMarkup !== previousPackListMarkup) {
+        packList.innerHTML = packListMarkup;
+        previousPackListMarkup = packListMarkup;
+      }
       events.innerHTML = state.events.map((event) => `<li>${escapeHtml(event)}</li>`).join("");
       renderTrace(state.agentTrace);
     }
@@ -593,11 +599,11 @@ function renderSummary(element: HTMLElement, summary?: GenerationSummary) {
   `;
 }
 
-function renderPack(pack: HudPackItem): string {
+function renderPack(pack: HudPackItem, pending: boolean): string {
   const classes = ["pack-card"];
   if (pack.active) classes.push("is-active");
   if (pack.empty) classes.push("is-empty");
-  const disabled = !pack.unlocked || pack.empty;
+  const disabled = pending || !pack.unlocked || pack.empty;
   const previewRows = pack.previewRows.length > 0 ? pack.previewRows : ["..............", "..............", ".............."];
   const preview = previewRows
     .slice(0, 9)
