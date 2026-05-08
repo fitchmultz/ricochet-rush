@@ -13,6 +13,7 @@ import {
   type LevelResponse,
   fallbackLevel,
   normalizeDesignerIntent,
+  designerTargets,
   normalizeLevel
 } from "../../shared/evolution";
 import {
@@ -1476,10 +1477,11 @@ export class RicochetRushGame {
 
   private localGenerationSummary(level: LevelBlueprint, reason: string): GenerationSummary {
     const brickCount = level.rows.flat().filter(Boolean).length;
+    const targets = designerTargets(this.designerIntent, this.level);
     return {
       source: "fallback",
       title: "Local fallback board",
-      detail: `Local fallback built ${level.name} from the current designer intent. Validation kept ${brickCount} playable bricks.`,
+      detail: `Local fallback built ${level.name} from the current designer intent. Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; Validation kept ${brickCount} playable bricks.`,
       chips: [
         this.designerIntent.style,
         `difficulty ${this.designerIntent.difficulty}/5`,

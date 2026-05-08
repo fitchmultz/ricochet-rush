@@ -103,6 +103,15 @@ export interface ComposerAgentTrace {
   parsedOutput?: unknown;
 }
 
+export interface DesignerTargets {
+  brickTarget: number;
+  specialTarget: number;
+  hardTarget: number;
+  speedTarget: number;
+  difficultyLabel: string;
+  styleGoal: string;
+}
+
 const BRICK_KINDS = new Set<BrickKind>([
   "basic",
   "hard",
@@ -136,6 +145,16 @@ const STYLE_LABELS: Record<DesignerStyle, string> = {
   "boss-core": "Boss core"
 };
 
+const STYLE_GOALS: Record<DesignerStyle, string> = {
+  balanced: "A readable mix of lanes, shields, rewards, and light risk.",
+  "open-lanes": "Two or three clean bank lanes with rewards around the openings.",
+  "bomb-chains": "Linked bomb pockets that can open routes without making the board unfair.",
+  precision: "Narrow aim windows, deliberate shields, and rewards for controlled angles.",
+  "boss-core": "A reachable center core with boss bricks, shields, and power routes."
+};
+
+const DIFFICULTY_LABELS = ["soft", "steady", "sharp", "hot", "wild"] as const;
+
 export function normalizeLevel(input: unknown, request: LevelRequest): LevelBlueprint {
   const raw = isRecord(input) ? input : {};
   if (!Array.isArray(raw.rows)) return fallbackLevel(request);
@@ -167,27 +186,49 @@ export function designerStyleLabel(style: DesignerStyle): string {
   return STYLE_LABELS[style];
 }
 
+export function designerStyleGoal(style: DesignerStyle): string {
+  return STYLE_GOALS[style];
+}
+
+export function designerTargets(intentInput: unknown, level = 1): DesignerTargets {
+  const intent = normalizeDesignerIntent(intentInput);
+  const brickTarget = clamp(Math.round(BRICK_COLUMNS * BRICK_ROWS * intent.density), MIN_BRICKS, MAX_BRICKS);
+  const specialRatio = 0.06 + intent.specialBias * 0.32;
+  const difficultyRatio = 0.05 + intent.difficulty * 0.035;
+  return {
+    brickTarget,
+    specialTarget: clamp(Math.round(brickTarget * specialRatio), intent.specialBias > 0 ? 2 : 0, Math.max(2, Math.round(brickTarget * 0.42))),
+    hardTarget: clamp(Math.round(brickTarget * difficultyRatio), 1, Math.max(2, Math.round(brickTarget * 0.28))),
+    speedTarget: clamp(0.9 + level * 0.035 + intent.difficulty * 0.06, 0.95, 1.75),
+    difficultyLabel: DIFFICULTY_LABELS[intent.difficulty - 1] ?? "sharp",
+    styleGoal: designerStyleGoal(intent.style)
+  };
+}
+
 export function describeDesignerIntent(intentInput: unknown): string {
   const intent = normalizeDesignerIntent(intentInput);
-  const difficulty = ["soft", "steady", "sharp", "hot", "wild"][intent.difficulty - 1] ?? "sharp";
+  const targets = designerTargets(intent);
+  const difficulty = targets.difficultyLabel;
   return `${designerStyleLabel(intent.style)} / ${difficulty} / ${Math.round(intent.density * 100)}% density / ${Math.round(intent.specialBias * 100)}% specials`;
 }
 
 export function fallbackLevel(request: LevelRequest): LevelBlueprint {
   const designer = normalizeDesignerIntent(request.designer);
+  const targets = designerTargets(designer, request.level);
   const rows = buildFallbackRows(request, designer);
 
   return {
     name: `${designerStyleLabel(designer.style)} Sector ${request.level}`,
     briefing: `Local designer built a ${designerStyleLabel(designer.style).toLowerCase()} wall from the "${designer.seed}" seed.`,
     paddleHint: hintForDesignerStyle(designer.style),
-    speed: clamp(0.9 + request.level * 0.035 + designer.difficulty * 0.06, 0.95, 1.75),
+    speed: targets.speedTarget,
     rows: repairBrickCount(rows, request.level)
   };
 }
 
 function buildFallbackRows(request: LevelRequest, designer: BoardDesignerIntent): BrickCell[][] {
   const rows = Array.from({ length: BRICK_ROWS }, () => Array.from({ length: BRICK_COLUMNS }, () => null as BrickCell));
+  const targets = designerTargets(designer, request.level);
   const seed = hashText(`${request.level}:${request.score}:${designer.style}:${designer.seed}`);
   const candidates: { x: number; y: number; score: number }[] = [];
   for (let y = 0; y < BRICK_ROWS - 2; y += 1) {
@@ -200,9 +241,30 @@ function buildFallbackRows(request: LevelRequest, designer: BoardDesignerIntent)
   }
   candidates.sort((a, b) => a.score - b.score);
 
-  const targetBricks = clamp(Math.round(BRICK_COLUMNS * BRICK_ROWS * designer.density), MIN_BRICKS, MAX_BRICKS);
-  for (const cell of candidates.slice(0, targetBricks)) {
-    rows[cell.y][cell.x] = fallbackBrickForCell(request, designer, seed, cell.x, cell.y);
+  const selected = candidates.slice(0, targets.brickTarget);
+  const specialCells = new Set(
+    [...selected]
+      .sort((a, b) => hashNumber(seed + 1_037, a.x, a.y) - hashNumber(seed + 1_037, b.x, b.y))
+      .slice(0, targets.specialTarget)
+      .map(cellKey)
+  );
+  const hardCells = new Set(
+    [...selected]
+      .filter((cell) => !specialCells.has(cellKey(cell)))
+      .sort((a, b) => hashNumber(seed + 2_071, a.x, a.y) - hashNumber(seed + 2_071, b.x, b.y))
+      .slice(0, targets.hardTarget)
+      .map(cellKey)
+  );
+
+  for (const cell of selected) {
+    const key = cellKey(cell);
+    if (specialCells.has(key)) {
+      rows[cell.y][cell.x] = { kind: pickSpecialKind(designer.style, seed, cell.x, cell.y), hp: 1 };
+    } else if (hardCells.has(key)) {
+      rows[cell.y][cell.x] = { kind: "hard", hp: clamp(1 + Math.ceil(designer.difficulty / 2), 2, 4) };
+    } else {
+      rows[cell.y][cell.x] = { kind: "basic", hp: 1 };
+    }
   }
 
   if (designer.style === "boss-core" || (request.level % 5 === 0 && designer.difficulty >= 4)) {
@@ -218,14 +280,8 @@ function buildFallbackRows(request: LevelRequest, designer: BoardDesignerIntent)
   return rows;
 }
 
-function fallbackBrickForCell(request: LevelRequest, designer: BoardDesignerIntent, seed: number, x: number, y: number): BrickSpec {
-  const roll = (hashNumber(seed + request.level * 19, x, y) % 10_000) / 10_000;
-  const edge = x === 0 || x === BRICK_COLUMNS - 1;
-  const hardChance = 0.07 + designer.difficulty * 0.035 + (edge ? 0.12 : 0);
-  const specialChance = 0.06 + designer.specialBias * 0.32;
-  if (roll < specialChance) return { kind: pickSpecialKind(designer.style, seed, x, y), hp: 1 };
-  if (roll < specialChance + hardChance) return { kind: "hard", hp: clamp(1 + Math.ceil(designer.difficulty / 2), 2, 4) };
-  return { kind: "basic", hp: 1 };
+function cellKey(cell: { x: number; y: number }): string {
+  return `${cell.x}:${cell.y}`;
 }
 
 function pickSpecialKind(style: DesignerStyle, seed: number, x: number, y: number): BrickKind {

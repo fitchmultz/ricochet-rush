@@ -9,6 +9,8 @@ import {
   type LevelRequest,
   type LevelResponse,
   describeDesignerIntent,
+  designerStyleGoal,
+  designerTargets,
   fallbackLevel,
   normalizeDesignerIntent,
   normalizeLevel,
@@ -81,6 +83,7 @@ export async function requestEvolution(request: LevelRequest): Promise<LevelResp
 
 export function buildPrompt(request: LevelRequest): string {
   const designer = normalizeDesignerIntent(request.designer);
+  const targets = designerTargets(designer, request.level);
   const feedbackLines =
     designer.feedback.length > 0
       ? designer.feedback.map((entry) => `- ${entry.vote === "up" ? "Liked" : "Rejected"} ${entry.levelName} (${designerStyleLabel(entry.style)}, seed "${entry.seed}")`).join("\n")
@@ -105,9 +108,14 @@ Game rules:
 
 Visible design intent:
 - Style: ${designerStyleLabel(designer.style)} (${designer.style}).
+- Style goal: ${designerStyleGoal(designer.style)}
 - Difficulty: ${designer.difficulty}/5.
-- Target density: ${Math.round(designer.density * 100)}% of the board, still obeying the mandatory brick count.
-- Special-brick bias: ${Math.round(designer.specialBias * 100)}%.
+- Difficulty target: ${targets.difficultyLabel}; use this for speed, hard-brick pressure, risk, and recovery-room generosity.
+- Target density: ${Math.round(designer.density * 100)}% of the board.
+- Target brick count: about ${targets.brickTarget} bricks, still obeying the mandatory ${BRICK_COLUMNS}x${BRICK_ROWS} grid and 34-86 brick limits.
+- Special-brick mix: about ${targets.specialTarget} special bricks. Specials are bomb, prize, penalty, laser, grab, fire, thru, split, wide, slow, or boss; hard is not a special.
+- Hard-brick pressure: about ${targets.hardTarget} hard bricks unless the style needs boss bricks instead.
+- Speed target: about ${targets.speedTarget.toFixed(2)}.
 - Seed phrase: "${designer.seed}". Treat this as an arcade design motif, not random text to print.
 - Intent summary: ${describeDesignerIntent(designer)}.
 
@@ -137,12 +145,13 @@ export function buildGenerationSummary(
   trace?: ComposerAgentTrace
 ): GenerationSummary {
   const designer = normalizeDesignerIntent(request.designer);
+  const targets = designerTargets(designer, request.level);
   const brickCount = level.rows.flat().filter(Boolean).length;
   const sourceLabel = source === "cursor-sdk" ? "Cursor SDK" : "Local fallback";
   return {
     source,
     title: `${sourceLabel} board`,
-    detail: `${sourceLabel} built ${level.name} from ${describeDesignerIntent(designer)}. Validation kept ${brickCount} playable bricks.`,
+    detail: `${sourceLabel} built ${level.name} from ${describeDesignerIntent(designer)}. Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; Validation kept ${brickCount} playable bricks.`,
     chips: [
       designerStyleLabel(designer.style),
       `difficulty ${designer.difficulty}/5`,

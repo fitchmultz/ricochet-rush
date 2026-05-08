@@ -729,6 +729,24 @@ body {
   accent-color: #7ef1ff;
 }
 
+.designer-readout {
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid rgba(255, 224, 102, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 224, 102, 0.055);
+  color: #c8d4d1;
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.designer-readout strong {
+  color: #ffe066;
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
 .designer-feedback {
   display: grid;
   grid-template-columns: 1fr 1fr auto;

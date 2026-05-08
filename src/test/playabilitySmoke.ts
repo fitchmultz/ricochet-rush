@@ -82,6 +82,7 @@ try {
   await page.locator('[data-tool-panel="designer"]').click();
   assert((await page.locator("[data-tool-title]").innerText()) === "Board Designer", "Expected Board Designer title.");
   assert(await page.locator(".designer-panel").isVisible(), "Expected Board Designer controls in a focused panel.");
+  assert((await page.locator("[data-designer-targets]").innerText()).includes("66 bricks"), "Expected visible designer target counts.");
   const canvasLabel = await page.locator('[data-testid="ricochet-rush-canvas"]').getAttribute("aria-label");
   assert(canvasLabel?.includes("Level 1") === true, "Expected canvas to expose current game state.");
 

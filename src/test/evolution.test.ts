@@ -7,8 +7,10 @@ import {
   MAX_BRICKS,
   MIN_BRICKS,
   fallbackLevel,
+  designerTargets,
   normalizeDesignerIntent,
   normalizeLevel,
+  type LevelBlueprint,
   type LevelRequest
 } from "../shared/evolution";
 import {
@@ -31,6 +33,20 @@ const request: LevelRequest = {
   clearedLevels: 3,
   recentEvents: ["Wall cleared."]
 };
+
+const SPECIAL_TEST_BRICKS = new Set(["bomb", "prize", "penalty", "laser", "grab", "fire", "thru", "split", "wide", "slow", "boss"]);
+
+function countBricks(level: LevelBlueprint): number {
+  return level.rows.flat().filter(Boolean).length;
+}
+
+function countSpecials(level: LevelBlueprint): number {
+  return level.rows.flat().filter((brick) => brick && SPECIAL_TEST_BRICKS.has(brick.kind)).length;
+}
+
+function countHardBricks(level: LevelBlueprint): number {
+  return level.rows.flat().filter((brick) => brick?.kind === "hard").length;
+}
 
 describe("Cursor SDK level generation contract", () => {
   it("pins composer-2 fast mode for level requests", () => {
@@ -65,9 +81,13 @@ describe("Cursor SDK level generation contract", () => {
     });
 
     expect(prompt).toContain("Style: Bomb chains");
+    expect(prompt).toContain("Style goal: Linked bomb pockets");
     expect(prompt).toContain("Difficulty: 5/5");
+    expect(prompt).toContain("Difficulty target: wild");
     expect(prompt).toContain("Target density: 70%");
-    expect(prompt).toContain("Special-brick bias: 80%");
+    expect(prompt).toContain("Target brick count: about 86 bricks");
+    expect(prompt).toContain("Special-brick mix: about 27 special bricks");
+    expect(prompt).toContain("Hard-brick pressure: about 19 hard bricks");
     expect(prompt).toContain('Seed phrase: "left rail fireworks"');
     expect(prompt).toContain("Rejected Flat Wall");
   });
@@ -151,6 +171,38 @@ describe("Cursor SDK level generation contract", () => {
     expect(bricks.length).toBeGreaterThanOrEqual(MIN_BRICKS);
     expect(bricks.length).toBeLessThanOrEqual(MAX_BRICKS);
     expect(level.rows.flat().some((brick) => brick?.kind === "boss")).toBe(true);
+  });
+
+  it("makes fallback density and specials track designer targets", () => {
+    const sparse = fallbackLevel({
+      ...request,
+      designer: {
+        style: "precision",
+        difficulty: 2,
+        density: 0.34,
+        specialBias: 0,
+        seed: "needle",
+        feedback: []
+      }
+    });
+    const dense = fallbackLevel({
+      ...request,
+      designer: {
+        style: "bomb-chains",
+        difficulty: 5,
+        density: 0.82,
+        specialBias: 1,
+        seed: "fireworks",
+        feedback: []
+      }
+    });
+    const sparseTargets = designerTargets({ style: "precision", difficulty: 2, density: 0.34, specialBias: 0, seed: "needle", feedback: [] }, request.level);
+    const denseTargets = designerTargets({ style: "bomb-chains", difficulty: 5, density: 0.82, specialBias: 1, seed: "fireworks", feedback: [] }, request.level);
+
+    expect(countBricks(sparse)).toBe(sparseTargets.brickTarget);
+    expect(countBricks(dense)).toBe(denseTargets.brickTarget);
+    expect(countSpecials(dense)).toBeGreaterThan(countSpecials(sparse) + 20);
+    expect(countHardBricks(dense)).toBeGreaterThan(countHardBricks(sparse));
   });
 
   it("can force local fallback for deterministic playability smoke tests", async () => {
@@ -271,6 +323,7 @@ describe("Cursor SDK level generation contract", () => {
     expect(summary.title).toBe("Local fallback board");
     expect(summary.detail).toContain(level.name);
     expect(summary.detail).toContain("Validation kept");
+    expect(summary.detail).toContain("Target was");
     expect(summary.warning).toBe("Cursor SDK authentication is unavailable.");
     expect(summary.detail).not.toContain("node_modules");
   });

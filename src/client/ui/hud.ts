@@ -4,6 +4,8 @@ import {
   type ComposerAgentTrace,
   type DesignerVote,
   type GenerationSummary,
+  designerStyleGoal,
+  designerTargets,
   designerStyleLabel
 } from "../../shared/evolution";
 
@@ -164,13 +166,17 @@ export function createHud(root: HTMLDivElement | null): HudApi {
                 <input data-designer="density" type="range" min="0.34" max="0.82" step="0.04" value="0.52" />
               </label>
               <label>
-                <span>Specials <strong data-designer-special-value>45%</strong></span>
+                <span>Special mix <strong data-designer-special-value>45%</strong></span>
                 <input data-designer="specials" type="range" min="0" max="1" step="0.05" value="0.45" />
               </label>
               <label>
                 <span>Seed</span>
                 <input data-designer="seed" type="text" maxlength="36" value="fresh-angle" />
               </label>
+            </div>
+            <div class="designer-readout" aria-label="Designer target">
+              <strong data-designer-style-goal>Readable lanes with controlled risk.</strong>
+              <span data-designer-targets>Targeting 66 bricks, about 13 specials, sharp tempo.</span>
             </div>
             <div class="designer-feedback" aria-label="Generated board feedback">
               <button type="button" data-action="rate-up">Good board</button>
@@ -281,6 +287,8 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   const designerDifficultyValue = query(root, "[data-designer-difficulty-value]");
   const designerDensityValue = query(root, "[data-designer-density-value]");
   const designerSpecialValue = query(root, "[data-designer-special-value]");
+  const designerStyleGoalEl = query(root, "[data-designer-style-goal]");
+  const designerTargetsEl = query(root, "[data-designer-targets]");
   const designerFeedback = query(root, "[data-designer-feedback]");
   const generationSummary = query(root, "[data-generation-summary]");
   const compactGenerationSummary = query(root, "[data-compact-generation-summary]");
@@ -459,6 +467,8 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       designerDifficultyValue.textContent = String(state.designer.intent.difficulty);
       designerDensityValue.textContent = `${Math.round(state.designer.intent.density * 100)}%`;
       designerSpecialValue.textContent = `${Math.round(state.designer.intent.specialBias * 100)}%`;
+      designerStyleGoalEl.textContent = designerStyleGoal(state.designer.intent.style);
+      designerTargetsEl.textContent = renderDesignerTargets(state.designer.intent);
       designerFeedback.textContent = `${state.designer.feedbackCount} note${state.designer.feedbackCount === 1 ? "" : "s"}`;
       renderSummary(generationSummary, state.designer.generationSummary);
       renderCompactSummary(compactGenerationSummary, state);
@@ -535,6 +545,11 @@ function renderBoardMeta(state: HudState): string {
   const activePack = state.packs.find((pack) => pack.active);
   if (!activePack) return "Curated board";
   return `${activePack.name} - ${activePack.progressLabel}`;
+}
+
+function renderDesignerTargets(intent: BoardDesignerIntent): string {
+  const targets = designerTargets(intent);
+  return `${targets.brickTarget} bricks, about ${targets.specialTarget} specials, ${targets.hardTarget} hard, ${targets.difficultyLabel} tempo`;
 }
 
 function renderCompactSummary(element: HTMLElement, state: HudState) {

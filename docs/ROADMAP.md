@@ -154,8 +154,10 @@ Implementation notes:
 
 - Added a shared board designer intent contract used by the HUD, local fallback generator, Cursor prompt, tests, and smoke path.
 - Added visible controls for style, difficulty, density, special-brick bias, and seed phrase.
+- Added a Designer target readout so style, density, special mix, hard-brick pressure, and tempo translate into concrete board targets.
 - Added generated-board feedback with Good board and Needs work actions. Feedback and recent events are included in later generation requests.
 - Updated local fallback generation so designer intent changes the generated wall even without `CURSOR_API_KEY`.
+- Updated the Cursor prompt to send exact brick, special-brick, hard-brick, speed, and style-goal targets instead of only vague percentages.
 - Added public generation summaries with source, intent chips, validation brick count, and warning text. Raw request, prompt, parsed response, output, and errors remain behind Composer trace details.
 - Existing Keep board behavior now acts as the save-to-pack path for generated designs.
 
