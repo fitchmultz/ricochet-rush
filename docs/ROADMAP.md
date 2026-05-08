@@ -52,9 +52,9 @@ Verified:
 
 ### P1 - Game Feel And Physics
 
-Goal: make the core loop feel sharp before adding more surface area. This is the next active priority.
+Goal: make the core loop feel sharp before adding more surface area.
 
-Status: implementation complete. User playtest is the next checkpoint before P2.
+Status: complete. User playtest accepted on May 8, 2026.
 
 Deliverables:
 
@@ -94,7 +94,7 @@ Implementation notes:
 
 Playtest note:
 
-- Pending user playtest. Do not move to P2 until the user confirms whether aim control, edge shots, and loop prevention feel good in real play.
+- User reported P1 feels good enough to move on. Treat future physics changes as tuning, not a blocker for P2.
 
 Acceptance criteria:
 
@@ -104,7 +104,7 @@ Acceptance criteria:
 
 ### P2 - Curated Board Packs
 
-Goal: add the replayable structure that made classic brick-breakers sticky.
+Goal: add the replayable structure that made classic brick-breakers sticky. This is the next active priority.
 
 Deliverables:
 
@@ -205,4 +205,4 @@ Acceptance criteria:
 
 ## Begin Here
 
-Start with the P1 start slice. Do not build board packs, audio, visual polish, or demo collateral until the paddle/ball loop feels good enough that a player can aim intentionally.
+Start with P2. Build a small curated-board foundation before adding broader audio, visual polish, or demo collateral.
