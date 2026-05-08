@@ -36,7 +36,8 @@ export interface HudState {
     particles: boolean;
     reducedMotion: boolean;
     highContrast: boolean;
-    sound: boolean;
+    sfx: boolean;
+    music: boolean;
   };
   activePowers: { label: string; seconds: number; maxSeconds: number }[];
   packs: HudPackItem[];
@@ -202,8 +203,12 @@ export function createHud(root: HTMLDivElement | null): HudApi {
                 <input data-setting="high-contrast" type="checkbox" />
               </label>
               <label class="toggle">
-                <span>Sound</span>
-                <input data-setting="sound" type="checkbox" />
+                <span>SFX</span>
+                <input data-setting="sfx" type="checkbox" />
+              </label>
+              <label class="toggle">
+                <span>Music</span>
+                <input data-setting="music" type="checkbox" />
               </label>
             </form>
             <div class="legend">
@@ -283,7 +288,8 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   const particles = queryInput(root, '[data-setting="particles"]');
   const reducedMotion = queryInput(root, '[data-setting="reduced-motion"]');
   const highContrast = queryInput(root, '[data-setting="high-contrast"]');
-  const sound = queryInput(root, '[data-setting="sound"]');
+  const sfx = queryInput(root, '[data-setting="sfx"]');
+  const music = queryInput(root, '[data-setting="music"]');
   const activePowersEl = query(root, "[data-active-powers]");
   const packList = query(root, "[data-pack-list]");
   const liveAnnouncement = query(root, "[data-live-announcement]");
@@ -311,7 +317,8 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       particles: particles.checked,
       reducedMotion: reducedMotion.checked,
       highContrast: highContrast.checked,
-      sound: sound.checked
+      sfx: sfx.checked,
+      music: music.checked
     });
   };
 
@@ -414,7 +421,8 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   particles.addEventListener("change", emitSettings);
   reducedMotion.addEventListener("change", emitSettings);
   highContrast.addEventListener("change", emitSettings);
-  sound.addEventListener("change", emitSettings);
+  sfx.addEventListener("change", emitSettings);
+  music.addEventListener("change", emitSettings);
 
   return {
     setActions(nextActions) {
@@ -458,7 +466,8 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       particles.checked = state.settings.particles;
       reducedMotion.checked = state.settings.reducedMotion;
       highContrast.checked = state.settings.highContrast;
-      sound.checked = state.settings.sound;
+      sfx.checked = state.settings.sfx;
+      music.checked = state.settings.music;
       score.classList.toggle("is-pulsing", state.score > previousScore);
       combo.classList.toggle("is-pulsing", state.combo > previousCombo + 0.05);
       previousScore = state.score;

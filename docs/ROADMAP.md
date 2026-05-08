@@ -226,12 +226,29 @@ Acceptance criteria:
 
 Goal: replace placeholder synthesized bleeps with a real arcade sound identity.
 
+Status: complete as of May 8, 2026.
+
 Deliverables:
 
 - Original SFX for paddle center, paddle edge, normal brick, hard/metal brick, glass/prize brick, bad power-up, good power-up, extra life, laser, explosion, ball lost, level clear, and game over.
 - Optional original music loops for menu, board play, boss board, and score screen.
 - Audio settings for sound and music separately.
 - Respect reduced-motion/accessibility settings where effects become too intense.
+
+Implementation notes:
+
+- Replaced one-note bleeps with a small procedural arcade sound palette built from Web Audio oscillators and noise bursts.
+- Added distinct cues for paddle center, paddle edge, grab catch, hard brick chip, normal brick break, special brick break, boss brick break, good power-up, bad power-up, extra life, level warp, laser, explosion, ball lost, level clear, game over, pause, and resume.
+- Added lightweight sound cooldowns so rapid brick chains stay readable instead of turning into a harsh wall of noise.
+- Added separate SFX and Music toggles in Options, with backward migration from the previous single Sound setting.
+- Added a quiet original procedural music pulse that can be enabled separately from SFX.
+- Kept audio asset-free: no third-party or extracted audio files are committed.
+
+Verified:
+
+- `npm run ci` passes.
+- Unit coverage verifies new settings normalization and legacy Sound-to-SFX migration.
+- Playwright smoke coverage verifies SFX and Music settings apply and persist.
 
 Acceptance criteria:
 

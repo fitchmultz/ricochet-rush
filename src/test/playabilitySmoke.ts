@@ -38,7 +38,8 @@ interface DebugSnapshot {
     particles: boolean;
     reducedMotion: boolean;
     highContrast: boolean;
-    sound: boolean;
+    sfx: boolean;
+    music: boolean;
   };
   recentEvents: string[];
   announcement: string;
@@ -131,13 +132,15 @@ try {
   assert((await page.locator("[data-tool-title]").innerText()) === "Options", "Expected Options panel title.");
   await page.locator('[data-setting="high-contrast"]').check();
   await page.locator('[data-setting="reduced-motion"]').check();
-  await page.locator('[data-setting="sound"]').check();
+  await page.locator('[data-setting="sfx"]').check();
+  await page.locator('[data-setting="music"]').check();
   await page.locator('[data-setting="particles"]').uncheck();
   await page.locator('[data-setting="ball-speed"]').fill("1.15");
   const tuned = await snapshot(page);
   assert(tuned.settings.highContrast, "Expected high contrast setting to apply.");
   assert(tuned.settings.reducedMotion, "Expected reduced motion setting to apply.");
-  assert(tuned.settings.sound, "Expected sound setting to apply.");
+  assert(tuned.settings.sfx, "Expected SFX setting to apply.");
+  assert(tuned.settings.music, "Expected music setting to apply.");
   assert(!tuned.settings.particles, "Expected particles setting to apply.");
   assert(tuned.settings.ballSpeed === 1.15, `Expected ball speed 1.15, got ${tuned.settings.ballSpeed}.`);
   assert(await page.locator(".shell.is-high-contrast.is-reduced-motion").count() === 1, "Expected visual settings classes to apply.");
@@ -149,7 +152,8 @@ try {
   const restoredSettings = await snapshot(page);
   assert(restoredSettings.settings.highContrast, "Expected high contrast setting to persist after reload.");
   assert(restoredSettings.settings.reducedMotion, "Expected reduced motion setting to persist after reload.");
-  assert(restoredSettings.settings.sound, "Expected sound setting to persist after reload.");
+  assert(restoredSettings.settings.sfx, "Expected SFX setting to persist after reload.");
+  assert(restoredSettings.settings.music, "Expected music setting to persist after reload.");
   assert(!restoredSettings.settings.particles, "Expected particles setting to persist after reload.");
 
   await page.locator('[data-action="clear-save"], [data-action="reset"]').click();

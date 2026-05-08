@@ -41,7 +41,7 @@ import {
   normalizeSettings
 } from "../../shared/saveState";
 import type { HudApi, HudPackItem } from "../ui/hud";
-import { createGameAudio } from "./gameAudio";
+import { createGameAudio, type GameSoundKind } from "./gameAudio";
 
 interface Ball {
   x: number;
@@ -436,6 +436,7 @@ export class RicochetRushGame {
       this.startPack("starter", "Starter pack loaded.");
     }
     this.applySettingsClass();
+    this.audio.setMusicEnabled(this.settings.music);
     window.requestAnimationFrame(this.loop);
   }
 
@@ -626,6 +627,7 @@ export class RicochetRushGame {
         this.settings = normalizeSettings(settings);
         writeJson(SETTINGS_KEY, this.settings);
         this.applySettingsClass();
+        this.audio.setMusicEnabled(this.settings.music);
         this.refreshHud("Settings updated.");
       },
       toggleSidebar: () => {
@@ -727,7 +729,7 @@ export class RicochetRushGame {
     this.phase = "playing";
     this.hideOverlay();
     this.launchBalls();
-    if (wasPaused) this.audio.play("resume", this.settings.sound);
+    if (wasPaused) this.audio.play("resume", this.settings.sfx);
   }
 
   private togglePause() {
@@ -735,12 +737,12 @@ export class RicochetRushGame {
       this.phase = "ready";
       this.showOverlay("Paused", "The board is frozen. Press Space, Enter, or Continue to resume.", "Continue", () => this.handlePrimaryAction());
       this.pushEvent("Paused.");
-      this.audio.play("pause", this.settings.sound);
+      this.audio.play("pause", this.settings.sfx);
     } else if (this.phase === "ready" && this.balls.some((ball) => !ball.stuck)) {
       this.phase = "playing";
       this.hideOverlay();
       this.pushEvent("Resumed.");
-      this.audio.play("resume", this.settings.sound);
+      this.audio.play("resume", this.settings.sfx);
     }
   }
 
@@ -1054,6 +1056,7 @@ export class RicochetRushGame {
       ball.x = catchX;
       ball.y = PADDLE_Y - 18;
       this.pushEvent("Grab paddle caught the ball.");
+      this.audio.play("grab", this.settings.sfx);
       return;
     }
     const rebound = calculatePaddleRebound({
@@ -1066,7 +1069,7 @@ export class RicochetRushGame {
     ball.vy = rebound.vy;
     this.lastPaddleHit = { ...rebound, hitZone: hit, paddleVelocityX: this.paddleVelocityX };
     ball.y = PADDLE_Y - 10 - ball.radius;
-    this.audio.play("paddle", this.settings.sound);
+    this.audio.play(Math.abs(hit) > 0.72 ? "paddleEdge" : "paddle", this.settings.sfx);
     this.paddleFlashTimer = 0.16;
     this.shakeBoard(0.08, 1.6);
     this.combo = Math.max(1, this.combo - 0.15);
@@ -1114,11 +1117,11 @@ export class RicochetRushGame {
 
   private hitBrick(brick: Brick) {
     brick.hp -= 1;
-    if (brick.hp > 0) this.audio.play("brickChip", this.settings.sound);
+    if (brick.hp > 0) this.audio.play(brick.kind === "hard" || brick.kind === "boss" ? "hardBrick" : "brickChip", this.settings.sfx);
     this.brickImpactTimers.set(brick, 0.16);
     this.emitSparks(brick.x + brick.width / 2, brick.y + brick.height / 2, COLORS[brick.kind], 12);
     if (brick.hp > 0) return;
-    this.audio.play("brickDestroy", this.settings.sound);
+    this.audio.play(soundForBrickDestroy(brick.kind), this.settings.sfx);
     this.bricks = this.bricks.filter((candidate) => candidate !== brick);
     const points = Math.round(40 * this.combo * (brick.kind === "boss" ? 5 : brick.maxHp));
     this.score += points;
@@ -1151,7 +1154,7 @@ export class RicochetRushGame {
 
   private explode(source: Brick) {
     this.emitSparks(source.x + source.width / 2, source.y + source.height / 2, "#ff5c5c", 32);
-    this.audio.play("explosion", this.settings.sound);
+    this.audio.play("explosion", this.settings.sfx);
     this.shakeBoard(0.2, 4.2);
     const blast = this.bricks.filter(
       (brick) => Math.abs(brick.x - source.x) < BRICK_WIDTH * 1.8 * this.explosionScale && Math.abs(brick.y - source.y) < BRICK_HEIGHT * 2 * this.explosionScale
@@ -1176,7 +1179,7 @@ export class RicochetRushGame {
       const caught = powerup.y > PADDLE_Y - 16 && powerup.y < PADDLE_Y + 24 && Math.abs(powerup.x - this.paddleX) < this.paddleWidth / 2 + 18;
       if (caught) {
         this.emitSparks(this.paddleX, PADDLE_Y - 6, "#ffe066", 10);
-        this.audio.play("powerup", this.settings.sound);
+        this.audio.play(soundForPowerup(powerup.kind), this.settings.sfx);
         this.paddleFlashTimer = 0.2;
         this.applyPowerup(powerup.kind);
         powerup.y = HEIGHT + 100;
@@ -1330,7 +1333,7 @@ export class RicochetRushGame {
     this.lives -= 1;
     this.combo = 1;
     this.noBallTimer = 0;
-    this.audio.play("loseLife", this.settings.sound);
+    this.audio.play("loseLife", this.settings.sfx);
     this.lifeFlashTimer = 0.45;
     this.shakeBoard(0.18, 3.2);
     if (this.lives <= 0) {
@@ -1341,7 +1344,7 @@ export class RicochetRushGame {
       this.hasSave = false;
       this.pushEvent("Run ended.");
       this.announce("Game over.");
-      this.audio.play("gameOver", this.settings.sound);
+      this.audio.play("gameOver", this.settings.sfx);
       this.showOverlay("Game Over", `Final score ${this.score}. Restart at Level 1 with a fresh generated board.`, "Restart", () => void this.restartRun());
       this.refreshHud("Game over.");
       return;
@@ -1373,7 +1376,7 @@ export class RicochetRushGame {
     this.announce(`Level ${this.level} cleared. Bonus ${bonus} points.`);
     this.addFloatingText(WIDTH / 2, HEIGHT / 2, `+${bonus} clear`, "status");
     this.levelClearFlashTimer = 0.8;
-    this.audio.play("levelClear", this.settings.sound);
+    this.audio.play("levelClear", this.settings.sfx);
     this.shakeBoard(0.28, 2.6);
     this.saveCheckpoint("Level checkpoint saved.");
     const nextStep = this.nextLevelCompleteStep(completedContext);
@@ -1933,7 +1936,7 @@ export class RicochetRushGame {
 
   private fireLaser(x: number) {
     this.laserBeams.push({ x, life: 0.09 });
-    this.audio.play("laser", this.settings.sound);
+    this.audio.play("laser", this.settings.sfx);
     const target = this.bricks
       .filter((brick) => x >= brick.x && x <= brick.x + brick.width)
       .sort((a, b) => b.y - a.y)
@@ -1989,6 +1992,20 @@ export class RicochetRushGame {
 
 function pick<T>(items: readonly T[]): T {
   return items[Math.floor(Math.random() * items.length)] ?? items[0];
+}
+
+function soundForBrickDestroy(kind: BrickKind): GameSoundKind {
+  if (kind === "boss") return "bossBrick";
+  if (kind === "hard") return "hardBrick";
+  if (kind === "basic") return "brickDestroy";
+  return "specialBrick";
+}
+
+function soundForPowerup(kind: PowerupKind): GameSoundKind {
+  if (kind === "extraLife") return "extraLife";
+  if (kind === "levelWarp") return "levelWarp";
+  if (NEGATIVE_POWERUPS.includes(kind)) return "badPowerup";
+  return "goodPowerup";
 }
 
 function circleRect(ball: Ball, brick: Brick): boolean {

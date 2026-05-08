@@ -7,7 +7,8 @@ export interface GameSettings {
   particles: boolean;
   reducedMotion: boolean;
   highContrast: boolean;
-  sound: boolean;
+  sfx: boolean;
+  music: boolean;
 }
 
 export interface SavedBrick {
@@ -60,19 +61,22 @@ export const DEFAULT_SETTINGS: GameSettings = {
   particles: true,
   reducedMotion: false,
   highContrast: false,
-  sound: false
+  sfx: false,
+  music: false
 };
 
 const BRICK_KINDS = new Set<BrickKind>(["basic", "hard", "bomb", "prize", "penalty", "laser", "grab", "fire", "thru", "split", "wide", "slow", "boss"]);
 
 export function normalizeSettings(input: unknown): GameSettings {
   const raw = isRecord(input) ? input : {};
+  const legacySound = booleanValue(raw.sound, DEFAULT_SETTINGS.sfx);
   return {
     ballSpeed: clamp(numberValue(raw.ballSpeed, DEFAULT_SETTINGS.ballSpeed), 0.8, 1.2),
     particles: booleanValue(raw.particles, DEFAULT_SETTINGS.particles),
     reducedMotion: booleanValue(raw.reducedMotion, DEFAULT_SETTINGS.reducedMotion),
     highContrast: booleanValue(raw.highContrast, DEFAULT_SETTINGS.highContrast),
-    sound: booleanValue(raw.sound, DEFAULT_SETTINGS.sound)
+    sfx: booleanValue(raw.sfx, legacySound),
+    music: booleanValue(raw.music, DEFAULT_SETTINGS.music)
   };
 }
 

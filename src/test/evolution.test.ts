@@ -281,7 +281,12 @@ describe("Cursor SDK level generation contract", () => {
       ballSpeed: 1.2,
       reducedMotion: true,
       highContrast: true,
-      sound: false
+      sfx: false,
+      music: false
+    });
+    expect(normalizeSettings({ sound: true })).toEqual({
+      ...DEFAULT_SETTINGS,
+      sfx: true
     });
     expect(normalizeSettings({ ballSpeed: 0.1, particles: false })).toEqual({
       ...DEFAULT_SETTINGS,
