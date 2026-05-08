@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { BRICK_COLUMNS, BRICK_ROWS, CURSOR_MODEL, MAX_BRICKS, MIN_BRICKS, fallbackLevel, normalizeLevel, type LevelRequest } from "../shared/evolution";
 import { DEFAULT_SETTINGS, SAVE_VERSION, normalizeSaveState, normalizeSettings } from "../shared/saveState";
 import { buildPrompt, parseWorkerOutput, requestEvolution, summarizeLevelError } from "../server/cursorAgent";
-import { trimComposerArchive, type ComposerGeneratedLevelEntry } from "../client/game/RicochetRushGame";
+import { calculatePaddleRebound, trimComposerArchive, type ComposerGeneratedLevelEntry } from "../client/game/RicochetRushGame";
 
 const request: LevelRequest = {
   level: 4,
@@ -260,5 +260,39 @@ describe("Cursor SDK level generation contract", () => {
     expect(save?.balls).toHaveLength(1);
     expect(save?.balls?.[0]?.radius).toBe(20);
     expect(save?.balls?.[0]?.fireTimer).toBe(120);
+  });
+});
+
+describe("Ricochet Rush paddle feel", () => {
+  it("keeps center paddle hits from becoming vertical dead loops", () => {
+    const rebound = calculatePaddleRebound({
+      hitZone: 0,
+      paddleVelocityX: 0,
+      incomingVx: 0,
+      incomingVy: 480
+    });
+
+    expect(Math.abs(rebound.vx)).toBeGreaterThanOrEqual(rebound.speed * 0.18);
+    expect(rebound.vy).toBeLessThan(0);
+  });
+
+  it("lets paddle movement add controlled spin to center hits", () => {
+    const left = calculatePaddleRebound({
+      hitZone: 0,
+      paddleVelocityX: -620,
+      incomingVx: 160,
+      incomingVy: 480
+    });
+    const right = calculatePaddleRebound({
+      hitZone: 0,
+      paddleVelocityX: 620,
+      incomingVx: -160,
+      incomingVy: 480
+    });
+
+    expect(left.vx).toBeLessThan(0);
+    expect(right.vx).toBeGreaterThan(0);
+    expect(Math.abs(left.vx)).toBeLessThan(left.speed * 0.84 + 0.001);
+    expect(Math.abs(right.vx)).toBeLessThan(right.speed * 0.84 + 0.001);
   });
 });

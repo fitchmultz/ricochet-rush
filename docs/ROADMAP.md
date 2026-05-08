@@ -54,6 +54,8 @@ Verified:
 
 Goal: make the core loop feel sharp before adding more surface area. This is the next active priority.
 
+Status: active.
+
 Deliverables:
 
 - Add paddle spin or "English" based on paddle movement at impact.
@@ -62,13 +64,25 @@ Deliverables:
 - Tune speed ramping so difficulty rises without turning into unreadable chaos.
 - Add a small debug overlay or test hook for ball speed, angle, paddle hit zone, and collision events.
 
-Start slice:
+Slice 1 - Paddle Rebound Control:
 
 - Track paddle velocity each frame.
 - Feed paddle velocity into paddle collision so moving into the ball adds controlled spin.
 - Clamp launch and rebound angles to avoid boring vertical/horizontal loops.
 - Add a focused unit test or smoke assertion for minimum horizontal velocity after paddle hits.
 - Playtest the first board and tune constants until edge hits feel intentional.
+
+Slice 2 - Collision Consistency:
+
+- Review wall and brick collision for repeated shallow loops.
+- Add rebound normalization only where the loop can actually get stuck.
+- Keep piercing, fireball, mega ball, and laser behavior unchanged.
+
+Slice 3 - Tuning And Debug:
+
+- Expose debug snapshot fields for paddle velocity and last paddle hit.
+- Tune min/max rebound angles, paddle spin transfer, and speed ramp constants.
+- Capture a short manual playtest note in the roadmap before moving to P2.
 
 Acceptance criteria:
 

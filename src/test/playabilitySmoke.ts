@@ -15,6 +15,8 @@ interface DebugSnapshot {
   balls: Array<{ x: number; y: number; vx: number; vy: number; stuck: boolean }>;
   paddleX: number;
   paddleWidth: number;
+  paddleVelocityX: number;
+  lastPaddleHit: { hitZone: number; paddleVelocityX: number; vx: number; vy: number; speed: number } | null;
   hasSave: boolean;
   settings: {
     ballSpeed: number;
@@ -61,7 +63,9 @@ try {
   const playing = await snapshot(page);
   assert(playing.phase === "playing", `Expected playing phase after launch, got ${playing.phase}.`);
   assert(playing.balls.some((ball) => !ball.stuck && ball.vy < 0), "Expected launched ball moving upward.");
+  assert(playing.balls.some((ball) => !ball.stuck && Math.abs(ball.vx) > 70), "Expected launched ball to avoid near-vertical loops.");
   assert(playing.paddleX > ready.paddleX, "Expected keyboard movement to move the paddle right.");
+  assert(playing.paddleVelocityX > 0, "Expected debug state to expose rightward paddle velocity.");
 
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");

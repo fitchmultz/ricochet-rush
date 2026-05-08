@@ -109,6 +109,24 @@ interface LaserBeam {
   life: number;
 }
 
+export interface PaddleReboundInput {
+  hitZone: number;
+  paddleVelocityX: number;
+  incomingVx: number;
+  incomingVy: number;
+}
+
+export interface PaddleRebound {
+  vx: number;
+  vy: number;
+  speed: number;
+}
+
+interface PaddleHitDebug extends PaddleRebound {
+  hitZone: number;
+  paddleVelocityX: number;
+}
+
 type GamePhase = "loading" | "ready" | "playing" | "levelComplete" | "gameOver";
 
 const WIDTH = 960;
@@ -119,6 +137,20 @@ const BRICK_TOP = 72;
 const BRICK_WIDTH = (WIDTH - WALL * 2 - BRICK_GAP * (BRICK_COLUMNS - 1)) / BRICK_COLUMNS;
 const BRICK_HEIGHT = 28;
 const PADDLE_Y = HEIGHT - 52;
+const PADDLE_SPEED = 620;
+const MAX_PADDLE_VELOCITY = 920;
+const PADDLE_ACCELERATION = 1.018;
+const PADDLE_EDGE_INFLUENCE = 0.74;
+const PADDLE_SPIN_INFLUENCE = 0.22;
+const LAUNCH_SIDE_SPEED = 190;
+const LAUNCH_OFFSET_INFLUENCE = 300;
+const LAUNCH_SPIN_INFLUENCE = 0.1;
+const LAUNCH_UPWARD_SPEED = 410;
+const MIN_BALL_SPEED = 420;
+const MAX_BALL_SPEED = 860;
+const MAX_LAUNCH_SPEED = 760;
+const MIN_REBOUND_X_RATIO = 0.18;
+const MAX_REBOUND_X_RATIO = 0.84;
 const POWERUP_ATLAS_COLUMNS = 5;
 const POWERUP_ATLAS_ROWS = 4;
 const SAVE_KEY = "ricochet-rush-save";
@@ -286,6 +318,8 @@ export class RicochetRushGame {
   private sidebarCollapsed = false;
   private lastKeyboardAt = 0;
   private lastPointerAt = 0;
+  private paddleVelocityX = 0;
+  private lastPaddleHit: PaddleHitDebug | null = null;
   private nextFloatingTextId = 1;
   private boardShakeTimer = 0;
   private boardShakeStrength = 0;
@@ -344,6 +378,8 @@ export class RicochetRushGame {
       balls: this.balls.map((ball) => ({ x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy, stuck: ball.stuck })),
       paddleX: this.paddleX,
       paddleWidth: this.paddleWidth,
+      paddleVelocityX: this.paddleVelocityX,
+      lastPaddleHit: this.lastPaddleHit,
       hasSave: this.hasSave,
       settings: this.settings,
       recentEvents: this.recentEvents,
@@ -467,10 +503,13 @@ export class RicochetRushGame {
       this.keys.delete(event.code);
     });
     const applyPointerPaddle = (clientX: number) => {
-      this.lastPointerAt = performance.now();
-      if (this.lastPointerAt < this.lastKeyboardAt) return;
+      const now = performance.now();
+      if (now < this.lastKeyboardAt) return;
       const rect = this.renderer.domElement.getBoundingClientRect();
-      this.paddleX = clamp(((clientX - rect.left) / rect.width) * WIDTH, WALL + this.paddleWidth / 2, WIDTH - WALL - this.paddleWidth / 2);
+      const nextX = ((clientX - rect.left) / rect.width) * WIDTH;
+      const elapsedSeconds = this.lastPointerAt > 0 ? (now - this.lastPointerAt) / 1000 : 1 / 60;
+      this.lastPointerAt = now;
+      this.setPaddleX(nextX, elapsedSeconds);
     };
     this.renderer.domElement.addEventListener("pointermove", (event) => {
       applyPointerPaddle(event.clientX);
@@ -560,13 +599,25 @@ export class RicochetRushGame {
   private updatePaddle(delta: number) {
     const direction = Number(this.keys.has("ArrowRight") || this.keys.has("KeyD")) - Number(this.keys.has("ArrowLeft") || this.keys.has("KeyA"));
     if (direction !== 0) this.lastKeyboardAt = performance.now();
-    this.paddleX = clamp(this.paddleX + direction * 620 * delta, WALL + this.paddleWidth / 2, WIDTH - WALL - this.paddleWidth / 2);
+    if (direction !== 0) {
+      this.setPaddleX(this.paddleX + direction * PADDLE_SPEED * delta, delta);
+    } else {
+      this.paddleVelocityX *= Math.max(0, 1 - delta * 12);
+      if (Math.abs(this.paddleVelocityX) < 1) this.paddleVelocityX = 0;
+    }
     for (const ball of this.balls) {
       if (ball.stuck) {
         ball.x = clamp(this.paddleX + ball.stuckOffset, WALL + ball.radius, WIDTH - WALL - ball.radius);
         ball.y = PADDLE_Y - 18;
       }
     }
+  }
+
+  private setPaddleX(nextX: number, elapsedSeconds: number) {
+    const previousX = this.paddleX;
+    this.paddleX = clamp(nextX, WALL + this.paddleWidth / 2, WIDTH - WALL - this.paddleWidth / 2);
+    const rawVelocity = elapsedSeconds > 0 ? (this.paddleX - previousX) / elapsedSeconds : 0;
+    this.paddleVelocityX = clamp(rawVelocity, -MAX_PADDLE_VELOCITY, MAX_PADDLE_VELOCITY);
   }
 
   private handlePrimaryAction() {
@@ -750,11 +801,14 @@ export class RicochetRushGame {
     for (const ball of this.balls) {
       if (ball.stuck) {
         const offset = clamp(ball.stuckOffset / (this.paddleWidth / 2), -1, 1);
-        const fallbackX = Math.abs(ball.vx) > 60 ? Math.sign(ball.vx) * 190 : 190;
+        const fallbackX = Math.abs(ball.vx) > 60 ? Math.sign(ball.vx) * LAUNCH_SIDE_SPEED : LAUNCH_SIDE_SPEED;
+        const launchSpeed = clamp(Math.hypot(fallbackX, LAUNCH_UPWARD_SPEED * this.levelBlueprint.speed), MIN_BALL_SPEED, MAX_LAUNCH_SPEED);
+        const desiredVx = (Math.abs(offset) > 0.08 ? LAUNCH_OFFSET_INFLUENCE * offset : fallbackX) + this.paddleVelocityX * LAUNCH_SPIN_INFLUENCE;
+        const launch = upwardVelocity(launchSpeed, desiredVx, Math.sign(desiredVx) || Math.sign(ball.vx) || 1);
         ball.stuck = false;
         ball.stuckOffset = 0;
-        ball.vx = Math.abs(offset) > 0.08 ? 260 * offset : fallbackX;
-        ball.vy = -410 * this.levelBlueprint.speed;
+        ball.vx = launch.vx;
+        ball.vy = launch.vy;
       }
     }
   }
@@ -789,9 +843,15 @@ export class RicochetRushGame {
       this.pushEvent("Grab paddle caught the ball.");
       return;
     }
-    const speed = clamp(Math.hypot(ball.vx, ball.vy) * 1.018, 420, 860);
-    ball.vx = hit * speed * 0.82;
-    ball.vy = -Math.sqrt(Math.max(0, speed * speed - ball.vx * ball.vx));
+    const rebound = calculatePaddleRebound({
+      hitZone: hit,
+      paddleVelocityX: this.paddleVelocityX,
+      incomingVx: ball.vx,
+      incomingVy: ball.vy
+    });
+    ball.vx = rebound.vx;
+    ball.vy = rebound.vy;
+    this.lastPaddleHit = { ...rebound, hitZone: hit, paddleVelocityX: this.paddleVelocityX };
     ball.y = PADDLE_Y - 10 - ball.radius;
     this.audio.play("paddle", this.settings.sound);
     this.paddleFlashTimer = 0.16;
@@ -1575,6 +1635,24 @@ function toWorld(x: number, y: number, z = 0): THREE.Vector3 {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+export function calculatePaddleRebound(input: PaddleReboundInput): PaddleRebound {
+  const speed = clamp(Math.hypot(input.incomingVx, input.incomingVy) * PADDLE_ACCELERATION, MIN_BALL_SPEED, MAX_BALL_SPEED);
+  const hitZone = clamp(input.hitZone, -1, 1);
+  const paddleVelocityX = clamp(input.paddleVelocityX, -MAX_PADDLE_VELOCITY, MAX_PADDLE_VELOCITY);
+  const desiredVx = hitZone * speed * PADDLE_EDGE_INFLUENCE + paddleVelocityX * PADDLE_SPIN_INFLUENCE;
+  const fallbackSign = Math.sign(desiredVx) || Math.sign(input.incomingVx) || 1;
+  return upwardVelocity(speed, desiredVx, fallbackSign);
+}
+
+function upwardVelocity(speed: number, desiredVx: number, fallbackSign: number): PaddleRebound {
+  const maxVx = speed * MAX_REBOUND_X_RATIO;
+  const minVx = Math.min(speed * MIN_REBOUND_X_RATIO, maxVx);
+  const sign = Math.sign(desiredVx) || Math.sign(fallbackSign) || 1;
+  const vx = sign * clamp(Math.abs(desiredVx), minVx, maxVx);
+  const vy = -Math.sqrt(Math.max(0, speed * speed - vx * vx));
+  return { vx, vy, speed };
 }
 
 function escapeHtml(value: string): string {
