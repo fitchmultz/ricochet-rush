@@ -10,6 +10,7 @@ import {
   designerTargets,
   normalizeDesignerIntent,
   normalizeLevel,
+  normalizeLevelRequest,
   type LevelBlueprint,
   type LevelRequest
 } from "../shared/evolution";
@@ -23,15 +24,14 @@ import {
   previewRowsFromLevel
 } from "../shared/boardPacks";
 import { DEFAULT_SETTINGS, SAVE_VERSION, normalizeSaveState, normalizeSettings } from "../shared/saveState";
+import { createApiServer } from "../server/api";
 import { buildGenerationSummary, buildPrompt, parseWorkerOutput, requestEvolution, summarizeLevelError } from "../server/cursorAgent";
 import {
   calculatePaddleRebound,
   normalizeLoopRiskVelocity,
   penaltyPowerupPool,
   powerupToneFor,
-  prizePowerupPool,
-  trimComposerArchive,
-  type ComposerGeneratedLevelEntry
+  prizePowerupPool
 } from "../client/game/RicochetRushGame";
 
 const request: LevelRequest = {
@@ -54,6 +54,25 @@ function countSpecials(level: LevelBlueprint): number {
 
 function countHardBricks(level: LevelBlueprint): number {
   return level.rows.flat().filter((brick) => brick?.kind === "hard").length;
+}
+
+async function withApiServer<T>(run: (baseUrl: string) => Promise<T>): Promise<T> {
+  const server = createApiServer();
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("API test server did not expose a TCP port.");
+    return await run(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  }
 }
 
 describe("Cursor SDK level generation contract", () => {
@@ -244,6 +263,59 @@ describe("Cursor SDK level generation contract", () => {
     expect(level.rows.flat().filter(Boolean).length).toBeLessThanOrEqual(MAX_BRICKS);
   });
 
+  it("caps overstuffed boss boards instead of preserving an invalid count", () => {
+    const level = normalizeLevel(
+      {
+        name: "Boss Flood",
+        rows: Array.from({ length: BRICK_ROWS }, () => Array.from({ length: BRICK_COLUMNS }, () => ({ kind: "boss", hp: 12 })))
+      },
+      request
+    );
+    expect(level.name).toBe("Boss Flood");
+    expect(level.rows.flat().filter(Boolean).length).toBe(MAX_BRICKS);
+  });
+
+  it("rejects malformed level requests at the API boundary", async () => {
+    expect(normalizeLevelRequest({ ...request, level: "4" })).toBeNull();
+    expect(normalizeLevelRequest({ ...request, recentEvents: ["ok", 3] })).toBeNull();
+    expect(normalizeLevelRequest({ ...request, designer: { style: "bogus", difficulty: 99, density: 2, specialBias: -1, seed: "x", feedback: [] } })).toMatchObject({
+      level: request.level,
+      designer: {
+        style: "balanced",
+        difficulty: 5,
+        density: 0.82,
+        specialBias: 0,
+        seed: "x"
+      }
+    });
+
+    await withApiServer(async (baseUrl) => {
+      const invalidRequest = await fetch(`${baseUrl}/api/level`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...request, level: "4" })
+      });
+      expect(invalidRequest.status).toBe(400);
+      expect(await invalidRequest.json()).toEqual({ error: "Invalid level request." });
+
+      const oversizedRequest = await fetch(`${baseUrl}/api/level`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...request, recentEvents: ["x".repeat(32_001)] })
+      });
+      expect(oversizedRequest.status).toBe(413);
+      expect(await oversizedRequest.json()).toEqual({ error: "Request body too large." });
+
+      const multibyteOversizedRequest = await fetch(`${baseUrl}/api/level`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...request, recentEvents: ["🙂".repeat(9_000)] })
+      });
+      expect(multibyteOversizedRequest.status).toBe(413);
+      expect(await multibyteOversizedRequest.json()).toEqual({ error: "Request body too large." });
+    });
+  });
+
   it("trims generated UI copy at word boundaries", () => {
     const level = normalizeLevel(
       {
@@ -304,25 +376,6 @@ describe("Cursor SDK level generation contract", () => {
         process.env.RICOCHET_RUSH_FORCE_FALLBACK = originalFallback;
       }
     }
-  });
-
-  it("bounds composer archive shape and ordering for persistence", () => {
-    const levelTemplate = fallbackLevel(request);
-    const now = Date.now();
-    const entries: ComposerGeneratedLevelEntry[] = Array.from({ length: 55 }, (_, index) => ({
-      createdAt: new Date(now - index).toISOString(),
-      level: index + 1,
-      score: index * 10,
-      lives: 3,
-      clearedLevels: index,
-      levelName: `Generated ${index}`,
-      model: CURSOR_MODEL,
-      levelBlueprint: levelTemplate
-    }));
-    const bounded = trimComposerArchive(entries);
-    expect(bounded).toHaveLength(50);
-    expect(bounded[0]).toEqual(entries[0]);
-    expect(bounded.at(-1)?.level).toBe(50);
   });
 
   it("builds a public generation summary without raw trace text", () => {

@@ -34,6 +34,12 @@ interface SoundProfile {
   voices: ToneVoice[];
 }
 
+declare global {
+  interface Window {
+    webkitAudioContext?: typeof AudioContext;
+  }
+}
+
 const PROFILES: Record<GameSoundKind, SoundProfile> = {
   paddle: { cooldownMs: 24, voices: [{ frequency: 260, duration: 0.045, peak: 0.055, type: "triangle", sweep: 80 }] },
   paddleEdge: {
@@ -131,7 +137,7 @@ export function createGameAudio() {
   const ensureContext = (): AudioContext | null => {
     if (typeof window === "undefined") return null;
     if (!ctx) {
-      const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      const Ctx = window.AudioContext ?? window.webkitAudioContext;
       if (!Ctx) return null;
       ctx = new Ctx();
     }

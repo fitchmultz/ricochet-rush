@@ -1,8 +1,11 @@
 import { Agent } from "@cursor/sdk";
-import { CURSOR_MODEL, type LevelRequest } from "../shared/evolution.js";
+import { CURSOR_MODEL, normalizeLevelRequest } from "../shared/evolution.js";
 import { buildPrompt } from "./cursorAgent.js";
 
-const request = JSON.parse(await readStdin()) as LevelRequest;
+const request = normalizeLevelRequest(JSON.parse(await readStdin()));
+if (!request) {
+  throw new Error("Invalid level request.");
+}
 const apiKey = process.env.CURSOR_API_KEY?.trim();
 if (!apiKey) {
   throw new Error("CURSOR_API_KEY is required for Cursor SDK level generation.");

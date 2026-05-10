@@ -3,6 +3,8 @@ import {
   BRICK_COLUMNS,
   BRICK_ROWS,
   CURSOR_MODEL,
+  MAX_BRICKS,
+  MIN_BRICKS,
   type ComposerAgentTrace,
   type GenerationSummary,
   type LevelBlueprint,
@@ -44,7 +46,7 @@ export async function requestEvolution(request: LevelRequest): Promise<LevelResp
   }
 
   try {
-    const workerResult = await runCursorWorker(request, prompt);
+    const workerResult = await runCursorWorker(request);
     const trace = toTrace(request, requestJson, prompt, workerResult);
 
     if (workerResult.parseStatus === "success") {
@@ -102,7 +104,7 @@ Game rules:
 - Brick kinds: basic, hard, bomb, prize, penalty, laser, grab, fire, thru, split, wide, slow, boss.
 - basic hp 1, hard hp 2-4, boss hp 5-12, all other special bricks hp 1.
 - null means empty space.
-- Use at least 34 bricks and at most 86 bricks. This is mandatory; too few or too many bricks are rejected.
+- Use at least ${MIN_BRICKS} bricks and at most ${MAX_BRICKS} bricks. This is mandatory; too few or too many bricks are rejected.
 - Use bombs sparingly. Use powerup bricks enough to be fun.
 - Leave some empty lanes for bank shots.
 
@@ -112,7 +114,7 @@ Visible design intent:
 - Difficulty: ${designer.difficulty}/5.
 - Difficulty target: ${targets.difficultyLabel}; use this for speed, hard-brick pressure, risk, and recovery-room generosity.
 - Target density: ${Math.round(designer.density * 100)}% of the board.
-- Target brick count: about ${targets.brickTarget} bricks, still obeying the mandatory ${BRICK_COLUMNS}x${BRICK_ROWS} grid and 34-86 brick limits.
+- Target brick count: about ${targets.brickTarget} bricks, still obeying the mandatory ${BRICK_COLUMNS}x${BRICK_ROWS} grid and ${MIN_BRICKS}-${MAX_BRICKS} brick limits.
 - Special-brick mix: about ${targets.specialTarget} special bricks. Specials are bomb, prize, penalty, laser, grab, fire, thru, split, wide, slow, or boss; hard is not a special.
 - Hard-brick pressure: about ${targets.hardTarget} hard bricks unless the style needs boss bricks instead.
 - Speed target: about ${targets.speedTarget.toFixed(2)}.
@@ -174,7 +176,7 @@ export function summarizeLevelError(error: unknown): string {
   return firstLine ? firstLine.slice(0, 140) : "Cursor SDK request failed.";
 }
 
-function runCursorWorker(request: LevelRequest, prompt: string): Promise<WorkerInvocationResult> {
+function runCursorWorker(request: LevelRequest): Promise<WorkerInvocationResult> {
   return new Promise((resolve) => {
     const startedAt = Date.now();
     const worker = spawn(process.execPath, ["--import", "tsx", "src/server/cursorWorker.ts"], {
@@ -198,7 +200,7 @@ function runCursorWorker(request: LevelRequest, prompt: string): Promise<WorkerI
         parseStatus: "worker-failed",
         parseError: "Cursor SDK worker timed out.",
         rawOutput: stdout,
-        rawError: `Request prompt: ${prompt}\n${stderr}`.trim(),
+        rawError: stderr.trim(),
         startedAt,
         finishedAt: Date.now(),
         workerExitCode: null

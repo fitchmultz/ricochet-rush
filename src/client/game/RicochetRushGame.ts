@@ -115,19 +115,6 @@ interface FloatingText {
   kind: "score" | "combo" | "status" | "powerupReward" | "powerupHazard" | "powerupVolatile";
 }
 
-export interface ComposerGeneratedLevelEntry {
-  createdAt: string;
-  level: number;
-  score: number;
-  lives: number;
-  clearedLevels: number;
-  levelName: string;
-  model: LevelResponse["model"];
-  levelBlueprint: LevelBlueprint;
-  summary?: GenerationSummary;
-  trace?: LevelResponse["trace"];
-}
-
 interface LaserBeam {
   x: number;
   life: number;
@@ -218,8 +205,6 @@ const SAVE_KEY = "ricochet-rush-save";
 const SETTINGS_KEY = "ricochet-rush-settings";
 const SIDEBAR_COLLAPSED_KEY = "ricochet-rush-sidebar-collapsed";
 const BEST_SCORE_KEY = "ricochet-rush-best-score";
-const COMPOSER_LEVEL_ARCHIVE_KEY = "ricochet-rush-composer-level-archive";
-const COMPOSER_LEVEL_ARCHIVE_MAX = 50;
 const PACK_PROGRESS_KEY = "ricochet-rush-pack-progress";
 const SAVED_BOARDS_KEY = "ricochet-rush-saved-boards";
 const SAVED_BOARDS_MAX = 24;
@@ -507,6 +492,23 @@ export class RicochetRushGame {
       recentEvents: this.recentEvents,
       announcement: this.announcement
     };
+  }
+
+  debugStageVisualSmokeState() {
+    this.powerups.splice(
+      0,
+      this.powerups.length,
+      { x: 320, y: 330, vy: 0, kind: "expandPaddle" },
+      { x: 480, y: 330, vy: 0, kind: "shrinkPaddle" },
+      { x: 640, y: 330, vy: 0, kind: "eightBall" }
+    );
+    this.laserTimer = 7;
+    this.grabTimer = 10;
+    if (this.balls[0]) this.balls[0].fireTimer = 8;
+    this.addFloatingText(320, 430, "+Expand paddle", "powerupReward");
+    this.addFloatingText(480, 430, "-Shrink paddle", "powerupHazard");
+    this.addFloatingText(640, 430, "! Eight ball", "powerupVolatile");
+    this.refreshHud();
   }
 
   private setupRenderer() {
@@ -959,25 +961,6 @@ export class RicochetRushGame {
     this.showLevelReadyOverlay(event);
     this.latestAgentTrace = trace;
     this.refreshHud(level.briefing);
-  }
-
-  private saveComposerGeneratedLevel(result: LevelResponse) {
-    if (result.source !== "cursor-sdk") return;
-    const archive = readJson(COMPOSER_LEVEL_ARCHIVE_KEY, normalizeComposerArchive) ?? [];
-    const next: ComposerGeneratedLevelEntry = {
-      createdAt: new Date().toISOString(),
-      level: this.level,
-      score: this.score,
-      lives: this.lives,
-      clearedLevels: this.clearedLevels,
-      levelName: result.level.name,
-      model: result.model,
-      levelBlueprint: result.level,
-      summary: result.summary,
-      trace: result.trace
-    };
-    const updated = trimComposerArchive([next, ...archive]);
-    writeJson(COMPOSER_LEVEL_ARCHIVE_KEY, updated);
   }
 
   private restoreSave(save: GameSave) {
@@ -1492,7 +1475,6 @@ export class RicochetRushGame {
         result.source === "cursor-sdk"
           ? `Generated ${result.level.name}.`
           : `Local fallback generated ${result.level.name}${publicWarning ? ` (${publicWarning})` : ""}.`;
-      if (result.source === "cursor-sdk") this.saveComposerGeneratedLevel(result);
       this.loadLevel(result.level, sourceEvent, result.trace, result.summary, { source: "generated", packId: null, boardIndex: 0 });
     } catch (error) {
       const reason = error instanceof Error ? error.message : "unknown error";
@@ -2229,100 +2211,6 @@ function toSavedBrick(brick: Brick): SavedBrick {
   };
 }
 
-function normalizeComposerArchive(input: unknown): ComposerGeneratedLevelEntry[] {
-  if (!Array.isArray(input)) return [];
-  return input.map(normalizeComposerArchiveEntry).filter((entry): entry is ComposerGeneratedLevelEntry => entry !== null);
-}
-
-export function trimComposerArchive(entries: ComposerGeneratedLevelEntry[], max = COMPOSER_LEVEL_ARCHIVE_MAX): ComposerGeneratedLevelEntry[] {
-  if (!Number.isFinite(max) || max <= 0) return [];
-  return entries.slice(0, max);
-}
-
-function normalizeComposerArchiveEntry(input: unknown): ComposerGeneratedLevelEntry | null {
-  if (!isRecord(input)) return null;
-  if (!isRecord(input.levelBlueprint)) return null;
-  if (!Array.isArray(input.levelBlueprint.rows)) return null;
-  const createdAt = typeof input.createdAt === "string" ? input.createdAt : new Date().toISOString();
-  const level = Math.max(1, Math.round(numberValue(input.level, 1)));
-  const score = Math.max(0, Math.round(numberValue(input.score, 0)));
-  const lives = Math.max(1, Math.round(numberValue(input.lives, 3)));
-  const clearedLevels = Math.max(0, Math.round(numberValue(input.clearedLevels, 0)));
-  const levelName = typeof input.levelName === "string" && input.levelName.trim().length > 0 ? input.levelName.trim() : "Generated Level";
-  const levelBlueprint = input.levelBlueprint as unknown as LevelBlueprint;
-  const model = isRecord(input.model) ? (input.model as LevelResponse["model"]) : { id: "composer-2", params: [{ id: "mode", value: "fast" }] };
-  if (!levelBlueprint || !isLevelBlueprint(levelBlueprint)) return null;
-  const trace = normalizeComposerTrace(input.trace);
-  return {
-    createdAt,
-    level,
-    score,
-    lives,
-    clearedLevels,
-    levelName,
-    model,
-    levelBlueprint,
-    summary: normalizeGenerationSummary(input.summary),
-    trace
-  };
-}
-
-function normalizeGenerationSummary(input: unknown): GenerationSummary | undefined {
-  if (!isRecord(input)) return undefined;
-  const source = input.source === "cursor-sdk" || input.source === "fallback" ? input.source : "fallback";
-  return {
-    source,
-    title: typeof input.title === "string" ? input.title.slice(0, 80) : source === "cursor-sdk" ? "Cursor SDK board" : "Local fallback board",
-    detail: typeof input.detail === "string" ? input.detail.slice(0, 240) : "",
-    chips: Array.isArray(input.chips) ? input.chips.filter((chip): chip is string => typeof chip === "string").slice(0, 6) : [],
-    warning: typeof input.warning === "string" ? input.warning.slice(0, 140) : undefined
-  };
-}
-
-function normalizeComposerTrace(input: unknown): LevelResponse["trace"] | undefined {
-  if (!isRecord(input)) return undefined;
-  const parseStatus = input.parseStatus;
-  if (parseStatus !== "success" && parseStatus !== "parse-failed" && parseStatus !== "worker-failed") return undefined;
-  const request = input.request;
-  if (!isRecord(request)) return undefined;
-  return {
-    request: {
-      level: numberValue(request.level, 0),
-      score: numberValue(request.score, 0),
-      lives: Math.max(1, numberValue(request.lives, 3)),
-      clearedLevels: Math.max(0, numberValue(request.clearedLevels, 0)),
-      recentEvents: Array.isArray(request.recentEvents)
-        ? request.recentEvents.filter((event): event is string => typeof event === "string")
-        : []
-    },
-    requestJson: typeof input.requestJson === "string" ? input.requestJson : JSON.stringify(request),
-    prompt: typeof input.prompt === "string" ? input.prompt : "",
-    rawOutput: typeof input.rawOutput === "string" ? input.rawOutput : "",
-    rawError: typeof input.rawError === "string" ? input.rawError : "",
-    parseStatus,
-    parseError: typeof input.parseError === "string" ? input.parseError : undefined,
-    durationMs: numberValue(input.durationMs, 0),
-    startedAt: typeof input.startedAt === "string" ? input.startedAt : new Date(0).toISOString(),
-    finishedAt: typeof input.finishedAt === "string" ? input.finishedAt : new Date(0).toISOString(),
-    workerExitCode: Number.isFinite(numberValue(input.workerExitCode, Number.NaN))
-      ? numberValue(input.workerExitCode, Number.NaN)
-      : null,
-    parsedOutput: isRecord(input.parsedOutput) ? input.parsedOutput : undefined
-  };
-}
-
-function numberValue(input: unknown, fallback: number): number {
-  return typeof input === "number" && Number.isFinite(input) ? input : fallback;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isLevelBlueprint(value: unknown): value is LevelBlueprint {
-  return isRecord(value) && Array.isArray(value.rows);
-}
-
 function readSave(): GameSave | null {
   return readJson(SAVE_KEY, normalizeSaveState);
 }
@@ -2357,7 +2245,8 @@ function readJson<T>(key: string, normalize: (value: unknown) => T | null): T | 
   try {
     const raw = localStorage.getItem(key);
     return raw ? normalize(JSON.parse(raw)) : null;
-  } catch {
+  } catch (error) {
+    warnStorageFailure("read", key, error);
     return null;
   }
 }
@@ -2365,7 +2254,12 @@ function readJson<T>(key: string, normalize: (value: unknown) => T | null): T | 
 function writeJson(key: string, value: unknown) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Local persistence is a convenience; gameplay should survive private-mode quota failures.
+  } catch (error) {
+    warnStorageFailure("write", key, error);
   }
+}
+
+function warnStorageFailure(operation: "read" | "write", key: string, error: unknown) {
+  const reason = error instanceof DOMException || error instanceof Error ? error.name : "unknown error";
+  console.warn(`Ricochet Rush could not ${operation} local state ${key}: ${reason}.`);
 }

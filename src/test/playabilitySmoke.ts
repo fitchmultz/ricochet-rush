@@ -267,28 +267,8 @@ async function stageOverlapsPlayConsole(page: { evaluate: <T>(callback: () => T)
 
 async function injectPowerupClarityState(page: { evaluate: <T>(callback: () => T) => Promise<T> }): Promise<void> {
   await page.evaluate(() => {
-    const game = window.__ricochetRushGame as unknown as {
-      powerups: Array<{ x: number; y: number; vy: number; kind: string }>;
-      balls: Array<{ fireTimer: number }>;
-      laserTimer: number;
-      grabTimer: number;
-      addFloatingText: (x: number, y: number, text: string, kind: string) => void;
-      refreshHud: () => void;
-    };
-    game.powerups.splice(
-      0,
-      game.powerups.length,
-      { x: 320, y: 330, vy: 0, kind: "expandPaddle" },
-      { x: 480, y: 330, vy: 0, kind: "shrinkPaddle" },
-      { x: 640, y: 330, vy: 0, kind: "eightBall" }
-    );
-    game.laserTimer = 7;
-    game.grabTimer = 10;
-    if (game.balls[0]) game.balls[0].fireTimer = 8;
-    game.addFloatingText(320, 430, "+Expand paddle", "powerupReward");
-    game.addFloatingText(480, 430, "-Shrink paddle", "powerupHazard");
-    game.addFloatingText(640, 430, "! Eight ball", "powerupVolatile");
-    game.refreshHud();
+    if (!window.__ricochetRushGame) throw new Error("Ricochet Rush game is not mounted.");
+    window.__ricochetRushGame.debugStageVisualSmokeState();
   });
 }
 

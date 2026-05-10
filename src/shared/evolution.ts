@@ -154,6 +154,30 @@ const STYLE_GOALS: Record<DesignerStyle, string> = {
 };
 
 const DIFFICULTY_LABELS = ["soft", "steady", "sharp", "hot", "wild"] as const;
+const MAX_REQUEST_LEVEL = 999;
+const MAX_REQUEST_SCORE = 999_999_999;
+const MAX_REQUEST_LIVES = 99;
+const MAX_RECENT_EVENTS = 5;
+
+export function normalizeLevelRequest(input: unknown): LevelRequest | null {
+  if (!isRecord(input)) return null;
+  const level = boundedInteger(input.level, 1, MAX_REQUEST_LEVEL);
+  const score = boundedInteger(input.score, 0, MAX_REQUEST_SCORE);
+  const lives = boundedInteger(input.lives, 0, MAX_REQUEST_LIVES);
+  const clearedLevels = boundedInteger(input.clearedLevels, 0, MAX_REQUEST_LEVEL);
+  if (level === null || score === null || lives === null || clearedLevels === null) return null;
+  if (!Array.isArray(input.recentEvents) || !input.recentEvents.every((event): event is string => typeof event === "string")) return null;
+  const recentEvents = input.recentEvents.slice(0, MAX_RECENT_EVENTS);
+  const request: LevelRequest = {
+    level,
+    score,
+    lives,
+    clearedLevels,
+    recentEvents
+  };
+  if (input.designer !== undefined) request.designer = normalizeDesignerIntent(input.designer);
+  return request;
+}
 
 export function normalizeLevel(input: unknown, request: LevelRequest): LevelBlueprint {
   const raw = isRecord(input) ? input : {};
@@ -343,6 +367,13 @@ function repairBrickCount(rows: BrickCell[][], level: number): BrickCell[][] {
         count -= 1;
       }
     }
+    for (let y = BRICK_ROWS - 1; y >= 0 && count > MAX_BRICKS; y -= 1) {
+      for (let x = (y + level + 1) % 2; x < BRICK_COLUMNS && count > MAX_BRICKS; x += 2) {
+        if (!repaired[y][x]) continue;
+        repaired[y][x] = null;
+        count -= 1;
+      }
+    }
   }
 
   if (count < MIN_BRICKS) {
@@ -365,6 +396,11 @@ function stringValue(value: unknown, fallback: string): string {
 
 function numberValue(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function boundedInteger(value: unknown, min: number, max: number): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) return null;
+  return value;
 }
 
 function clamp(value: number, min: number, max: number): number {

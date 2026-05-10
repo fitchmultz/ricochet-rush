@@ -1,4 +1,4 @@
-import type { BrickKind, LevelBlueprint } from "./evolution";
+import { normalizeLevel, type BrickKind, type LevelBlueprint } from "./evolution";
 
 export const SAVE_VERSION = 3;
 
@@ -102,6 +102,7 @@ export function normalizeSaveState(input: unknown): GameSave | null {
   }
   const boardSource = rawVersion === SAVE_VERSION && input.boardSource === "pack" ? "pack" : "generated";
 
+  const levelBlueprint = normalizeLevel(input.levelBlueprint, { level, score, lives, clearedLevels: 0, recentEvents: [] });
   return {
     version: SAVE_VERSION,
     savedAt: stringValue(input.savedAt, new Date(0).toISOString()),
@@ -115,7 +116,7 @@ export function normalizeSaveState(input: unknown): GameSave | null {
     lives,
     combo: clamp(numberValue(input.combo, 1), 1, 8),
     paddleWidth: clamp(numberValue(input.paddleWidth, 116), 58, 210),
-    levelBlueprint: input.levelBlueprint as unknown as LevelBlueprint,
+    levelBlueprint,
     bricks: input.bricks.map(normalizeBrick).filter((brick): brick is SavedBrick => brick !== null),
     recentEvents: Array.isArray(input.recentEvents) ? input.recentEvents.filter((event): event is string => typeof event === "string").slice(0, 6) : [],
     laserTimer,

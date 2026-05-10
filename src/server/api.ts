@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, normalize } from "node:path";
 import { requestEvolution } from "./cursorAgent.js";
-import type { LevelRequest } from "../shared/evolution.js";
+import { normalizeLevelRequest } from "../shared/evolution.js";
 
 const MIME_TYPES: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
@@ -14,6 +14,15 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 type FallbackHandler = (request: IncomingMessage, response: ServerResponse, next?: (error?: unknown) => void) => void;
+
+class HttpError extends Error {
+  constructor(
+    readonly status: number,
+    message: string
+  ) {
+    super(message);
+  }
+}
 
 export function createApiServer(options: { staticDir?: string; fallback?: FallbackHandler } = {}) {
   return createServer(async (request, response) => {
@@ -37,7 +46,7 @@ export function createApiServer(options: { staticDir?: string; fallback?: Fallba
       if (options.fallback) {
         options.fallback(request, response, (error?: unknown) => {
           if (error) {
-            sendJson(response, 500, { error: error instanceof Error ? error.message : "Fallback handler failed" });
+            sendJson(response, 500, { error: "Fallback handler failed" });
             return;
           }
           sendJson(response, 404, { error: "Not found" });
@@ -47,16 +56,25 @@ export function createApiServer(options: { staticDir?: string; fallback?: Fallba
 
       sendJson(response, 404, { error: "Not found" });
     } catch (error) {
-      sendJson(response, 500, {
-        error: error instanceof Error ? error.message : "Unknown server error"
-      });
+      if (error instanceof HttpError) {
+        sendJson(response, error.status, { error: error.message });
+        return;
+      }
+      sendJson(response, 500, { error: "Internal server error" });
     }
   });
 }
 
 async function handleEvolution(request: IncomingMessage, response: ServerResponse) {
   const body = await readBody(request);
-  const levelRequest = JSON.parse(body) as LevelRequest;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    throw new HttpError(400, "Invalid JSON body.");
+  }
+  const levelRequest = normalizeLevelRequest(payload);
+  if (!levelRequest) throw new HttpError(400, "Invalid level request.");
   const result = await requestEvolution(levelRequest);
   sendJson(response, 200, result);
 }
@@ -65,7 +83,13 @@ async function serveStatic(staticDir: string, pathname: string, response: Server
   const requestedPath = pathname === "/" ? "/index.html" : pathname;
   const safePath = normalize(requestedPath).replace(/^(\.\.(\/|\\|$))+/, "");
   const filePath = join(staticDir, safePath);
-  const body = await readFile(filePath);
+  let body: Buffer;
+  try {
+    body = await readFile(filePath);
+  } catch (error) {
+    if (isMissingFileError(error)) throw new HttpError(404, "Not found");
+    throw error;
+  }
   response.writeHead(200, {
     "content-type": MIME_TYPES[extname(filePath)] ?? "application/octet-stream"
   });
@@ -75,16 +99,34 @@ async function serveStatic(staticDir: string, pathname: string, response: Server
 function readBody(request: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let body = "";
+    let bodyBytes = 0;
+    let settled = false;
+    const rejectOnce = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
     request.setEncoding("utf8");
     request.on("data", (chunk) => {
-      body += chunk;
-      if (body.length > 32_000) {
-        request.destroy(new Error("Request body too large"));
+      if (settled) return;
+      bodyBytes += Buffer.byteLength(chunk, "utf8");
+      if (bodyBytes > 32_000) {
+        rejectOnce(new HttpError(413, "Request body too large."));
+        return;
       }
+      body += chunk;
     });
-    request.on("end", () => resolve(body));
-    request.on("error", reject);
+    request.on("end", () => {
+      if (settled) return;
+      settled = true;
+      resolve(body);
+    });
+    request.on("error", rejectOnce);
   });
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
 
 function sendJson(response: ServerResponse, status: number, payload: unknown) {
