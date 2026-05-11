@@ -42,6 +42,7 @@ export interface HudState {
     music: boolean;
   };
   activePowers: { label: string; seconds: number; maxSeconds: number; tone: "reward" | "hazard" | "volatile" }[];
+  powerupPrimerDismissed: boolean;
   packs: HudPackItem[];
   canSaveBoard: boolean;
   canRateBoard: boolean;
@@ -66,6 +67,7 @@ export interface HudActions {
   selectPack(packId: string): void;
   updateDesigner(intent: BoardDesignerIntent): void;
   rateBoard(vote: DesignerVote): void;
+  dismissPowerupPrimer(): void;
   toggleSidebar(): void;
   updateSettings(settings: HudState["settings"]): void;
 }
@@ -122,6 +124,18 @@ export function createHud(root: HTMLDivElement | null): HudApi {
           <span data-hint>Keep the ball angled. Flat returns are a trap.</span>
         </div>
         <div data-compact-generation-summary class="compact-summary" hidden></div>
+        <section data-powerup-primer class="powerup-primer" aria-label="Power-up primer">
+          <div>
+            <span class="primer-kicker">Power-ups</span>
+            <strong>Read the falling icons before you catch them.</strong>
+          </div>
+          <ul>
+            <li><i class="is-reward" aria-hidden="true"></i><span>Green helps: wide paddle, fire, lasers, extra life.</span></li>
+            <li><i class="is-hazard" aria-hidden="true"></i><span>Red hurts: shrink, fast ball, kill paddle.</span></li>
+            <li><i class="is-volatile" aria-hidden="true"></i><span>Gold is chaos: multiball, warp, bomb chain swings.</span></li>
+          </ul>
+          <button type="button" data-action="dismiss-powerup-primer">Got it</button>
+        </section>
         <div class="actions" aria-label="Game actions">
           <button type="button" data-action="new-board">Design board</button>
           <button type="button" data-action="save-board">Keep board</button>
@@ -276,6 +290,8 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   const saveBoard = queryButton(root, '[data-action="save-board"]');
   const save = queryButton(root, '[data-action="save"]');
   const reset = queryButton(root, '[data-action="reset"]');
+  const powerupPrimer = query(root, "[data-powerup-primer]");
+  const dismissPowerupPrimer = queryButton(root, '[data-action="dismiss-powerup-primer"]');
   const rateUp = queryButton(root, '[data-action="rate-up"]');
   const rateDown = queryButton(root, '[data-action="rate-down"]');
   const sidebarToggle = queryButton(root, '[data-action="toggle-sidebar"]');
@@ -395,6 +411,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   saveBoard.addEventListener("click", () => actions?.saveBoardToPack());
   save.addEventListener("click", () => actions?.saveNow());
   reset.addEventListener("click", () => actions?.resetProgress());
+  dismissPowerupPrimer.addEventListener("click", () => actions?.dismissPowerupPrimer());
   rateUp.addEventListener("click", () => actions?.rateBoard("up"));
   rateDown.addEventListener("click", () => actions?.rateBoard("down"));
   sidebarToggle.addEventListener("click", () => actions?.toggleSidebar());
@@ -475,6 +492,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       designerFeedback.textContent = `${state.designer.feedbackCount} note${state.designer.feedbackCount === 1 ? "" : "s"}`;
       renderSummary(generationSummary, state.designer.generationSummary);
       renderCompactSummary(compactGenerationSummary, state);
+      powerupPrimer.hidden = state.powerupPrimerDismissed;
       ballSpeed.value = String(state.settings.ballSpeed);
       particles.checked = state.settings.particles;
       reducedMotion.checked = state.settings.reducedMotion;

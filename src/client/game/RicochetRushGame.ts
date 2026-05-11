@@ -210,6 +210,7 @@ const SAVED_BOARDS_KEY = "ricochet-rush-saved-boards";
 const SAVED_BOARDS_MAX = 24;
 const DESIGNER_INTENT_KEY = "ricochet-rush-designer-intent";
 const DESIGNER_FEEDBACK_KEY = "ricochet-rush-designer-feedback";
+const POWERUP_PRIMER_DISMISSED_KEY = "ricochet-rush-powerup-primer-dismissed";
 const DESIGNER_FEEDBACK_MAX = 8;
 const POWER_DURATIONS: Record<string, number> = {
   Laser: 8,
@@ -410,6 +411,7 @@ export class RicochetRushGame {
   private designerIntent: BoardDesignerIntent = DEFAULT_DESIGNER_INTENT;
   private designerFeedback: BoardDesignerFeedback[] = [];
   private currentBoardVote: DesignerVote | null = null;
+  private powerupPrimerDismissed = false;
   private latestGenerationSummary?: GenerationSummary;
 
   constructor(mount: HTMLDivElement, hud: HudApi) {
@@ -425,6 +427,7 @@ export class RicochetRushGame {
       feedback: this.designerFeedback
     };
     this.sidebarCollapsed = readJson(SIDEBAR_COLLAPSED_KEY, normalizeBoolean) ?? false;
+    this.powerupPrimerDismissed = readJson(POWERUP_PRIMER_DISMISSED_KEY, normalizeBoolean) ?? false;
     this.bestScore = Math.max(readBestScore(), readSave()?.bestScore ?? 0);
     this.setupRenderer();
     this.setupScene();
@@ -489,6 +492,7 @@ export class RicochetRushGame {
       currentBoardVote: this.currentBoardVote,
       generationSummary: this.latestGenerationSummary,
       settings: this.settings,
+      powerupPrimerDismissed: this.powerupPrimerDismissed,
       recentEvents: this.recentEvents,
       announcement: this.announcement
     };
@@ -659,6 +663,9 @@ export class RicochetRushGame {
       },
       rateBoard: (vote) => {
         this.rateCurrentBoard(vote);
+      },
+      dismissPowerupPrimer: () => {
+        this.dismissPowerupPrimer();
       },
       updateSettings: (settings) => {
         this.settings = normalizeSettings(settings);
@@ -1610,6 +1617,7 @@ export class RicochetRushGame {
       sidebarCollapsed: this.sidebarCollapsed,
       settings: this.settings,
       activePowers: this.collectActivePowers(),
+      powerupPrimerDismissed: this.powerupPrimerDismissed,
       packs: this.collectPackItems(),
       canSaveBoard: this.boardContext.source === "generated" && this.bricks.length > 0,
       canRateBoard: this.boardContext.source === "generated" && this.bricks.length > 0,
@@ -1649,6 +1657,13 @@ export class RicochetRushGame {
   private pushEvent(event: string) {
     this.recentEvents.unshift(event);
     this.recentEvents.splice(6);
+  }
+
+  private dismissPowerupPrimer() {
+    this.powerupPrimerDismissed = true;
+    writeJson(POWERUP_PRIMER_DISMISSED_KEY, true);
+    this.pushEvent("Power-up primer dismissed.");
+    this.refreshHud("Power-up primer dismissed.");
   }
 
   private announce(message: string) {

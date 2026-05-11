@@ -49,6 +49,7 @@ interface DebugSnapshot {
     sfx: boolean;
     music: boolean;
   };
+  powerupPrimerDismissed: boolean;
   recentEvents: string[];
   announcement: string;
 }
@@ -85,10 +86,17 @@ try {
   assert((await page.locator('link[rel="icon"][href="/assets/ricochet-rush-icon.svg"]').count()) === 1, "Expected branded favicon asset.");
   assert(await page.locator(".play-console").count() === 1, "Expected a compact play console.");
   assert((await page.locator(".brand-mark").count()) === 1, "Expected the original brand mark in the Play Console.");
+  assert(await page.locator("[data-powerup-primer]").isVisible(), "Expected first-run power-up primer to be visible.");
+  const primerText = await page.locator("[data-powerup-primer]").innerText();
+  assert(primerText.includes("Green helps") && primerText.includes("Red hurts") && primerText.includes("Gold is chaos"), "Expected primer to explain power-up color tones.");
   assert(await page.locator(".play-console .designer-panel, .play-console .pack-browser, .play-console .settings, .play-console .agent-trace").count() === 0, "Expected heavy tools outside the play console.");
   assert(await page.locator("[data-tool-surface]").isHidden(), "Expected tool panels to be closed by default.");
   assert(await page.locator('[data-action="save-board"]').isDisabled(), "Expected Keep board to be disabled for authored boards.");
   assert(await hasFocusedOverlayAction(page), "Expected ready overlay to focus its primary action.");
+  await page.locator('[data-action="dismiss-powerup-primer"]').click();
+  assert((await snapshot(page)).powerupPrimerDismissed, "Expected power-up primer dismissal in debug state.");
+  assert(await hasLocalStorageKey(page, "ricochet-rush-powerup-primer-dismissed"), "Expected power-up primer dismissal to persist.");
+  assert(await page.locator("[data-powerup-primer]").isHidden(), "Expected dismissed power-up primer to hide.");
   assert(await canvasHasVisiblePixels(page), "Expected the WebGL canvas to render nonblank gameplay pixels.");
   assert(!(await stageOverlapsPlayConsole(page)), "Expected desktop playfield and Play Console not to overlap.");
   await page.locator('[data-tool-panel="packs"]').click();
@@ -192,6 +200,8 @@ try {
   assert(restoredSettings.settings.sfx, "Expected SFX setting to persist after reload.");
   assert(restoredSettings.settings.music, "Expected music setting to persist after reload.");
   assert(!restoredSettings.settings.particles, "Expected particles setting to persist after reload.");
+  assert(restoredSettings.powerupPrimerDismissed, "Expected dismissed power-up primer to persist after reload.");
+  assert(await page.locator("[data-powerup-primer]").isHidden(), "Expected dismissed power-up primer to stay hidden after reload.");
 
   await page.locator('[data-action="clear-save"], [data-action="reset"]').click();
   const confirmText = await page.locator(".overlay-card").innerText();

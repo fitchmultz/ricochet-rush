@@ -12,7 +12,6 @@ This list is public and should stay practical. It is not a private strategy docu
 
 ## Next Bets
 
-- Add a small onboarding prompt for first-time power-up categories after playtesting confirms the right wording.
 - Add optional touch controls if mobile play becomes a primary demo path.
 - Split the Three.js runtime into a separate lazy chunk if load time becomes a real issue.
 - Add a short capture clip to the README once the final public demo flow is recorded.
