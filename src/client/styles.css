@@ -866,6 +866,43 @@ body {
   accent-color: #7ef1ff;
 }
 
+.agent-pipeline {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid rgba(126, 241, 255, 0.2);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(126, 241, 255, 0.09), rgba(255, 224, 102, 0.045));
+  color: #c8d4d1;
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.agent-pipeline div {
+  display: grid;
+  gap: 3px;
+}
+
+.agent-pipeline span {
+  color: #7ef1ff;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.agent-pipeline strong {
+  color: #ffffff;
+  font-size: 0.8rem;
+}
+
+.agent-pipeline ol {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
 .designer-readout {
   display: grid;
   gap: 5px;

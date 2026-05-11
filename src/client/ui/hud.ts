@@ -1,4 +1,5 @@
 import {
+  CURSOR_MODEL,
   DESIGNER_STYLES,
   type BoardDesignerIntent,
   type ComposerAgentTrace,
@@ -165,6 +166,17 @@ export function createHud(root: HTMLDivElement | null): HudApi {
         <div class="tool-body">
           <section class="designer-panel tool-view" data-tool-view="designer" aria-label="Board designer">
             <div class="panel-heading">Board Designer</div>
+            <section class="agent-pipeline" data-agent-pipeline aria-label="Cursor SDK agent pipeline">
+              <div>
+                <span>Agent pipeline</span>
+                <strong>Intent → ${CURSOR_MODEL.id} → validation → playable wall</strong>
+              </div>
+              <ol>
+                <li>Designer controls become a structured prompt for the local server.</li>
+                <li>Cursor SDK credentials stay server-side; browser code never receives API keys.</li>
+                <li>Every response is normalized into the same bounded brick grid, with fallback ready.</li>
+              </ol>
+            </section>
             <div class="designer-controls">
               <label>
                 <span>Style</span>

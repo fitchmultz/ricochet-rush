@@ -107,6 +107,9 @@ try {
   await page.locator('[data-tool-panel="designer"]').click();
   assert((await page.locator("[data-tool-title]").innerText()) === "Board Designer", "Expected Board Designer title.");
   assert(await page.locator(".designer-panel").isVisible(), "Expected Board Designer controls in a focused panel.");
+  const agentPipelineText = await page.locator("[data-agent-pipeline]").innerText();
+  assert(agentPipelineText.includes("Intent → composer-2 → validation → playable wall"), "Expected Board Designer to explain the Cursor SDK agent pipeline.");
+  assert(agentPipelineText.includes("server-side") && agentPipelineText.includes("fallback"), "Expected agent pipeline to explain credential safety and fallback behavior.");
   assert((await page.locator("[data-designer-targets]").innerText()).includes("66 bricks"), "Expected visible designer target counts.");
   const canvasLabel = await page.locator('[data-testid="ricochet-rush-canvas"]').getAttribute("aria-label");
   assert(canvasLabel?.includes("Level 1") === true, "Expected canvas to expose current game state.");
