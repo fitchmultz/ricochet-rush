@@ -451,6 +451,48 @@ body {
   background: #ffe066;
 }
 
+.touch-controls {
+  position: absolute;
+  left: 50%;
+  bottom: 52px;
+  z-index: 5;
+  display: none;
+  grid-template-columns: 54px minmax(96px, 1fr) 54px 74px;
+  gap: 8px;
+  width: min(94%, 370px);
+  transform: translateX(-50%);
+}
+
+.touch-controls button {
+  min-height: 48px;
+  border: 1px solid rgba(126, 241, 255, 0.38);
+  border-radius: 999px;
+  background: rgba(6, 10, 17, 0.78);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.34);
+  color: #edf4ef;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 900;
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.touch-controls button:hover,
+.touch-controls button:focus-visible {
+  border-color: rgba(255, 224, 102, 0.72);
+  background: rgba(255, 224, 102, 0.16);
+  color: #ffe066;
+  outline: none;
+}
+
+.touch-controls .touch-primary {
+  border-color: rgba(255, 224, 102, 0.72);
+  background: #ffe066;
+  color: #141006;
+}
+
 .hint {
   position: absolute;
   left: 14px;
@@ -1436,8 +1478,17 @@ body {
     flex-direction: column;
   }
 
+  .touch-controls {
+    display: grid;
+  }
+
+  .stage.has-visible-overlay .touch-controls {
+    display: none;
+  }
+
   .hint {
     right: 14px;
+    bottom: 8px;
   }
 
   .panel {

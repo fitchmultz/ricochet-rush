@@ -228,6 +228,24 @@ try {
   const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   assert(!mobileOverflow, "Expected narrow layout without horizontal overflow.");
   assert(await canvasHasVisiblePixels(page), "Expected mobile viewport to keep rendering the game canvas.");
+  assert(await page.locator(".touch-controls").isVisible(), "Expected mobile touch controls to be visible.");
+  await page.locator('[data-touch-action="primary"]').click();
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "playing");
+  const touchLaunched = await snapshot(page);
+  assert(touchLaunched.balls.some((ball) => !ball.stuck), "Expected touch launch to start play.");
+  await page.locator('[data-touch-action="right"]').dispatchEvent("pointerdown");
+  await page.waitForTimeout(180);
+  await page.locator('[data-touch-action="right"]').dispatchEvent("pointerup");
+  const touchMovedRight = await snapshot(page);
+  assert(touchMovedRight.paddleX > touchLaunched.paddleX, "Expected right touch control to move the paddle right.");
+  await page.locator('[data-touch-action="left"]').dispatchEvent("pointerdown");
+  await page.waitForTimeout(180);
+  await page.locator('[data-touch-action="left"]').dispatchEvent("pointerup");
+  assert((await snapshot(page)).paddleX < touchMovedRight.paddleX, "Expected left touch control to move the paddle left.");
+  await page.locator('[data-touch-action="pause"]').click();
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
+  assert((await page.locator(".overlay-card").innerText()).includes("Paused"), "Expected touch pause to open the pause overlay.");
+  assert(await page.locator(".touch-controls").isHidden(), "Expected touch controls to hide while an overlay is visible.");
 } finally {
   await browser.close();
   await new Promise<void>((resolveClose, rejectClose) => {

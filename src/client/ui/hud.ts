@@ -108,6 +108,12 @@ export function createHud(root: HTMLDivElement | null): HudApi {
           </div>
           <div data-status class="status"></div>
         </div>
+        <div class="touch-controls" aria-label="Touch controls">
+          <button type="button" data-touch-action="left" aria-label="Move paddle left">←</button>
+          <button type="button" data-touch-action="primary" class="touch-primary">Launch</button>
+          <button type="button" data-touch-action="right" aria-label="Move paddle right">→</button>
+          <button type="button" data-touch-action="pause">Pause</button>
+        </div>
         <div class="hint">A/D or arrows move - Space/Enter launch or continue - P/Escape pause - N design or reroll</div>
         <div data-live-announcement class="sr-only" aria-live="polite" aria-atomic="true"></div>
       </section>

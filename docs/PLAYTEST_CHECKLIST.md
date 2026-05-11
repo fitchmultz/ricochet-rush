@@ -28,7 +28,7 @@ The gate must pass before calling the build ready.
 - Confirm no horizontal scroll.
 - Confirm the board, Play Console, and tool drawer stack without overlapping text or controls.
 - Open Designer, Boards, Options, and Details once each.
-- Launch and pause with keyboard-equivalent controls where available.
+- Launch, steer left/right, and pause with the on-screen touch controls.
 
 ## Visual Checks
 

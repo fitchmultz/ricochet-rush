@@ -641,6 +641,43 @@ export class RicochetRushGame {
       applyPointerPaddle(event.clientX);
       this.handlePrimaryAction();
     });
+    this.bindTouchControls();
+  }
+
+  private bindTouchControls() {
+    const shell = this.mount.closest<HTMLElement>(".shell");
+    if (!shell) return;
+    const bindDirection = (action: "left" | "right", code: "ArrowLeft" | "ArrowRight") => {
+      const button = shell.querySelector<HTMLButtonElement>(`[data-touch-action="${action}"]`);
+      if (!button) return;
+      const press = (event: Event) => {
+        event.preventDefault();
+        this.keys.add(code);
+        this.lastKeyboardAt = performance.now();
+        this.renderer.domElement.focus({ preventScroll: true });
+      };
+      const release = (event: Event) => {
+        event.preventDefault();
+        this.keys.delete(code);
+      };
+      button.addEventListener("pointerdown", press);
+      button.addEventListener("pointerup", release);
+      button.addEventListener("pointercancel", release);
+      button.addEventListener("pointerleave", release);
+      button.addEventListener("contextmenu", (event) => event.preventDefault());
+    };
+    bindDirection("left", "ArrowLeft");
+    bindDirection("right", "ArrowRight");
+    shell.querySelector<HTMLButtonElement>('[data-touch-action="primary"]')?.addEventListener("click", (event) => {
+      event.preventDefault();
+      this.renderer.domElement.focus({ preventScroll: true });
+      this.handlePrimaryAction();
+    });
+    shell.querySelector<HTMLButtonElement>('[data-touch-action="pause"]')?.addEventListener("click", (event) => {
+      event.preventDefault();
+      this.renderer.domElement.focus({ preventScroll: true });
+      this.togglePause();
+    });
   }
 
   private bindHudActions() {
@@ -2039,6 +2076,7 @@ export class RicochetRushGame {
 
   private showOverlay(title: string, body: string, actionLabel?: string, action?: () => void, busy = false, secondaryLabel?: string, secondaryAction?: () => void) {
     this.previouslyFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    this.mount.closest<HTMLElement>(".stage")?.classList.add("has-visible-overlay");
     this.overlay.classList.add("is-visible");
     this.overlay.innerHTML = `
       <div class="overlay-card" role="dialog" aria-modal="true" aria-label="${escapeAttribute(title)}">
@@ -2063,6 +2101,7 @@ export class RicochetRushGame {
 
   private hideOverlay() {
     this.overlay.classList.remove("is-visible");
+    this.mount.closest<HTMLElement>(".stage")?.classList.remove("has-visible-overlay");
     this.overlay.innerHTML = "";
     if (this.previouslyFocusedElement?.isConnected) this.previouslyFocusedElement.focus({ preventScroll: true });
     this.previouslyFocusedElement = null;
