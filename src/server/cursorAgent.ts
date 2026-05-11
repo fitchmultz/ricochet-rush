@@ -45,6 +45,30 @@ export async function requestEvolution(request: LevelRequest): Promise<LevelResp
     };
   }
 
+  if (!process.env.CURSOR_API_KEY) {
+    const warning = "Cursor SDK authentication is unavailable.";
+    const now = Date.now();
+    const trace = toTrace(request, requestJson, prompt, {
+      parsed: null,
+      parseStatus: "worker-failed",
+      parseError: warning,
+      rawOutput: "",
+      rawError: warning,
+      startedAt: now,
+      finishedAt: now,
+      workerExitCode: null
+    });
+    const level = fallbackLevel(request);
+    return {
+      level,
+      source: "fallback",
+      model: CURSOR_MODEL,
+      summary: buildGenerationSummary(request, level, "fallback", warning, trace),
+      warning,
+      trace
+    };
+  }
+
   try {
     const workerResult = await runCursorWorker(request);
     const trace = toTrace(request, requestJson, prompt, workerResult);

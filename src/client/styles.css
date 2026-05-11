@@ -579,6 +579,16 @@ body {
   color: #ffe066;
 }
 
+.compact-summary.is-cursor-sdk div span {
+  background: rgba(126, 241, 255, 0.12);
+  color: #7ef1ff;
+}
+
+.compact-summary em {
+  color: #ffcf7a;
+  font-style: normal;
+}
+
 .powerup-primer {
   border-color: rgba(255, 224, 102, 0.22);
   background: linear-gradient(135deg, rgba(255, 224, 102, 0.1), rgba(126, 241, 255, 0.045));

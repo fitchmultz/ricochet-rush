@@ -125,6 +125,10 @@ try {
   assert(designed.generationSummary?.title === "Local fallback board", "Expected public generation summary for forced fallback.");
   assert(await page.locator("[data-generation-summary]").isVisible(), "Expected visible public generation summary.");
   assert(await page.locator("[data-compact-generation-summary]").isVisible(), "Expected compact generated-board summary in the play console.");
+  const compactSummaryText = await page.locator("[data-compact-generation-summary]").innerText();
+  assert(compactSummaryText.toLowerCase().includes("fallback generated"), "Expected compact summary to foreground fallback status.");
+  assert((await page.locator("[data-compact-generation-summary].is-fallback em").innerText()).length > 0, "Expected compact summary to surface fallback warning text.");
+  assert(await page.locator("[data-compact-generation-summary].is-fallback").count() === 1, "Expected compact summary to expose fallback source styling.");
   assert(await page.locator('[data-action="save-board"]').isEnabled(), "Expected generated boards to be keepable.");
   await page.locator('[data-action="rate-up"]').click();
   assert((await snapshot(page)).currentBoardVote === "up", "Expected generated board feedback to be captured.");

@@ -593,19 +593,24 @@ function renderCompactSummary(element: HTMLElement, state: HudState) {
   const summary = state.designer.generationSummary;
   if (state.boardSource !== "generated" || !summary) {
     element.hidden = true;
+    element.classList.remove("is-cursor-sdk", "is-fallback");
     element.innerHTML = "";
     return;
   }
 
   element.hidden = false;
+  element.classList.toggle("is-cursor-sdk", summary.source === "cursor-sdk");
+  element.classList.toggle("is-fallback", summary.source === "fallback");
   const chips = summary.chips
     .slice(0, 3)
     .map((chip) => `<span>${escapeHtml(chip)}</span>`)
     .join("");
+  const statusLabel = summary.source === "cursor-sdk" ? "Cursor SDK" : "Fallback";
   element.innerHTML = `
-    <span>Generated</span>
+    <span>${statusLabel} generated</span>
     <strong>${escapeHtml(summary.title)}</strong>
     <div>${chips}</div>
+    ${summary.warning ? `<em>${escapeHtml(summary.warning)}</em>` : ""}
   `;
 }
 

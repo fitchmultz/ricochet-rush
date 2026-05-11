@@ -357,11 +357,14 @@ describe("Cursor SDK level generation contract", () => {
     delete process.env.RICOCHET_RUSH_FORCE_FALLBACK;
     try {
       const response = await requestEvolution({ ...request, level: 11 });
+      expect(response.source).toBe("fallback");
+      expect(response.warning).toBe("Cursor SDK authentication is unavailable.");
       expect(response.trace).toBeTruthy();
       expect(response.trace?.request.level).toBe(11);
       expect(response.trace?.requestJson).toContain("\"level\":11");
       expect(response.trace?.prompt).toContain("composer-2");
-      expect(response.trace?.parseStatus).toMatch(/success|parse-failed|worker-failed/);
+      expect(response.trace?.parseStatus).toBe("worker-failed");
+      expect(response.trace?.parseError).toBe("Cursor SDK authentication is unavailable.");
       expect(response.trace?.rawOutput).toBeTypeOf("string");
       expect(response.trace?.durationMs).toBeGreaterThanOrEqual(0);
     } finally {
