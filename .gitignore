@@ -3,5 +3,6 @@
 .env.*
 .scratchpad.md
 dist/
+docs/media/.capture-tmp/
 node_modules/
 

@@ -10,6 +10,8 @@ The game includes curated board packs for repeatable runs, plus a visible board 
 
 ![Ricochet Rush desktop gameplay](docs/media/ricochet-rush-desktop.png)
 
+<video src="docs/media/ricochet-rush-demo.webm" controls muted playsinline width="960" aria-label="Ricochet Rush gameplay and board designer demo"></video>
+
 ## Run
 
 ```sh
@@ -52,6 +54,12 @@ npm run ci
 The CI gate builds the app, runs unit tests for level/save/pack/designer/power-up contracts, and runs a Playwright smoke against the production preview. The smoke verifies curated-pack boot, designer intent persistence, fallback generation summaries, saved generated boards, feedback capture, board selection, paddle movement, save/clear behavior, settings persistence, canvas rendering, and layout overflow.
 
 Set `CURSOR_API_KEY` to enable live Cursor SDK level generation. Set `RICOCHET_RUSH_FORCE_FALLBACK=1` when deterministic fallback generation is desired.
+
+To refresh the README demo clip after visual changes, run:
+
+```sh
+npm run capture:demo
+```
 
 ## Demo And QA
 
