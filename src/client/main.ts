@@ -1,10 +1,10 @@
 import "./styles.css";
-import { RicochetRushGame } from "./game/RicochetRushGame";
 import { createHud } from "./ui/hud";
+import type { RicochetRushGame as RicochetRushGameInstance } from "./game/RicochetRushGame";
 
 declare global {
   interface Window {
-    __ricochetRushGame?: RicochetRushGame;
+    __ricochetRushGame?: RicochetRushGameInstance;
   }
 }
 
@@ -15,6 +15,7 @@ if (!mount) {
   throw new Error("Missing #game mount");
 }
 
+const { RicochetRushGame } = await import("./game/RicochetRushGame");
 const game = new RicochetRushGame(mount, hud);
 window.__ricochetRushGame = game;
 game.start();

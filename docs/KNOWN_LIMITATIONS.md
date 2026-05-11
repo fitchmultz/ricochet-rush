@@ -8,9 +8,8 @@ This list is public and should stay practical. It is not a private strategy docu
 - Progress, saved boards, settings, and best score are local to the current browser storage.
 - Mobile works as a responsive browser game with on-screen touch controls, while desktop keyboard play remains the crispest input path.
 - Music is procedural and intentionally lightweight; there are no recorded audio assets yet.
-- Bundle size is above Vite's default chunk warning because Three.js and the local game runtime ship together.
+- First game load still includes the Three.js vendor chunk; the local game runtime is split from it.
 
 ## Next Bets
 
-- Split the Three.js runtime into a separate lazy chunk if load time becomes a real issue.
 - Add a short capture clip to the README once the final public demo flow is recorded.
