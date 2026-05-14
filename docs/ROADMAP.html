@@ -205,6 +205,9 @@ Roadmap</a>
 <ul>
 <li><a href="#done---identity-cutover"
 id="toc-done---identity-cutover">Done - Identity Cutover</a></li>
+<li><a href="#done---dependency-and-cursor-sdk-runtime-refresh"
+id="toc-done---dependency-and-cursor-sdk-runtime-refresh">Done -
+Dependency And Cursor SDK Runtime Refresh</a></li>
 <li><a href="#p1---game-feel-and-physics"
 id="toc-p1---game-feel-and-physics">P1 - Game Feel And Physics</a></li>
 <li><a href="#p2---curated-board-packs"
@@ -292,6 +295,47 @@ notes stay ignored.</li>
 audit items are low-severity transitive
 <code>@cursor/sdk</code>/<code>sqlite3</code> chain findings with no
 available fix.</li>
+</ul>
+<h3 id="done---dependency-and-cursor-sdk-runtime-refresh">Done -
+Dependency And Cursor SDK Runtime Refresh</h3>
+<p>Status: complete as of May 14, 2026.</p>
+<p>Completed:</p>
+<ul>
+<li>Updated direct package pins to <code>@cursor/sdk@1.0.13</code>,
+<code>vite@8.0.13</code>, <code>vitest@4.1.6</code>,
+<code>playwright@1.60.0</code>, <code>tsx@4.22.0</code>, and
+<code>@types/node@25.8.0</code>.</li>
+<li>Kept the existing transitive refresh for
+<code>semver@7.8.0</code> and <code>socks@2.8.9</code> in the
+lockfile.</li>
+<li>Updated the Cursor SDK worker to consume <code>run.stream()</code>
+for assistant text, use <code>run.wait()</code> for terminal status, and
+await SDK async disposal.</li>
+<li>Changed the SDK handoff from large row-object JSON to a compact 14x9
+grid draft, then materialized and validated that draft locally. This keeps
+live SDK generation fast enough to finish while preserving the canonical
+brick-grid contract.</li>
+<li>Trimmed and passed <code>CURSOR_API_KEY</code> explicitly into the
+worker environment before starting SDK work.</li>
+<li>Mapped newer SDK failure shapes such as busy agents, stream-buffer
+overflow, unavailable models, empty assistant output, and invalid JSON
+back to public fallback warnings.</li>
+<li>Added a browser-side generation watchdog so interrupted or overlong
+Cursor SDK requests fall back locally instead of leaving the game stuck on
+the Generating overlay.</li>
+<li>Installed the matching Playwright Chromium browser for the updated
+smoke runner on this machine.</li>
+</ul>
+<p>Verified:</p>
+<ul>
+<li><code>npm outdated --json</code> returns no outdated direct
+packages.</li>
+<li><code>npm audit --audit-level=moderate</code> exits cleanly; the
+remaining report is low-severity transitive
+<code>@cursor/sdk</code>/<code>sqlite3</code> audit debt with no
+available fix.</li>
+<li><code>npm run build</code>, <code>npm run test</code>, and
+<code>npm run smoke</code> pass with the updated package set.</li>
 </ul>
 <h3 id="p1---game-feel-and-physics">P1 - Game Feel And Physics</h3>
 <p>Goal: make the core loop feel sharp before adding more surface
@@ -402,7 +446,7 @@ shared level validation path before play.</li>
 saved-board shape, and current/v1/v2 save-state migration.</li>
 <li>Playwright smoke coverage verifies Starter boot, pack cards, Saved
 Designs unlock after keeping a generated board, settings persistence,
-save/clear flow, keyboard launch, pause, and responsive overflow
+autosave/clear flow, keyboard launch, pause, and responsive overflow
 checks.</li>
 <li>Screenshot review passed for desktop <code>1280x820</code> and
 mobile <code>390x760</code>.</li>
@@ -420,11 +464,9 @@ implementation detail.</p>
 <p>Status: complete as of May 8, 2026.</p>
 <p>Deliverables:</p>
 <ul>
-<li>Add a “Board Designer” panel with style, difficulty, density,
-special-brick bias, and seed-like prompt controls: complete.</li>
+<li>Add a prompt-first “Board Designer” panel where the player types a
+short board request: complete.</li>
 <li>Add reroll, keep, and save-to-pack actions: complete.</li>
-<li>Capture thumbs-up/down and recent events to guide later generation:
-complete.</li>
 <li>Show a concise public-friendly generation summary instead of raw
 trace by default: complete.</li>
 <li>Keep raw trace available behind a dev/details panel: complete.</li>
@@ -433,22 +475,21 @@ trace by default: complete.</li>
 <ul>
 <li>Added a shared board designer intent contract used by the HUD, local
 fallback generator, Cursor prompt, tests, and smoke path.</li>
-<li>Added visible controls for style, difficulty, density, special-brick
-bias, and seed phrase.</li>
-<li>Added a Designer target readout so style, density, special mix,
-hard-brick pressure, and tempo translate into concrete board
-targets.</li>
-<li>Added generated-board feedback with Good board and Needs work
-actions. Feedback and recent events are included in later generation
-requests.</li>
+<li>Reworked the visible designer surface to a single board prompt,
+removing preset style controls and the earlier feedback buttons.</li>
+<li>Kept difficulty, density, special-brick mix, and seed defaults as
+hidden tuning inputs so broad prompts still produce bounded playable
+boards.</li>
 <li>Updated local fallback generation so designer intent changes the
-generated wall even without <code>CURSOR_API_KEY</code>.</li>
-<li>Updated the Cursor prompt to send exact brick, special-brick,
-hard-brick, speed, and style-goal targets instead of only vague
-percentages.</li>
-<li>Added public generation summaries with source, intent chips,
-validation brick count, and warning text. Raw request, prompt, parsed
-response, output, and errors remain behind Composer trace details.</li>
+generated wall even without <code>CURSOR_API_KEY</code>, including
+explicit shape and material briefs such as heart-shaped all-bomb
+boards.</li>
+<li>Updated the Cursor prompt to treat the player's board prompt as the
+primary design source of truth while still sending exact brick,
+special-brick, hard-brick, speed, and compact-grid bounds.</li>
+<li>Added public generation summaries with intent chips, final brick
+count, and warning text. Raw request, prompt, parsed response, output,
+and errors remain behind generation trace details.</li>
 <li>Existing Keep board behavior now acts as the save-to-pack path for
 generated designs.</li>
 </ul>
@@ -458,10 +499,10 @@ generated designs.</li>
 <li>Unit coverage validates designer prompt content, designer intent
 normalization, fallback intent behavior, public generation summaries,
 and forced fallback summary behavior.</li>
-<li>Playwright smoke coverage verifies designer control persistence,
-fallback generation summary visibility, generated-board feedback
-capture, Saved Designs unlock, settings persistence, save/clear flow,
-keyboard launch, pause, and responsive overflow checks.</li>
+<li>Playwright smoke coverage verifies prompt typing with spaces,
+designer prompt persistence, fallback generation summary visibility,
+Saved Designs unlock, settings persistence, autosave/clear flow, keyboard
+launch, pause, and responsive overflow checks.</li>
 <li>Screenshot review passed for generated-board desktop
 <code>1280x820</code> and mobile <code>390x760</code>.</li>
 </ul>
@@ -482,7 +523,7 @@ pack selection, and settings easy to reach.</p>
 <ul>
 <li>The sidebar now has too many always-visible surfaces: run actions,
 Board Designer controls, generation summary, board packs, settings,
-legend, event log, and Composer trace.</li>
+legend, event log, and generation trace.</li>
 <li>The information is useful, but it competes with itself and makes the
 game feel more like a control panel than an arcade game.</li>
 <li>Mobile makes this worse because every secondary surface becomes a
@@ -494,13 +535,13 @@ long vertical stack.</li>
 Packs, and Settings.</li>
 <li>Keep only current board name, primary action, save/keep, and one
 compact designer or pack summary visible by default.</li>
-<li>Move settings, legend, events, and Composer trace into collapsible
+<li>Move settings, legend, events, and generation trace into collapsible
 details or a separate pause/options surface.</li>
 <li>Show the generated-board summary only when the active board is
 generated, then collapse it to a one-line chip after launch.</li>
 <li>Let pack selection use a dedicated picker or drawer instead of
 showing every pack card all the time.</li>
-<li>Keep raw Composer trace as a developer/details panel, never part of
+<li>Keep raw generation trace as a developer log panel, never part of
 the default play rail.</li>
 </ul>
 <p>Implementation notes:</p>
@@ -508,11 +549,11 @@ the default play rail.</li>
 <li>Replaced the overloaded sidebar with a compact Play Console that
 keeps the current board, hint, primary run actions, tool launchers, and
 latest event visible.</li>
-<li>Moved Board Designer, Board Select, Options, and Diagnostics into
+<li>Moved Board Designer, Board Select, Options, and Run Log into
 focused drawer panels opened from the Play Console.</li>
 <li>Kept the playfield as the first read on desktop and mobile;
 secondary tools now dim the board only while intentionally open.</li>
-<li>Moved settings, brick legend, event log, and Composer trace out of
+<li>Moved settings, brick legend, event log, and generation trace out of
 the default view.</li>
 <li>Added a compact generated-board summary in the Play Console while
 the full generation summary stays in the Board Designer panel.</li>
@@ -524,7 +565,7 @@ surface and still complete the core run/save/settings flow.</li>
 <li><code>npm run ci</code> passes.</li>
 <li>Playwright smoke coverage verifies compact Play Console defaults,
 focused Board Select and Board Designer panels, compact generated
-summaries, Options settings, save/clear flow, launch/pause behavior, and
+summaries, Options settings, autosave/clear flow, launch/pause behavior, and
 responsive overflow checks.</li>
 <li>Screenshot review passed for desktop default, desktop Board
 Designer, desktop Board Select, mobile default, and mobile Options.</li>
@@ -576,7 +617,8 @@ ball lost, level clear, game over, pause, and resume.</li>
 readable instead of turning into a harsh wall of noise.</li>
 <li>Added separate SFX and Music toggles in Options, with backward
 migration from the previous single Sound setting.</li>
-<li>Added a quiet original procedural music pulse that can be enabled
+<li>Added a quiet original procedural music pulse that is enabled by
+default, starts after the first browser audio gesture, and can be toggled
 separately from SFX.</li>
 <li>Kept audio asset-free: no third-party or extracted audio files are
 committed.</li>
@@ -584,8 +626,8 @@ committed.</li>
 <p>Verified:</p>
 <ul>
 <li><code>npm run ci</code> passes.</li>
-<li>Unit coverage verifies new settings normalization and legacy
-Sound-to-SFX migration.</li>
+<li>Unit coverage verifies new settings normalization, legacy
+Sound-to-SFX migration, and the one-time SFX/Music default-on migration.</li>
 <li>Playwright smoke coverage verifies SFX and Music settings apply and
 persist.</li>
 </ul>

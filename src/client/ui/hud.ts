@@ -1,13 +1,8 @@
 import {
-  CURSOR_MODEL,
-  DESIGNER_STYLES,
+  DEFAULT_DESIGNER_INTENT,
   type BoardDesignerIntent,
   type ComposerAgentTrace,
-  type DesignerVote,
-  type GenerationSummary,
-  designerStyleGoal,
-  designerTargets,
-  designerStyleLabel
+  type GenerationSummary
 } from "../../shared/evolution";
 
 export interface HudPackItem {
@@ -46,12 +41,9 @@ export interface HudState {
   powerupPrimerDismissed: boolean;
   packs: HudPackItem[];
   canSaveBoard: boolean;
-  canRateBoard: boolean;
   boardSource: "pack" | "generated";
   designer: {
     intent: BoardDesignerIntent;
-    feedbackCount: number;
-    currentVote: DesignerVote | null;
     generationSummary?: GenerationSummary;
   };
   events: string[];
@@ -62,12 +54,10 @@ export interface HudState {
 
 export interface HudActions {
   requestBoard(): void;
-  saveNow(): void;
   saveBoardToPack(): void;
   resetProgress(): void;
   selectPack(packId: string): void;
   updateDesigner(intent: BoardDesignerIntent): void;
-  rateBoard(vote: DesignerVote): void;
   dismissPowerupPrimer(): void;
   toggleSidebar(): void;
   updateSettings(settings: HudState["settings"]): void;
@@ -84,7 +74,7 @@ const TOOL_PANEL_LABELS: Record<HudToolPanel, string> = {
   designer: "Board Designer",
   packs: "Board Select",
   options: "Options",
-  diagnostics: "Diagnostics"
+  diagnostics: "Run Log"
 };
 
 export function createHud(root: HTMLDivElement | null): HudApi {
@@ -143,17 +133,14 @@ export function createHud(root: HTMLDivElement | null): HudApi {
           </ul>
           <button type="button" data-action="dismiss-powerup-primer">Got it</button>
         </section>
-        <div class="actions" aria-label="Game actions">
-          <button type="button" data-action="new-board">Design board</button>
+        <div class="actions" data-game-actions aria-label="Game actions">
           <button type="button" data-action="save-board">Keep board</button>
-          <button type="button" data-action="save">Save run</button>
-          <button type="button" data-action="reset">Clear save</button>
         </div>
         <nav class="tool-dock" aria-label="Game tools">
           <button type="button" data-tool-panel="designer">Designer</button>
           <button type="button" data-tool-panel="packs">Boards</button>
           <button type="button" data-tool-panel="options">Options</button>
-          <button type="button" data-tool-panel="diagnostics">Details</button>
+          <button type="button" data-tool-panel="diagnostics">Log</button>
         </nav>
         <div class="console-status" aria-label="Latest event">
           <strong>Latest</strong>
@@ -172,49 +159,15 @@ export function createHud(root: HTMLDivElement | null): HudApi {
         <div class="tool-body">
           <section class="designer-panel tool-view" data-tool-view="designer" aria-label="Board designer">
             <div class="panel-heading">Board Designer</div>
-            <section class="agent-pipeline" data-agent-pipeline aria-label="Cursor SDK agent pipeline">
-              <div>
-                <span>Agent pipeline</span>
-                <strong>Intent → ${CURSOR_MODEL.id} → validation → playable wall</strong>
-              </div>
-              <ol>
-                <li>Designer controls become a structured prompt for the local server.</li>
-                <li>Cursor SDK credentials stay server-side; browser code never receives API keys.</li>
-                <li>Every response is normalized into the same bounded brick grid, with fallback ready.</li>
-              </ol>
-            </section>
             <div class="designer-controls">
-              <label>
-                <span>Style</span>
-                <select data-designer="style">
-                  ${DESIGNER_STYLES.map((style) => `<option value="${style}">${designerStyleLabel(style)}</option>`).join("")}
-                </select>
-              </label>
-              <label>
-                <span>Difficulty <strong data-designer-difficulty-value>3</strong></span>
-                <input data-designer="difficulty" type="range" min="1" max="5" step="1" value="3" />
-              </label>
-              <label>
-                <span>Density <strong data-designer-density-value>52%</strong></span>
-                <input data-designer="density" type="range" min="0.34" max="0.82" step="0.04" value="0.52" />
-              </label>
-              <label>
-                <span>Special mix <strong data-designer-special-value>45%</strong></span>
-                <input data-designer="specials" type="range" min="0" max="1" step="0.05" value="0.45" />
-              </label>
-              <label>
-                <span>Seed</span>
-                <input data-designer="seed" type="text" maxlength="36" value="fresh-angle" />
+              <label class="designer-brief">
+                <span>Board prompt</span>
+                <textarea data-designer="brief" maxlength="180" rows="4" placeholder="heart shaped board with only exploding blocks"></textarea>
               </label>
             </div>
-            <div class="designer-readout" aria-label="Designer target">
-              <strong data-designer-style-goal>Readable lanes with controlled risk.</strong>
-              <span data-designer-targets>Targeting 66 bricks, about 13 specials, sharp tempo.</span>
-            </div>
-            <div class="designer-feedback" aria-label="Generated board feedback">
-              <button type="button" data-action="rate-up">Good board</button>
-              <button type="button" data-action="rate-down">Needs work</button>
-              <span data-designer-feedback>0 notes</span>
+            <div class="designer-actions">
+              <button type="button" data-action="new-board">Design board</button>
+              <span data-designer-pending hidden>Generating Level 1...</span>
             </div>
             <div data-generation-summary class="generation-summary" hidden></div>
           </section>
@@ -250,6 +203,9 @@ export function createHud(root: HTMLDivElement | null): HudApi {
                 <input data-setting="music" type="checkbox" />
               </label>
             </form>
+            <div class="settings-actions" aria-label="Save management">
+              <button type="button" data-action="reset">Clear local save</button>
+            </div>
             <div class="legend">
               <span><i class="basic" aria-hidden="true"></i>basic</span>
               <span><i class="hard" aria-hidden="true"></i>hard</span>
@@ -266,13 +222,13 @@ export function createHud(root: HTMLDivElement | null): HudApi {
               <span><i class="boss" aria-hidden="true"></i>boss</span>
             </div>
           </section>
-          <section class="diagnostics-panel tool-view" data-tool-view="diagnostics" aria-label="Diagnostics" hidden>
-            <div class="panel-heading">Recent Events</div>
+          <section class="diagnostics-panel tool-view" data-tool-view="diagnostics" aria-label="Run log" hidden>
+            <div class="panel-heading">Run Log</div>
             <ol data-events class="events"></ol>
             <details class="agent-trace" data-agent-trace>
-              <summary>Composer trace</summary>
+              <summary>Generation trace</summary>
               <div class="agent-trace-content">
-                <p data-trace-status class="agent-trace-status">No composer trace yet.</p>
+                <p data-trace-status class="agent-trace-status">No generation trace yet.</p>
                 <h4>Request JSON</h4>
                 <pre data-trace-input class="agent-trace-block"></pre>
                 <h4>Prompt</h4>
@@ -304,27 +260,16 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   const hint = query(root, "[data-hint]");
   const consoleEvent = query(root, "[data-console-event]");
   const events = query(root, "[data-events]");
+  const gameActions = query(root, "[data-game-actions]");
   const newBoard = queryButton(root, '[data-action="new-board"]');
   const saveBoard = queryButton(root, '[data-action="save-board"]');
-  const save = queryButton(root, '[data-action="save"]');
   const reset = queryButton(root, '[data-action="reset"]');
   const powerupPrimer = query(root, "[data-powerup-primer]");
   const dismissPowerupPrimer = queryButton(root, '[data-action="dismiss-powerup-primer"]');
-  const rateUp = queryButton(root, '[data-action="rate-up"]');
-  const rateDown = queryButton(root, '[data-action="rate-down"]');
   const sidebarToggle = queryButton(root, '[data-action="toggle-sidebar"]');
   const toolClose = queryButton(root, '[data-action="close-tool-panel"]');
-  const designerStyle = querySelect(root, '[data-designer="style"]');
-  const designerDifficulty = queryInput(root, '[data-designer="difficulty"]');
-  const designerDensity = queryInput(root, '[data-designer="density"]');
-  const designerSpecials = queryInput(root, '[data-designer="specials"]');
-  const designerSeed = queryInput(root, '[data-designer="seed"]');
-  const designerDifficultyValue = query(root, "[data-designer-difficulty-value]");
-  const designerDensityValue = query(root, "[data-designer-density-value]");
-  const designerSpecialValue = query(root, "[data-designer-special-value]");
-  const designerStyleGoalEl = query(root, "[data-designer-style-goal]");
-  const designerTargetsEl = query(root, "[data-designer-targets]");
-  const designerFeedback = query(root, "[data-designer-feedback]");
+  const designerBrief = queryTextArea(root, '[data-designer="brief"]');
+  const designerPending = query(root, "[data-designer-pending]");
   const generationSummary = query(root, "[data-generation-summary]");
   const compactGenerationSummary = query(root, "[data-compact-generation-summary]");
   const ballSpeed = queryInput(root, '[data-setting="ball-speed"]');
@@ -368,12 +313,8 @@ export function createHud(root: HTMLDivElement | null): HudApi {
 
   const emitDesigner = () => {
     actions?.updateDesigner({
-      style: designerStyle.value as BoardDesignerIntent["style"],
-      difficulty: Number(designerDifficulty.value),
-      density: Number(designerDensity.value),
-      specialBias: Number(designerSpecials.value),
-      seed: designerSeed.value,
-      feedback: []
+      ...DEFAULT_DESIGNER_INTENT,
+      brief: designerBrief.value
     });
   };
 
@@ -408,7 +349,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
 
   const renderTrace = (trace?: ComposerAgentTrace) => {
     if (!trace) {
-      traceStatus.textContent = "No composer trace yet.";
+      traceStatus.textContent = "No generation trace yet.";
       traceInput.textContent = "";
       tracePrompt.textContent = "";
       traceOutput.textContent = "";
@@ -417,7 +358,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       return;
     }
 
-    traceStatus.textContent = `Status: ${trace.parseStatus}. ${trace.durationMs}ms`;
+    traceStatus.textContent = `Generation: ${trace.parseStatus}. ${trace.durationMs}ms${trace.streamStats ? `; ${formatStreamStats(trace.streamStats)}` : ""}`;
     traceInput.textContent = prettyJson(trace.request);
     tracePrompt.textContent = trace.prompt;
     traceOutput.textContent = trace.parsedOutput ? prettyJson(trace.parsedOutput) : "(not parsed)";
@@ -427,11 +368,8 @@ export function createHud(root: HTMLDivElement | null): HudApi {
 
   newBoard.addEventListener("click", () => actions?.requestBoard());
   saveBoard.addEventListener("click", () => actions?.saveBoardToPack());
-  save.addEventListener("click", () => actions?.saveNow());
   reset.addEventListener("click", () => actions?.resetProgress());
   dismissPowerupPrimer.addEventListener("click", () => actions?.dismissPowerupPrimer());
-  rateUp.addEventListener("click", () => actions?.rateBoard("up"));
-  rateDown.addEventListener("click", () => actions?.rateBoard("down"));
   sidebarToggle.addEventListener("click", () => actions?.toggleSidebar());
   toolClose.addEventListener("click", () => setToolPanel(null));
   toolBackdrop.addEventListener("click", () => setToolPanel(null));
@@ -458,11 +396,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
     setToolPanel(null);
     actions?.selectPack(button.dataset.packId ?? "");
   });
-  designerStyle.addEventListener("change", emitDesigner);
-  designerDifficulty.addEventListener("input", emitDesigner);
-  designerDensity.addEventListener("input", emitDesigner);
-  designerSpecials.addEventListener("input", emitDesigner);
-  designerSeed.addEventListener("input", emitDesigner);
+  designerBrief.addEventListener("input", emitDesigner);
   ballSpeed.addEventListener("input", emitSettings);
   particles.addEventListener("change", emitSettings);
   reducedMotion.addEventListener("change", emitSettings);
@@ -486,28 +420,19 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       levelName.textContent = state.levelName;
       hint.textContent = state.hint;
       consoleEvent.textContent = state.pending ? "Designing the next board." : state.events[0] ?? state.status;
-      newBoard.textContent = state.boardSource === "generated" ? "Reroll board" : "Design board";
+      newBoard.textContent = state.pending ? `Generating Level ${state.level}` : state.boardSource === "generated" ? "Design another board" : "Design board";
       newBoard.disabled = state.pending;
+      designerPending.hidden = !state.pending;
+      designerPending.textContent = `Generating Level ${state.level}. The game is paused while Cursor SDK designs and validates the wall.`;
+      gameActions.hidden = state.boardSource !== "generated";
+      saveBoard.hidden = state.boardSource !== "generated";
       saveBoard.disabled = state.pending || !state.canSaveBoard;
-      save.disabled = state.pending;
       reset.disabled = state.pending || !state.hasSave;
-      rateUp.disabled = state.pending || !state.canRateBoard;
-      rateDown.disabled = state.pending || !state.canRateBoard;
-      rateUp.classList.toggle("is-selected", state.designer.currentVote === "up");
-      rateDown.classList.toggle("is-selected", state.designer.currentVote === "down");
       sidebarToggle.textContent = state.sidebarCollapsed ? "⟩" : "⟨";
       sidebarToggle.setAttribute("aria-expanded", String(!state.sidebarCollapsed));
-      designerStyle.value = state.designer.intent.style;
-      designerDifficulty.value = String(state.designer.intent.difficulty);
-      designerDensity.value = String(state.designer.intent.density);
-      designerSpecials.value = String(state.designer.intent.specialBias);
-      designerSeed.value = state.designer.intent.seed;
-      designerDifficultyValue.textContent = String(state.designer.intent.difficulty);
-      designerDensityValue.textContent = `${Math.round(state.designer.intent.density * 100)}%`;
-      designerSpecialValue.textContent = `${Math.round(state.designer.intent.specialBias * 100)}%`;
-      designerStyleGoalEl.textContent = designerStyleGoal(state.designer.intent.style);
-      designerTargetsEl.textContent = renderDesignerTargets(state.designer.intent);
-      designerFeedback.textContent = `${state.designer.feedbackCount} note${state.designer.feedbackCount === 1 ? "" : "s"}`;
+      if (document.activeElement !== designerBrief) {
+        designerBrief.value = state.designer.intent.brief;
+      }
       renderSummary(generationSummary, state.designer.generationSummary);
       renderCompactSummary(compactGenerationSummary, state);
       powerupPrimer.hidden = state.powerupPrimerDismissed;
@@ -558,9 +483,9 @@ function queryInput(root: ParentNode, selector: string): HTMLInputElement {
   return element;
 }
 
-function querySelect(root: ParentNode, selector: string): HTMLSelectElement {
-  const element = root.querySelector<HTMLSelectElement>(selector);
-  if (!element) throw new Error(`Missing HUD select ${selector}`);
+function queryTextArea(root: ParentNode, selector: string): HTMLTextAreaElement {
+  const element = root.querySelector<HTMLTextAreaElement>(selector);
+  if (!element) throw new Error(`Missing HUD textarea ${selector}`);
   return element;
 }
 
@@ -590,11 +515,6 @@ function renderBoardMeta(state: HudState): string {
   return `${activePack.name} - ${activePack.progressLabel}`;
 }
 
-function renderDesignerTargets(intent: BoardDesignerIntent): string {
-  const targets = designerTargets(intent);
-  return `${targets.brickTarget} bricks, about ${targets.specialTarget} specials, ${targets.hardTarget} hard, ${targets.difficultyLabel} tempo`;
-}
-
 function renderCompactSummary(element: HTMLElement, state: HudState) {
   const summary = state.designer.generationSummary;
   if (state.boardSource !== "generated" || !summary) {
@@ -611,9 +531,9 @@ function renderCompactSummary(element: HTMLElement, state: HudState) {
     .slice(0, 3)
     .map((chip) => `<span>${escapeHtml(chip)}</span>`)
     .join("");
-  const statusLabel = summary.source === "cursor-sdk" ? "Cursor SDK" : "Fallback";
+  const statusLabel = summary.source === "cursor-sdk" ? "New board ready" : "Local backup used";
   element.innerHTML = `
-    <span>${statusLabel} generated</span>
+    <span>${statusLabel}</span>
     <strong>${escapeHtml(summary.title)}</strong>
     <div>${chips}</div>
     ${summary.warning ? `<em>${escapeHtml(summary.warning)}</em>` : ""}
@@ -639,6 +559,13 @@ function renderSummary(element: HTMLElement, summary?: GenerationSummary) {
     <div>${chips}</div>
     ${summary.warning ? `<em>${escapeHtml(summary.warning)}</em>` : ""}
   `;
+}
+
+function formatStreamStats(stats: ComposerAgentTrace["streamStats"]): string {
+  if (!stats) return "";
+  const pieces = [`thinking ${stats.thinkingEvents}`, `assistant ${stats.assistantEvents}`];
+  if (stats.toolCallEvents > 0) pieces.push(`tools ${stats.toolCallEvents} (${stats.firstToolCalls.join(", ")})`);
+  return pieces.join(", ");
 }
 
 function renderPack(pack: HudPackItem, pending: boolean): string {

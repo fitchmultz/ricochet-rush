@@ -1,9 +1,11 @@
+import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   BRICK_COLUMNS,
   BRICK_ROWS,
   CURSOR_MODEL,
+  DEFAULT_DESIGNER_INTENT,
   MAX_BRICKS,
   MIN_BRICKS,
   fallbackLevel,
@@ -25,7 +27,9 @@ import {
 } from "../shared/boardPacks";
 import { DEFAULT_SETTINGS, SAVE_VERSION, normalizeSaveState, normalizeSettings } from "../shared/saveState";
 import { createApiServer } from "../server/api";
-import { buildGenerationSummary, buildPrompt, parseWorkerOutput, requestEvolution, summarizeLevelError } from "../server/cursorAgent";
+import { buildGenerationSummary, buildPrompt, parseWorkerOutput, requestEvolution, runCursorWorker, summarizeLevelError } from "../server/cursorAgent";
+import { parseLevelJsonFromCandidates } from "../server/levelJson";
+import { appendAssistantTextChunk } from "../server/streamText";
 import {
   calculatePaddleRebound,
   normalizeLoopRiskVelocity,
@@ -33,6 +37,8 @@ import {
   powerupToneFor,
   prizePowerupPool
 } from "../client/game/RicochetRushGame";
+import { MUSIC_MASTER_GAIN, MUSIC_MELODY_PEAK, createGameAudio } from "../client/game/gameAudio";
+import { levelGenerationTimeoutMessage, requestGeneratedLevel } from "../client/game/levelApi";
 
 const request: LevelRequest = {
   level: 4,
@@ -54,6 +60,107 @@ function countSpecials(level: LevelBlueprint): number {
 
 function countHardBricks(level: LevelBlueprint): number {
   return level.rows.flat().filter((brick) => brick?.kind === "hard").length;
+}
+
+class FakeAudioParam {
+  readonly exponentialRamps: number[] = [];
+  value = 1;
+
+  cancelScheduledValues(): void {}
+
+  setValueAtTime(value: number): void {
+    this.value = value;
+  }
+
+  exponentialRampToValueAtTime(value: number): void {
+    this.value = value;
+    this.exponentialRamps.push(value);
+  }
+}
+
+class FakeGainNode {
+  readonly gain = new FakeAudioParam();
+
+  connect(): void {}
+
+  disconnect(): void {}
+}
+
+class FakeOscillatorNode {
+  readonly frequency = new FakeAudioParam();
+  type: OscillatorType = "sine";
+
+  connect(): void {}
+
+  disconnect(): void {}
+
+  addEventListener(): void {}
+
+  start(): void {}
+
+  stop(): void {}
+}
+
+class FakeAudioContext {
+  readonly createdGains: FakeGainNode[] = [];
+  readonly destination = {};
+  currentTime = 0;
+  state: AudioContextState = "running";
+
+  createGain(): GainNode {
+    const gain = new FakeGainNode();
+    this.createdGains.push(gain);
+    return gain as unknown as GainNode;
+  }
+
+  createOscillator(): OscillatorNode {
+    return new FakeOscillatorNode() as unknown as OscillatorNode;
+  }
+
+  resume(): Promise<void> {
+    this.state = "running";
+    return Promise.resolve();
+  }
+}
+
+function withFakeAudioWindow<T>(run: (context: FakeAudioContext) => T): T {
+  const originalWindow = "window" in globalThis ? window : undefined;
+  let context: FakeAudioContext | null = null;
+  class TestAudioContext extends FakeAudioContext {
+    constructor() {
+      super();
+      context = this;
+    }
+  }
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    writable: true,
+    value: {
+      AudioContext: TestAudioContext as unknown as typeof AudioContext,
+      setInterval: ((handler: TimerHandler) => {
+        if (typeof handler === "function") handler();
+        return 1;
+      }) as typeof window.setInterval,
+      clearInterval: (() => undefined) as typeof window.clearInterval
+    } as unknown as Window
+  });
+  try {
+    const audio = createGameAudio();
+    audio.setMusicEnabled(true);
+    audio.unlock();
+    if (!context) throw new Error("Fake AudioContext was not created.");
+    return run(context);
+  } finally {
+    if (originalWindow) {
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        writable: true,
+        value: originalWindow
+      });
+    } else {
+      Reflect.deleteProperty(globalThis, "window");
+    }
+  }
 }
 
 async function withApiServer<T>(run: (baseUrl: string) => Promise<T>): Promise<T> {
@@ -84,9 +191,10 @@ describe("Cursor SDK level generation contract", () => {
     expect(buildPrompt(request)).toContain("composer-2 in fast mode");
     expect(buildPrompt(request)).toContain("Ricochet Rush");
     expect(buildPrompt(request)).toContain(`${MIN_BRICKS} bricks and at most ${MAX_BRICKS} bricks`);
+    expect(buildPrompt(request)).toContain("Do not calculate exact brick counts");
   });
 
-  it("adds visible board designer intent and feedback to the Cursor prompt", () => {
+  it("adds the board prompt and hidden tuning defaults to the Cursor prompt", () => {
     const prompt = buildPrompt({
       ...request,
       designer: {
@@ -95,48 +203,69 @@ describe("Cursor SDK level generation contract", () => {
         density: 0.7,
         specialBias: 0.8,
         seed: "left rail fireworks",
-        feedback: [
-          {
-            vote: "down",
-            levelName: "Flat Wall",
-            style: "balanced",
-            seed: "flat",
-            recentEvents: ["Ball looped."]
-          }
-        ]
+        brief: "left rail fireworks with bomb pockets"
       }
     });
 
-    expect(prompt).toContain("Style: Bomb chains");
-    expect(prompt).toContain("Style goal: Linked bomb pockets");
-    expect(prompt).toContain("Difficulty: 5/5");
-    expect(prompt).toContain("Difficulty target: wild");
-    expect(prompt).toContain("Target density: 70%");
-    expect(prompt).toContain("Target brick count: about 86 bricks");
-    expect(prompt).toContain("Special-brick mix: about 27 special bricks");
-    expect(prompt).toContain("Hard-brick pressure: about 19 hard bricks");
-    expect(prompt).toContain('Seed phrase: "left rail fireworks"');
-    expect(prompt).toContain("Rejected Flat Wall");
+    expect(prompt).toContain('Player board prompt:\n- "left rail fireworks with bomb pockets"');
+    expect(prompt).toContain("Prompt locks: preferred brick kind=bomb");
+    expect(prompt).toContain("Target about 86 bricks");
+    expect(prompt).toContain("Target about 27 specials and 19 hard bricks");
+    expect(prompt).toContain('wild difficulty, speed near');
+    expect(prompt).toContain('seed "left rail fireworks"');
+    expect(prompt).toContain('"level":4');
+  });
+
+  it("passes freeform board briefs through the Cursor prompt as high-priority design intent", () => {
+    const prompt = buildPrompt({
+      ...request,
+      designer: {
+        ...DEFAULT_DESIGNER_INTENT,
+        brief: "create a heart shaped board that has nothing but exploding blocks"
+      }
+    });
+
+    expect(prompt).toContain('Player board prompt:\n- "create a heart shaped board that has nothing but exploding blocks"');
+    expect(prompt).toContain("Prompt locks: shape=heart, exclusive occupied brick kind=bomb");
+    expect(prompt).toContain("Priority order: prompt shape/material");
+    expect(prompt).toContain("For \"exploding blocks\", use bomb bricks.");
+    expect(prompt).toContain("Return exactly this compact shape");
+    expect(prompt).toContain('"grid"');
+  });
+
+  it("does not collapse multi-component prompts into one preferred brick kind", () => {
+    const prompt = buildPrompt({
+      ...request,
+      designer: {
+        ...DEFAULT_DESIGNER_INTENT,
+        brief: "boss core with a hard shield ring and fire routes through the sides"
+      }
+    });
+
+    expect(prompt).toContain('Player board prompt:\n- "boss core with a hard shield ring and fire routes through the sides"');
+    expect(prompt).toContain("Prompt locks: shape=circle, components=boss,hard,fire");
+    expect(prompt).toContain("Priority order: prompt shape/material");
   });
 
   it("normalizes board designer controls into safe prompt bounds", () => {
-    expect(
-      normalizeDesignerIntent({
-        style: "bogus",
-        difficulty: 99,
-        density: 0.1,
-        specialBias: 3,
-        seed: "0123456789012345678901234567890123456789",
-        feedback: [{ vote: "up", levelName: "Good", style: "precision", seed: "needle", recentEvents: ["Saved."] }]
-      })
-    ).toMatchObject({
+    const longBrief = "create a heart shaped board that has nothing but exploding blocks and make every lane feel dramatic ".repeat(3);
+    const normalized = normalizeDesignerIntent({
+      style: "bogus",
+      difficulty: 99,
+      density: 0.1,
+      specialBias: 3,
+      seed: "0123456789012345678901234567890123456789",
+      brief: longBrief
+    });
+    expect(normalized).toMatchObject({
       style: "balanced",
       difficulty: 5,
       density: 0.34,
       specialBias: 1,
-      seed: "012345678901234567890123456789012345",
-      feedback: [{ vote: "up", levelName: "Good", style: "precision", seed: "needle", recentEvents: ["Saved."] }]
+      seed: "012345678901234567890123456789012345"
     });
+    expect(normalized.brief).toMatch(/^create a heart shaped board/);
+    expect(normalized.brief.length).toBeLessThanOrEqual(183);
   });
 
   it("normalizes generated level JSON into a bounded brick grid", () => {
@@ -189,11 +318,11 @@ describe("Cursor SDK level generation contract", () => {
         density: 0.78,
         specialBias: 0.9,
         seed: "center furnace",
-        feedback: []
+        brief: ""
       }
     });
     const bricks = level.rows.flat().filter(Boolean);
-    expect(level.name).toBe("Boss core Sector 4");
+    expect(level.name).toBe("Generated Sector 4");
     expect(level.briefing).toContain("center furnace");
     expect(bricks.length).toBeGreaterThanOrEqual(MIN_BRICKS);
     expect(bricks.length).toBeLessThanOrEqual(MAX_BRICKS);
@@ -209,7 +338,7 @@ describe("Cursor SDK level generation contract", () => {
         density: 0.34,
         specialBias: 0,
         seed: "needle",
-        feedback: []
+        brief: ""
       }
     });
     const dense = fallbackLevel({
@@ -220,16 +349,35 @@ describe("Cursor SDK level generation contract", () => {
         density: 0.82,
         specialBias: 1,
         seed: "fireworks",
-        feedback: []
+        brief: ""
       }
     });
-    const sparseTargets = designerTargets({ style: "precision", difficulty: 2, density: 0.34, specialBias: 0, seed: "needle", feedback: [] }, request.level);
-    const denseTargets = designerTargets({ style: "bomb-chains", difficulty: 5, density: 0.82, specialBias: 1, seed: "fireworks", feedback: [] }, request.level);
+    const sparseTargets = designerTargets({ style: "precision", difficulty: 2, density: 0.34, specialBias: 0, seed: "needle", brief: "" }, request.level);
+    const denseTargets = designerTargets({ style: "bomb-chains", difficulty: 5, density: 0.82, specialBias: 1, seed: "fireworks", brief: "" }, request.level);
 
     expect(countBricks(sparse)).toBe(sparseTargets.brickTarget);
     expect(countBricks(dense)).toBe(denseTargets.brickTarget);
     expect(countSpecials(dense)).toBeGreaterThan(countSpecials(sparse) + 20);
     expect(countHardBricks(dense)).toBeGreaterThan(countHardBricks(sparse));
+  });
+
+  it("honors freeform heart and exploding-block requests in local fallback boards", () => {
+    const level = fallbackLevel({
+      ...request,
+      designer: {
+        ...DEFAULT_DESIGNER_INTENT,
+        density: 0.52,
+        specialBias: 1,
+        brief: "create a heart shaped board that has nothing but exploding blocks"
+      }
+    });
+    const rowCounts = level.rows.map((row) => row.filter(Boolean).length);
+    const bricks = level.rows.flat().filter((brick): brick is NonNullable<typeof brick> => brick !== null);
+
+    expect(rowCounts).toEqual([6, 10, 12, 14, 12, 10, 8, 6, 4]);
+    expect(bricks).toHaveLength(82);
+    expect(bricks.every((brick) => brick.kind === "bomb" && brick.hp === 1)).toBe(true);
+    expect(level.name).toContain("Heart");
   });
 
   it("can force local fallback for deterministic playability smoke tests", async () => {
@@ -238,8 +386,8 @@ describe("Cursor SDK level generation contract", () => {
       const response = await requestEvolution(request);
       expect(response.source).toBe("fallback");
       expect(response.warning).toContain("RICOCHET_RUSH_FORCE_FALLBACK");
-      expect(response.summary?.title).toBe("Local fallback board");
-      expect(response.summary?.detail).toContain("Validation kept");
+      expect(response.summary?.title).toBe("Local backup board");
+      expect(response.summary?.detail).toContain("final wall has");
     } finally {
       delete process.env.RICOCHET_RUSH_FORCE_FALLBACK;
     }
@@ -249,6 +397,70 @@ describe("Cursor SDK level generation contract", () => {
     const level = normalizeLevel({ rows: [[{ kind: "basic", hp: 1 }]] }, request);
     expect(level.name).toBe(`Sector ${request.level}`);
     expect(level.rows.flat().filter(Boolean).length).toBeGreaterThanOrEqual(MIN_BRICKS);
+  });
+
+  it("keeps explicit heart and all-bomb requests when normalizing Cursor output", () => {
+    const level = normalizeLevel(
+      {
+        name: "Cursor Heart",
+        rows: fallbackLevel(request).rows
+      },
+      {
+        ...request,
+        designer: {
+          ...DEFAULT_DESIGNER_INTENT,
+          brief: "heart shaped board with nothing but exploding blocks"
+        }
+      }
+    );
+    const rowCounts = level.rows.map((row) => row.filter(Boolean).length);
+    const bricks = level.rows.flat().filter((brick): brick is NonNullable<typeof brick> => brick !== null);
+    expect(rowCounts).toEqual([6, 10, 12, 14, 12, 10, 8, 6, 4]);
+    expect(bricks).toHaveLength(82);
+    expect(bricks.every((brick) => brick.kind === "bomb")).toBe(true);
+  });
+
+  it("materializes compact Cursor grid drafts into canonical brick rows", () => {
+    const level = normalizeLevel(
+      {
+        name: "Compact Heart",
+        briefing: "Tiny JSON, big boom.",
+        paddleHint: "Start on the lobe edge.",
+        speed: 1.22,
+        brick: "bomb",
+        grid: ["...xxx..xxx...", "..xxxxxxxxxx..", ".xxxxxxxxxxxx.", "xxxxxxxxxxxxxx", ".xxxxxxxxxxxx.", "..xxxxxxxxxx..", "...xxxxxxxx...", "....xxxxxx....", ".....xxxx....."]
+      },
+      {
+        ...request,
+        designer: {
+          ...DEFAULT_DESIGNER_INTENT,
+          brief: "heart shaped board with nothing but exploding blocks"
+        }
+      }
+    );
+    const rowCounts = level.rows.map((row) => row.filter(Boolean).length);
+    const bricks = level.rows.flat().filter((brick): brick is NonNullable<typeof brick> => brick !== null);
+    expect(level.name).toBe("Compact Heart");
+    expect(rowCounts).toEqual([6, 10, 12, 14, 12, 10, 8, 6, 4]);
+    expect(bricks).toHaveLength(82);
+    expect(bricks.every((brick) => brick.kind === "bomb")).toBe(true);
+  });
+
+  it("lets compact grid codes override a leftover default brick value", () => {
+    const level = normalizeLevel(
+      {
+        name: "Mixed Compact",
+        brick: "basic",
+        grid: ["bohx.........", "..............", "..............", "..............", "..............", "..............", "..............", "..............", ".............."]
+      },
+      request
+    );
+    const [basic, bomb, hard, filled] = level.rows[0] ?? [];
+
+    expect(basic?.kind).toBe("basic");
+    expect(bomb?.kind).toBe("bomb");
+    expect(hard?.kind).toBe("hard");
+    expect(filled?.kind).toBe("basic");
   });
 
   it("trims overstuffed generated boards without replacing the level identity", () => {
@@ -278,14 +490,15 @@ describe("Cursor SDK level generation contract", () => {
   it("rejects malformed level requests at the API boundary", async () => {
     expect(normalizeLevelRequest({ ...request, level: "4" })).toBeNull();
     expect(normalizeLevelRequest({ ...request, recentEvents: ["ok", 3] })).toBeNull();
-    expect(normalizeLevelRequest({ ...request, designer: { style: "bogus", difficulty: 99, density: 2, specialBias: -1, seed: "x", feedback: [] } })).toMatchObject({
+    expect(normalizeLevelRequest({ ...request, designer: { style: "bogus", difficulty: 99, density: 2, specialBias: -1, seed: "x", brief: "heart" } })).toMatchObject({
       level: request.level,
       designer: {
         style: "balanced",
         difficulty: 5,
         density: 0.82,
         specialBias: 0,
-        seed: "x"
+        seed: "x",
+        brief: "heart"
       }
     });
 
@@ -331,6 +544,11 @@ describe("Cursor SDK level generation contract", () => {
   it("does not leak Cursor SDK stack traces in fallback warnings", () => {
     const warning = summarizeLevelError(new Error("ConnectError: [unknown] Error\n    at node_modules/@cursor/sdk/dist/index.js\ncause: AuthenticationError"));
     expect(warning).toBe("Cursor SDK authentication is unavailable.");
+    expect(summarizeLevelError(new Error("[agent_busy] Agent already has an active run."))).toBe("Cursor SDK agent is busy.");
+    expect(summarizeLevelError(new Error("[stream_buffer_overflow] Cloud agent message buffer overflow; consumer is too slow"))).toBe(
+      "Cursor SDK stream buffer overflowed."
+    );
+    expect(summarizeLevelError(new Error("[invalid_model] Model 'nope' is not available"))).toBe("Cursor SDK model is unavailable.");
   });
 
   it("passes CURSOR_API_KEY explicitly into the local Cursor SDK agent", () => {
@@ -338,6 +556,55 @@ describe("Cursor SDK level generation contract", () => {
     expect(workerSource).toContain("process.env.CURSOR_API_KEY");
     expect(workerSource).toContain("apiKey,");
     expect(workerSource).toContain("Agent.create");
+    expect(workerSource).toContain("settingSources: []");
+    expect(workerSource).toContain("run.stream");
+    expect(workerSource).toContain("streamStats");
+    expect(workerSource).toContain('process.once("SIGTERM"');
+    expect(workerSource).toContain("Symbol.asyncDispose");
+  });
+
+  it("returns a timeout fallback result and terminates an unresponsive Cursor SDK worker", async () => {
+    vi.useFakeTimers();
+    const stdout = new EventEmitter() as EventEmitter & { setEncoding: (encoding: BufferEncoding) => void };
+    const stderr = new EventEmitter() as EventEmitter & { setEncoding: (encoding: BufferEncoding) => void };
+    stdout.setEncoding = vi.fn();
+    stderr.setEncoding = vi.fn();
+    const worker = new EventEmitter() as EventEmitter & {
+      stdout: typeof stdout;
+      stderr: typeof stderr;
+      stdin: { end: (data: string) => unknown };
+      kill: (signal: NodeJS.Signals) => boolean;
+    };
+    const endStdin = vi.fn((_: string) => {});
+    const killWorker = vi.fn((_: NodeJS.Signals) => true);
+    worker.stdout = stdout;
+    worker.stderr = stderr;
+    worker.stdin = { end: endStdin };
+    worker.kill = killWorker;
+
+    const resultPromise = runCursorWorker(JSON.stringify(request), "test-key", {
+      timeoutMs: 25,
+      sigkillGraceMs: 10,
+      spawnWorker: () => worker
+    });
+    stdout.emit("data", "partial output");
+    stderr.emit("data", "partial error");
+    await vi.advanceTimersByTimeAsync(25);
+    const result = await resultPromise;
+
+    expect(worker.stdin.end).toHaveBeenCalledWith(JSON.stringify(request));
+    expect(worker.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(result).toMatchObject({
+      parsed: null,
+      parseStatus: "worker-failed",
+      parseError: "Cursor SDK worker timed out.",
+      rawOutput: "partial output",
+      rawError: "partial error",
+      workerExitCode: null
+    });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(worker.kill).toHaveBeenCalledWith("SIGKILL");
+    vi.useRealTimers();
   });
 
   it("parses JSON even when the local Cursor SDK writes startup logs first", () => {
@@ -348,9 +615,51 @@ describe("Cursor SDK level generation contract", () => {
       name: "Generated",
       rows: []
     });
+    expect(
+      parseWorkerOutput(
+        JSON.stringify({
+          parsed: { name: "Wrapped", grid: ["xxxx"] },
+          parseStatus: "success",
+          rawOutput: '{"name":"Wrapped","grid":["xxxx"]}'
+        })
+      )
+    ).toEqual({ name: "Wrapped", grid: ["xxxx"] });
+    expect(
+      parseWorkerOutput(
+        JSON.stringify({
+          parsed: null,
+          parseStatus: "parse-failed",
+          parseError: "Cursor SDK returned invalid JSON.",
+          rawOutput: "not level JSON"
+        })
+      )
+    ).toBeNull();
   });
 
-  it("returns composer trace metadata for generation attempts", async () => {
+  it("parses the best Cursor SDK JSON candidate instead of relying on concatenated stream text", () => {
+    const partial = '{"name":"Heart Bomb","grid":["xxxx"';
+    const corruptedCombined = `${partial}{"name":"Heart Bomb","grid":["xxxx"]}`;
+    const finalCandidate = '{"name":"Heart Bomb","briefing":"boom","paddleHint":"edge","speed":1.1,"brick":"bomb","grid":["xxxx"]}';
+
+    expect(parseLevelJsonFromCandidates([partial, corruptedCombined, finalCandidate])).toMatchObject({
+      parsed: {
+        name: "Heart Bomb",
+        grid: ["xxxx"]
+      },
+      jsonText: finalCandidate
+    });
+  });
+
+  it("merges cumulative Cursor stream chunks without duplicating partial JSON", () => {
+    let output = "";
+    output = appendAssistantTextChunk(output, '{"name":"Heart","rows":[{"kind":"bomb","hp"');
+    output = appendAssistantTextChunk(output, '{"name":"Heart","rows":[{"kind":"bomb","hp":1}]}');
+    output = appendAssistantTextChunk(output, "");
+    expect(output).toBe('{"name":"Heart","rows":[{"kind":"bomb","hp":1}]}');
+    expect(JSON.parse(output)).toMatchObject({ name: "Heart" });
+  });
+
+  it("returns generation trace metadata for generation attempts", async () => {
     const originalApiKey = process.env.CURSOR_API_KEY;
     const originalFallback = process.env.RICOCHET_RUSH_FORCE_FALLBACK;
     process.env.CURSOR_API_KEY = "";
@@ -381,12 +690,33 @@ describe("Cursor SDK level generation contract", () => {
     }
   });
 
+  it("times out stalled browser generation requests so gameplay can fall back", async () => {
+    vi.useFakeTimers();
+    try {
+      const stalledFetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Aborted", "AbortError"));
+          });
+        });
+      }) as unknown as typeof fetch;
+
+      const pendingRequest = requestGeneratedLevel(request, { fetcher: stalledFetch, timeoutMs: 100 });
+      const timeoutExpectation = expect(pendingRequest).rejects.toThrow(levelGenerationTimeoutMessage(100));
+      await vi.advanceTimersByTimeAsync(100);
+      await timeoutExpectation;
+      expect(stalledFetch).toHaveBeenCalledWith("/api/level", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("builds a public generation summary without raw trace text", () => {
     const level = fallbackLevel(request);
     const summary = buildGenerationSummary(request, level, "fallback", "Cursor SDK authentication is unavailable.");
-    expect(summary.title).toBe("Local fallback board");
+    expect(summary.title).toBe("Local backup board");
     expect(summary.detail).toContain(level.name);
-    expect(summary.detail).toContain("Validation kept");
+    expect(summary.detail).toContain("final wall has");
     expect(summary.detail).toContain("Target was");
     expect(summary.warning).toBe("Cursor SDK authentication is unavailable.");
     expect(summary.detail).not.toContain("node_modules");
@@ -397,13 +727,15 @@ describe("Cursor SDK level generation contract", () => {
       ...DEFAULT_SETTINGS,
       ballSpeed: 1.2,
       reducedMotion: true,
-      highContrast: true,
-      sfx: false,
-      music: false
+      highContrast: true
     });
     expect(normalizeSettings({ sound: true })).toEqual({
       ...DEFAULT_SETTINGS,
       sfx: true
+    });
+    expect(normalizeSettings({ sound: false })).toEqual({
+      ...DEFAULT_SETTINGS,
+      sfx: false
     });
     expect(normalizeSettings({ ballSpeed: 0.1, particles: false })).toEqual({
       ...DEFAULT_SETTINGS,
@@ -656,5 +988,15 @@ describe("Ricochet Rush power-up balance", () => {
     expect(powerupToneFor("expandPaddle")).toBe("reward");
     expect(powerupToneFor("shrinkPaddle")).toBe("hazard");
     expect(powerupToneFor("eightBall")).toBe("volatile");
+  });
+});
+
+describe("Ricochet Rush audio", () => {
+  it("keeps default music above the effectively silent mix floor", () => {
+    withFakeAudioWindow((context) => {
+      const musicGain = context.createdGains[0];
+      expect(musicGain?.gain.exponentialRamps).toContain(MUSIC_MASTER_GAIN);
+      expect(MUSIC_MASTER_GAIN * MUSIC_MELODY_PEAK).toBeGreaterThanOrEqual(0.008);
+    });
   });
 });

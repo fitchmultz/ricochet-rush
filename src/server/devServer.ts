@@ -1,5 +1,8 @@
 import { createApiServer } from "./api.js";
+import { loadLocalEnv } from "./env.js";
 import { createServer as createViteServer } from "vite";
+
+loadLocalEnv();
 
 const port = Number(process.env.PORT ?? 4177);
 const vite = await createViteServer({

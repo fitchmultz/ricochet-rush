@@ -6,7 +6,7 @@
 
 Ricochet Rush is a fast 3D browser brick-breaker with a sharp paddle, angled rebounds, lives, score, multiball, laser and grab paddles, bomb chains, boss bricks, and a power-up atlas.
 
-The game includes curated board packs for repeatable runs, plus a visible board designer for generated walls. The server asks Cursor SDK `composer-2` for new playable wall layouts from the selected design intent, then validates the response into a bounded brick grid. If Cursor auth is missing or the SDK fails, the local fallback generator immediately keeps the run playable.
+The game includes curated board packs for repeatable runs, plus a prompt-first board designer for generated walls. The server asks Cursor SDK `composer-2` in fast mode for a compact 14x9 board draft from the player’s board prompt, then validates and materializes it into the canonical brick grid. If Cursor auth is missing or the SDK fails, the local fallback generator keeps the run playable.
 
 ![Ricochet Rush desktop gameplay](docs/media/ricochet-rush-desktop.png)
 
@@ -33,13 +33,12 @@ Open `http://127.0.0.1:4177`.
 
 - 3D arcade board rendered with Three.js
 - Authored board packs with unlock progress, preview cards, and best score by pack
-- Board Designer controls for style, difficulty, density, special-brick bias, and seed phrase
+- Board Designer prompt for requests like `heart shaped board with only exploding blocks`
 - Cursor SDK level generation through the local Node API only
-- Public generation summary with raw composer trace kept behind a details panel
-- Thumbs-up/down feedback that guides later generated boards
+- Public generation summary with raw generation trace kept behind the Run Log
 - Saved Designs pack for generated boards you decide to keep
 - Local fallback levels for offline or unauthenticated play
-- Local run checkpoints, restore, clear-save confirmation, and best score
+- Autosaved run checkpoints, restore, Options-only clear-save confirmation, and best score
 - Settings for ball speed, particles, reduced motion, and high contrast
 - Reward, hazard, and volatile power-up categories with readable pickup labels
 - Pack/source board theme tints and original Ricochet Rush logo/icon assets
@@ -51,9 +50,11 @@ Open `http://127.0.0.1:4177`.
 npm run ci
 ```
 
-The CI gate builds the app, runs unit tests for level/save/pack/designer/power-up contracts, and runs a Playwright smoke against the production preview. The smoke verifies curated-pack boot, designer intent persistence, fallback generation summaries, saved generated boards, feedback capture, board selection, paddle movement, save/clear behavior, settings persistence, canvas rendering, and layout overflow.
+The CI gate builds the app, runs unit tests for level/save/pack/designer/power-up contracts, and runs a Playwright smoke against the production preview. The smoke verifies curated-pack boot, designer prompt persistence, fallback generation summaries, saved generated boards, board selection, paddle movement, autosave/clear behavior, settings persistence, canvas rendering, and layout overflow.
 
-Set `CURSOR_API_KEY` to enable live Cursor SDK level generation. Set `RICOCHET_RUSH_FORCE_FALLBACK=1` when deterministic fallback generation is desired.
+After a Playwright package update, run `npx playwright install chromium` once if the smoke reports a missing browser executable.
+
+Set `CURSOR_API_KEY` in the shell or in local `.env` to enable live Cursor SDK level generation. Restart the dev or preview server after changing `.env`. Browser generation falls back locally if the request has not completed after 65 seconds or the compact draft fails validation. Set `RICOCHET_RUSH_FORCE_FALLBACK=1` when deterministic fallback generation is desired.
 
 To refresh the README demo clip after visual changes, run:
 

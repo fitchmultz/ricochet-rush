@@ -27,8 +27,6 @@ export type BrickKind =
 
 export type DesignerStyle = (typeof DESIGNER_STYLES)[number];
 
-export type DesignerVote = "up" | "down";
-
 export interface BrickSpec {
   kind: BrickKind;
   hp: number;
@@ -45,22 +43,13 @@ export interface LevelRequest {
   designer?: BoardDesignerIntent;
 }
 
-export interface BoardDesignerFeedback {
-  vote: DesignerVote;
-  levelName: string;
-  style: DesignerStyle;
-  seed: string;
-  recentEvents: string[];
-  createdAt?: string;
-}
-
 export interface BoardDesignerIntent {
   style: DesignerStyle;
   difficulty: number;
   density: number;
   specialBias: number;
   seed: string;
-  feedback: BoardDesignerFeedback[];
+  brief: string;
 }
 
 export interface LevelBlueprint {
@@ -100,7 +89,21 @@ export interface ComposerAgentTrace {
   startedAt: string;
   finishedAt: string;
   workerExitCode?: number | null;
+  streamStats?: ComposerStreamStats;
   parsedOutput?: unknown;
+}
+
+export interface ComposerStreamStats {
+  requestEvents: number;
+  statusEvents: number;
+  thinkingEvents: number;
+  assistantEvents: number;
+  toolCallEvents: number;
+  taskEvents: number;
+  systemEvents: number;
+  userEvents: number;
+  otherEvents: number;
+  firstToolCalls: string[];
 }
 
 export interface DesignerTargets {
@@ -134,7 +137,7 @@ export const DEFAULT_DESIGNER_INTENT: BoardDesignerIntent = {
   density: 0.52,
   specialBias: 0.45,
   seed: "fresh-angle",
-  feedback: []
+  brief: ""
 };
 
 const STYLE_LABELS: Record<DesignerStyle, string> = {
@@ -158,6 +161,22 @@ const MAX_REQUEST_LEVEL = 999;
 const MAX_REQUEST_SCORE = 999_999_999;
 const MAX_REQUEST_LIVES = 99;
 const MAX_RECENT_EVENTS = 5;
+const MAX_DESIGNER_BRIEF_LENGTH = 180;
+const COMPACT_GRID_KINDS: Record<string, BrickKind> = {
+  b: "basic",
+  h: "hard",
+  o: "bomb",
+  p: "prize",
+  n: "penalty",
+  l: "laser",
+  g: "grab",
+  f: "fire",
+  t: "thru",
+  s: "split",
+  w: "wide",
+  m: "slow",
+  c: "boss"
+};
 
 export function normalizeLevelRequest(input: unknown): LevelRequest | null {
   if (!isRecord(input)) return null;
@@ -181,15 +200,55 @@ export function normalizeLevelRequest(input: unknown): LevelRequest | null {
 
 export function normalizeLevel(input: unknown, request: LevelRequest): LevelBlueprint {
   const raw = isRecord(input) ? input : {};
-  if (!Array.isArray(raw.rows)) return fallbackLevel(request);
-  const rows = repairBrickCount(normalizeRows(raw.rows, request.level), request.level);
+  const normalizedRows = normalizeLevelRows(raw, request);
+  if (!normalizedRows) return fallbackLevel(request);
+  const rows = repairBrickCount(normalizedRows, request.level);
   return {
     name: stringValue(raw.name, `Sector ${request.level}`),
     briefing: stringValue(raw.briefing, "Break the wall before it learns your rhythm."),
     paddleHint: stringValue(raw.paddleHint, "Keep the ball angled. Flat returns are a trap."),
     speed: clamp(numberValue(raw.speed, 1 + request.level * 0.04), 0.85, 1.85),
-    rows
+    rows: applyDesignerBriefConstraints(rows, normalizeDesignerIntent(request.designer))
   };
+}
+
+function normalizeLevelRows(raw: Record<string, unknown>, request: LevelRequest): BrickCell[][] | null {
+  if (Array.isArray(raw.rows)) return normalizeRows(raw.rows, request.level);
+  if (Array.isArray(raw.grid)) return normalizeCompactGrid(raw.grid, raw, request);
+  return null;
+}
+
+function normalizeCompactGrid(grid: unknown[], raw: Record<string, unknown>, request: LevelRequest): BrickCell[][] {
+  const designer = normalizeDesignerIntent(request.designer);
+  const defaultKind = brickKindValue(raw.brick) ?? brickKindValue(raw.kind) ?? brickKindValue(raw.fillKind);
+  const legend = isRecord(raw.legend) ? raw.legend : {};
+  return Array.from({ length: BRICK_ROWS }, (_, y) => {
+    const sourceRow = typeof grid[y] === "string" ? grid[y] : "";
+    const cells = [...sourceRow.padEnd(BRICK_COLUMNS, ".").slice(0, BRICK_COLUMNS)];
+    return cells.map((char) => compactGridCell(char, legend, defaultKind, designer, request.level));
+  });
+}
+
+function compactGridCell(char: string, legend: Record<string, unknown>, defaultKind: BrickKind | undefined, designer: BoardDesignerIntent, level: number): BrickCell {
+  const code = char.toLowerCase();
+  if (code === "." || code === "_" || code === "-" || code.trim().length === 0) return null;
+  const legendEntry = legend[char] ?? legend[code];
+  const kind = brickKindValue(legendEntry) ?? COMPACT_GRID_KINDS[code] ?? defaultKind ?? "basic";
+  const brick = brickForKind(kind, designer, level);
+  const hp = hpValue(legendEntry);
+  return hp === undefined ? brick : { kind, hp };
+}
+
+function brickKindValue(value: unknown): BrickKind | undefined {
+  if (typeof value === "string" && BRICK_KINDS.has(value as BrickKind)) return value as BrickKind;
+  if (isRecord(value)) return brickKindValue(value.kind);
+  return undefined;
+}
+
+function hpValue(value: unknown): number | undefined {
+  if (!isRecord(value)) return undefined;
+  const hp = boundedInteger(value.hp, 1, 12);
+  return hp ?? undefined;
 }
 
 export function normalizeDesignerIntent(input: unknown): BoardDesignerIntent {
@@ -202,7 +261,7 @@ export function normalizeDesignerIntent(input: unknown): BoardDesignerIntent {
     density: clamp(numberValue(raw.density, DEFAULT_DESIGNER_INTENT.density), 0.34, 0.82),
     specialBias: clamp(numberValue(raw.specialBias, DEFAULT_DESIGNER_INTENT.specialBias), 0, 1),
     seed: stringValue(raw.seed, DEFAULT_DESIGNER_INTENT.seed).slice(0, 36),
-    feedback: Array.isArray(raw.feedback) ? raw.feedback.map(normalizeDesignerFeedback).filter((entry): entry is BoardDesignerFeedback => entry !== null).slice(0, 6) : []
+    brief: briefValue(raw.brief, DEFAULT_DESIGNER_INTENT.brief)
   };
 }
 
@@ -233,20 +292,24 @@ export function describeDesignerIntent(intentInput: unknown): string {
   const intent = normalizeDesignerIntent(intentInput);
   const targets = designerTargets(intent);
   const difficulty = targets.difficultyLabel;
-  return `${designerStyleLabel(intent.style)} / ${difficulty} / ${Math.round(intent.density * 100)}% density / ${Math.round(intent.specialBias * 100)}% specials`;
+  const prompt = intent.brief ? `"${intent.brief}"` : "default prompt";
+  return `${prompt} / ${difficulty} / ${Math.round(intent.density * 100)}% density / ${Math.round(intent.specialBias * 100)}% specials`;
 }
 
 export function fallbackLevel(request: LevelRequest): LevelBlueprint {
   const designer = normalizeDesignerIntent(request.designer);
   const targets = designerTargets(designer, request.level);
-  const rows = buildFallbackRows(request, designer);
+  const rows = applyDesignerBriefConstraints(repairBrickCount(buildFallbackRows(request, designer), request.level), designer);
+  const brief = analyzeDesignerBrief(designer.brief);
 
   return {
-    name: `${designerStyleLabel(designer.style)} Sector ${request.level}`,
-    briefing: `Local designer built a ${designerStyleLabel(designer.style).toLowerCase()} wall from the "${designer.seed}" seed.`,
-    paddleHint: hintForDesignerStyle(designer.style),
+    name: brief.shape ? `${shapeLabel(brief.shape)} Prompt ${request.level}` : `Generated Sector ${request.level}`,
+    briefing: designer.brief
+      ? `Local designer followed "${designer.brief}" from the "${designer.seed}" seed.`
+      : `Local designer built a generated wall from the "${designer.seed}" seed.`,
+    paddleHint: hintForDesignerIntent(designer, brief),
     speed: targets.speedTarget,
-    rows: repairBrickCount(rows, request.level)
+    rows
   };
 }
 
@@ -254,6 +317,7 @@ function buildFallbackRows(request: LevelRequest, designer: BoardDesignerIntent)
   const rows = Array.from({ length: BRICK_ROWS }, () => Array.from({ length: BRICK_COLUMNS }, () => null as BrickCell));
   const targets = designerTargets(designer, request.level);
   const seed = hashText(`${request.level}:${request.score}:${designer.style}:${designer.seed}`);
+  const brief = analyzeDesignerBrief(designer.brief);
   const candidates: { x: number; y: number; score: number }[] = [];
   for (let y = 0; y < BRICK_ROWS - 2; y += 1) {
     for (let x = 0; x < BRICK_COLUMNS; x += 1) {
@@ -265,7 +329,7 @@ function buildFallbackRows(request: LevelRequest, designer: BoardDesignerIntent)
   }
   candidates.sort((a, b) => a.score - b.score);
 
-  const selected = candidates.slice(0, targets.brickTarget);
+  const selected = selectFallbackCells(candidates, brief, targets.brickTarget);
   const specialCells = new Set(
     [...selected]
       .sort((a, b) => hashNumber(seed + 1_037, a.x, a.y) - hashNumber(seed + 1_037, b.x, b.y))
@@ -282,8 +346,10 @@ function buildFallbackRows(request: LevelRequest, designer: BoardDesignerIntent)
 
   for (const cell of selected) {
     const key = cellKey(cell);
-    if (specialCells.has(key)) {
-      rows[cell.y][cell.x] = { kind: pickSpecialKind(designer.style, seed, cell.x, cell.y), hp: 1 };
+    if (brief.exclusiveKind) {
+      rows[cell.y][cell.x] = brickForKind(brief.exclusiveKind, designer, request.level);
+    } else if (specialCells.has(key)) {
+      rows[cell.y][cell.x] = { kind: brief.preferredKind ?? pickSpecialKind(designer.style, seed, cell.x, cell.y), hp: 1 };
     } else if (hardCells.has(key)) {
       rows[cell.y][cell.x] = { kind: "hard", hp: clamp(1 + Math.ceil(designer.difficulty / 2), 2, 4) };
     } else {
@@ -302,6 +368,142 @@ function buildFallbackRows(request: LevelRequest, designer: BoardDesignerIntent)
     }
   }
   return rows;
+}
+
+export type DesignerBriefShape = "heart" | "diamond" | "circle" | "triangle" | "cross" | "x";
+
+export interface DesignerBriefAnalysis {
+  exclusiveKind?: BrickKind;
+  preferredKind?: BrickKind;
+  mentionedKinds: BrickKind[];
+  shape?: DesignerBriefShape;
+}
+
+export function analyzeDesignerBrief(brief: string): DesignerBriefAnalysis {
+  const text = brief.toLowerCase();
+  const kinds = brickKindsFromBrief(text);
+  const kind = kinds[0];
+  const exclusive = kind && /\b(all|only|nothing but|entirely|exclusively|just)\b/.test(text);
+  return {
+    exclusiveKind: exclusive ? kind : undefined,
+    preferredKind: !exclusive && kinds.length === 1 ? kind : undefined,
+    mentionedKinds: kinds,
+    shape: shapeFromBrief(text)
+  };
+}
+
+function brickKindsFromBrief(text: string): BrickKind[] {
+  const matches: BrickKind[] = [];
+  const add = (kind: BrickKind, pattern: RegExp) => {
+    if (pattern.test(text) && !matches.includes(kind)) matches.push(kind);
+  };
+  add("bomb", /\b(explod|bomb|blast|detonat)/);
+  add("boss", /\b(boss|core|bosses)\b/);
+  add("hard", /\b(hard|metal|armou?r|shield)/);
+  add("prize", /\b(prize|reward|gift|green)/);
+  add("penalty", /\b(penalty|hazard|red|bad)\b/);
+  add("laser", /\b(laser|beam)\b/);
+  add("grab", /\b(grab|catch|sticky)\b/);
+  add("fire", /\b(fire|flame|burn)\b/);
+  add("thru", /\b(thru|ghost|phase|pierc)/);
+  add("split", /\b(split|multi[- ]?ball|multiball)\b/);
+  add("wide", /\b(wide|expand|big paddle)\b/);
+  add("slow", /\b(slow|brake|chill)\b/);
+  add("basic", /\b(basic|plain|normal)\b/);
+  return matches;
+}
+
+function shapeFromBrief(text: string): DesignerBriefShape | undefined {
+  if (/\b(heart|love|valentine)\b/.test(text)) return "heart";
+  if (/\b(diamond|gem|rhombus)\b/.test(text)) return "diamond";
+  if (/\b(circle|round|orb|ring)\b/.test(text)) return "circle";
+  if (/\b(triangle|pyramid)\b/.test(text)) return "triangle";
+  if (/\b(cross|plus)\b/.test(text)) return "cross";
+  if (/\b(x[- ]?shape|letter x|big x)\b/.test(text)) return "x";
+  return undefined;
+}
+
+function selectFallbackCells(candidates: { x: number; y: number; score: number }[], brief: DesignerBriefAnalysis, targetCount: number) {
+  if (!brief.shape) return candidates.slice(0, targetCount);
+  const shaped = cellsForShape(brief.shape).map(({ x, y }) => ({ x, y, score: 0 }));
+  if (shaped.length >= MIN_BRICKS && shaped.length <= MAX_BRICKS) return shaped;
+  if (shaped.length > MAX_BRICKS) return shaped.slice(0, MAX_BRICKS);
+  const selected = new Map(shaped.map((cell) => [cellKey(cell), cell]));
+  for (const cell of candidates) {
+    if (selected.size >= MIN_BRICKS) break;
+    selected.set(cellKey(cell), cell);
+  }
+  return [...selected.values()];
+}
+
+function cellsForShape(shape: DesignerBriefShape): { x: number; y: number }[] {
+  const cells: { x: number; y: number }[] = [];
+  for (let y = 0; y < BRICK_ROWS; y += 1) {
+    for (let x = 0; x < BRICK_COLUMNS; x += 1) {
+      if (shapeIncludesCell(shape, x, y)) cells.push({ x, y });
+    }
+  }
+  return cells;
+}
+
+function shapeIncludesCell(shape: DesignerBriefShape, x: number, y: number): boolean {
+  const cx = x - (BRICK_COLUMNS - 1) / 2;
+  const cy = y - (BRICK_ROWS - 1) / 2;
+  if (shape === "heart") {
+    const rowExtents = [
+      [3, 5],
+      [2, 11],
+      [1, 12],
+      [0, 13],
+      [1, 12],
+      [2, 11],
+      [3, 10],
+      [4, 9],
+      [5, 8]
+    ] as const;
+    const range = rowExtents[y];
+    if (!range) return false;
+    if (y === 0) return (x >= 3 && x <= 5) || (x >= 8 && x <= 10);
+    return x >= range[0] && x <= range[1];
+  }
+  if (shape === "diamond") return Math.abs(cx) / 6.5 + Math.abs(cy) / 4 <= 1;
+  if (shape === "circle") return cx * cx / 40 + cy * cy / 16 <= 1;
+  if (shape === "triangle") return y >= 1 && y <= 8 && Math.abs(cx) <= y * 0.82;
+  if (shape === "cross") return (x >= 5 && x <= 8 && y <= 8) || (y >= 3 && y <= 5 && x >= 1 && x <= 12);
+  return Math.abs(cx - cy * 1.35) <= 1.1 || Math.abs(cx + cy * 1.35) <= 1.1;
+}
+
+function shapeLabel(shape: DesignerBriefShape): string {
+  return shape === "x" ? "X-Shaped" : `${shape[0]?.toUpperCase() ?? ""}${shape.slice(1)}`;
+}
+
+function applyDesignerBriefConstraints(rows: BrickCell[][], designer: BoardDesignerIntent): BrickCell[][] {
+  const brief = analyzeDesignerBrief(designer.brief);
+  const exclusiveKind = brief.exclusiveKind;
+  const fillKind = exclusiveKind ?? brief.preferredKind ?? "basic";
+  let constrained = rows.map((row) => [...row]);
+
+  if (brief.shape) {
+    const shapeCells = new Set(cellsForShape(brief.shape).map(cellKey));
+    constrained = constrained.map((row, y) =>
+      row.map((brick, x) => {
+        if (!shapeCells.has(cellKey({ x, y }))) return null;
+        return brick ?? brickForKind(fillKind, designer, 1);
+      })
+    );
+  }
+
+  if (exclusiveKind) {
+    constrained = constrained.map((row) => row.map((brick) => (brick ? brickForKind(exclusiveKind, designer, 1) : null)));
+  }
+
+  return constrained;
+}
+
+function brickForKind(kind: BrickKind, designer: BoardDesignerIntent, level: number): BrickSpec {
+  if (kind === "hard") return { kind, hp: clamp(1 + Math.ceil(designer.difficulty / 2), 2, 4) };
+  if (kind === "boss") return { kind, hp: clamp(4 + designer.difficulty + Math.floor(level / 4), 5, 12) };
+  return { kind, hp: 1 };
 }
 
 function cellKey(cell: { x: number; y: number }): string {
@@ -326,6 +528,12 @@ function hintForDesignerStyle(style: DesignerStyle): string {
   if (style === "precision") return "Hold a shallow angle and work through the narrow windows.";
   if (style === "boss-core") return "Save fire, laser, or thru power for the center core.";
   return "Open a lane first, then chase powerups when the return angle is safe.";
+}
+
+function hintForDesignerIntent(designer: BoardDesignerIntent, brief: DesignerBriefAnalysis): string {
+  if (brief.exclusiveKind === "bomb") return "Clip the edge of the bomb chain, then ride the opened lanes.";
+  if (brief.shape === "heart") return "Open one heart lobe first so the return has a clean center lane.";
+  return hintForDesignerStyle(designer.style);
 }
 
 function normalizeRows(input: unknown, level: number): BrickCell[][] {
@@ -394,6 +602,10 @@ function stringValue(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim().length > 0 ? trimForUi(value.trim(), 110) : fallback;
 }
 
+function briefValue(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim().length > 0 ? trimForUi(value.trim(), MAX_DESIGNER_BRIEF_LENGTH) : fallback;
+}
+
 function numberValue(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
@@ -413,21 +625,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isDesignerStyle(value: string): value is DesignerStyle {
   return DESIGNER_STYLES.includes(value as DesignerStyle);
-}
-
-function normalizeDesignerFeedback(input: unknown): BoardDesignerFeedback | null {
-  if (!isRecord(input)) return null;
-  const vote = input.vote === "up" || input.vote === "down" ? input.vote : null;
-  if (!vote) return null;
-  const rawStyle = input.style;
-  return {
-    vote,
-    levelName: stringValue(input.levelName, "Generated Board").slice(0, 80),
-    style: typeof rawStyle === "string" && isDesignerStyle(rawStyle) ? rawStyle : DEFAULT_DESIGNER_INTENT.style,
-    seed: stringValue(input.seed, DEFAULT_DESIGNER_INTENT.seed).slice(0, 36),
-    recentEvents: Array.isArray(input.recentEvents) ? input.recentEvents.filter((event): event is string => typeof event === "string").slice(0, 4) : [],
-    createdAt: typeof input.createdAt === "string" ? input.createdAt : undefined
-  };
 }
 
 function trimForUi(value: string, maxLength: number): string {

@@ -11,9 +11,9 @@ Target length: 60-90 seconds.
 ## Board Designer
 
 1. Open Designer.
-2. Set a visible intent such as `Bomb Chains`, higher density, and a memorable seed.
+2. Type a short prompt such as `heart shaped board with only exploding blocks`.
 3. Generate the board.
-4. Point out the concise generation summary and the concrete target counts.
+4. Point out the concise generation summary and visible board change.
 5. Keep the generated board to unlock Saved Designs.
 
 ## Replay Structure
@@ -27,7 +27,7 @@ Target length: 60-90 seconds.
 - Curated packs make it a game, not just a generator.
 - Cursor SDK board design changes actual playable layouts through the local server route.
 - Fallback generation keeps the app playable without credentials.
-- Raw trace is available in Details without cluttering the default game view.
+- Raw trace is available in Log without cluttering the default game view.
 
 ## Close
 

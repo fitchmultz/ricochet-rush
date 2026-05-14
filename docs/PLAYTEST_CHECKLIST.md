@@ -16,18 +16,18 @@ The gate must pass before calling the build ready.
 - Confirm the first screen reads as a game: board visible, Play Console compact, Launch focused.
 - Launch with keyboard, move left and right, and verify the ball leaves at a readable angle.
 - Open Boards, choose Starter, and confirm the drawer closes on selection.
-- Open Designer, change style and seed, generate a board, rate it, and keep it.
+- Open Designer, type a short board prompt with spaces, generate a board, and keep it.
 - Confirm Saved Designs unlocks after keeping a generated board.
 - Open Options and toggle high contrast, reduced motion, SFX, music, particles, and ball speed.
-- Save the run, reload, confirm it restores, then clear the save and confirm cancellation preserves it.
-- Inspect Details and confirm raw composer trace is behind that panel, not in the default play view.
+- Confirm autosave restores after reload, then clear the save from Options and confirm cancellation preserves it.
+- Inspect Log and confirm raw generation trace is behind that panel, not in the default play view.
 
 ## Mobile Width
 
 - Boot at `390x760`.
 - Confirm no horizontal scroll.
 - Confirm the board, Play Console, and tool drawer stack without overlapping text or controls.
-- Open Designer, Boards, Options, and Details once each.
+- Open Designer, Boards, Options, and Log once each.
 - Launch, steer left/right, and pause with the on-screen touch controls.
 
 ## Visual Checks
@@ -42,4 +42,7 @@ The gate must pass before calling the build ready.
 
 - Without `CURSOR_API_KEY`, generation must fall back quickly and show a public fallback summary.
 - With `CURSOR_API_KEY`, generated boards must still pass validation and remain playable.
+- Freeform briefs such as `heart shape, only bomb bricks` must visibly steer both Cursor SDK generation and local fallback.
+- In Log, successful live SDK generations should show a compact `grid` draft before local validation materializes the board.
+- Stalled generation must recover to a local fallback instead of leaving the game on the Generating overlay.
 - Browser code must not expose Cursor SDK secrets or expect direct SDK auth.

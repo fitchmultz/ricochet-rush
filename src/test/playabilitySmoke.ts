@@ -1,6 +1,6 @@
 import { once } from "node:events";
 import { resolve } from "node:path";
-import { chromium } from "playwright";
+import { chromium, type Page } from "playwright";
 import { createApiServer } from "../server/api";
 
 process.env.RICOCHET_RUSH_FORCE_FALLBACK = "1";
@@ -35,8 +35,8 @@ interface DebugSnapshot {
     density: number;
     specialBias: number;
     seed: string;
+    brief: string;
   };
-  currentBoardVote: "up" | "down" | null;
   generationSummary?: {
     title: string;
     detail: string;
@@ -48,6 +48,13 @@ interface DebugSnapshot {
     highContrast: boolean;
     sfx: boolean;
     music: boolean;
+  };
+  audio: {
+    contextState: string;
+    musicEnabled: boolean;
+    musicPlaying: boolean;
+    musicMasterGain: number;
+    musicMelodyOutputPeak: number;
   };
   powerupPrimerDismissed: boolean;
   recentEvents: string[];
@@ -66,10 +73,70 @@ const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await page.evaluate((save) => {
+    localStorage.clear();
+    localStorage.setItem("ricochet-rush-save", JSON.stringify(save));
+  }, staleEmptyBrickSave());
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
+  const repairedStaleSave = await snapshot(page);
+  assert(repairedStaleSave.boardSource === "generated", "Expected stale generated save to restore as a generated board.");
+  assert(repairedStaleSave.bricks >= 34, `Expected stale empty save to rebuild playable bricks, got ${repairedStaleSave.bricks}.`);
+  assert(await page.evaluate(() => JSON.parse(localStorage.getItem("ricochet-rush-save") ?? "{}").bricks?.length >= 34), "Expected repaired save to persist rebuilt bricks.");
+
+  await page.evaluate(() => {
+    localStorage.clear();
+    localStorage.setItem(
+      "ricochet-rush-settings",
+      JSON.stringify({
+        ballSpeed: 1,
+        particles: true,
+        reducedMotion: false,
+        highContrast: false,
+        sfx: false,
+        music: false
+      })
+    );
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
+  await page.waitForSelector('[data-tool-panel="designer"]');
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
+  await page.waitForFunction(() => {
+    const mark = document.querySelector<HTMLImageElement>(".brand-mark");
+    return mark && mark.complete && mark.naturalWidth > 0;
+  });
+  const explicitOptOut = await snapshot(page);
+  assert(!explicitOptOut.settings.sfx, "Expected explicit SFX opt-out to survive audio-defaults migration.");
+  assert(!explicitOptOut.settings.music, "Expected explicit music opt-out to survive audio-defaults migration.");
+  assert(await hasLocalStorageKey(page, "ricochet-rush-audio-defaults-v1"), "Expected audio defaults migration marker after preserving explicit opt-outs.");
+
+  await page.evaluate(() => {
+    localStorage.clear();
+    localStorage.setItem(
+      "ricochet-rush-settings",
+      JSON.stringify({
+        ballSpeed: 1,
+        particles: true,
+        reducedMotion: false,
+        highContrast: false,
+        sound: false
+      })
+    );
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
+  const legacySoundOff = await snapshot(page);
+  assert(!legacySoundOff.settings.sfx, "Expected legacy Sound opt-out to survive audio-defaults migration.");
+  assert(legacySoundOff.settings.music, "Expected missing legacy music setting to default on.");
+  assert(await hasLocalStorageKey(page, "ricochet-rush-audio-defaults-v1"), "Expected audio defaults migration marker after legacy sound migration.");
+
   await page.evaluate(() => localStorage.clear());
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
-  await page.waitForSelector('[data-action="save"]');
+  await page.waitForSelector('[data-tool-panel="designer"]');
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
   await page.waitForFunction(() => {
     const mark = document.querySelector<HTMLImageElement>(".brand-mark");
@@ -83,6 +150,31 @@ try {
   assert(ready.boardSource === "pack", `Expected first board to come from a curated pack, got ${ready.boardSource}.`);
   assert(ready.currentPackId === "starter", `Expected Starter pack on boot, got ${ready.currentPackId}.`);
   assert(ready.boardTheme.wallGlow === "#4ecdc4", `Expected Starter board theme, got ${ready.boardTheme.wallGlow}.`);
+  await page.evaluate(() => {
+    const raw = localStorage.getItem("ricochet-rush-save");
+    if (!raw) throw new Error("Missing starter checkpoint to corrupt.");
+    const save = JSON.parse(raw) as {
+      bricks?: Array<{ kind: string; hp: number; maxHp: number }>;
+      recentEvents?: string[];
+    };
+    save.bricks = save.bricks?.map((brick) => ({ ...brick, kind: "bomb", hp: 1, maxHp: 1 })) ?? [];
+    save.recentEvents = ["Corrupt pack checkpoint."];
+    localStorage.setItem("ricochet-rush-save", JSON.stringify(save));
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
+  const repairedPackSave = await page.evaluate(() => JSON.parse(localStorage.getItem("ricochet-rush-save") ?? "{}") as { bricks?: Array<{ kind: string }> });
+  const repairedPackKinds = new Set(repairedPackSave.bricks?.map((brick) => brick.kind) ?? []);
+  assert(!repairedPackKinds.has("bomb"), "Expected corrupt bomb-only Starter checkpoint to rebuild from authored board data.");
+  assert(repairedPackKinds.has("wide") && repairedPackKinds.has("split"), "Expected repaired Starter checkpoint to restore authored special bricks.");
+  const repairedReady = await snapshot(page);
+  assert(repairedReady.boardSource === "pack" && repairedReady.currentPackId === "starter", "Expected repaired corrupt checkpoint to stay on Starter pack.");
+  assert(repairedReady.bricks === ready.bricks, `Expected repaired Starter brick count ${ready.bricks}, got ${repairedReady.bricks}.`);
+  assert(repairedReady.recentEvents.includes("Saved board rebuilt."), "Expected corrupt checkpoint repair to be visible in recent events.");
+  assert(repairedReady.settings.sfx, "Expected missing settings to default SFX on.");
+  assert(repairedReady.settings.music, "Expected missing settings to default music on.");
+  assert(await hasLocalStorageKey(page, "ricochet-rush-audio-defaults-v1"), "Expected audio defaults migration marker.");
   assert((await page.locator('link[rel="icon"][href="/assets/ricochet-rush-icon.svg"]').count()) === 1, "Expected branded favicon asset.");
   assert(await page.locator(".play-console").count() === 1, "Expected a compact play console.");
   assert((await page.locator(".brand-mark").count()) === 1, "Expected the original brand mark in the Play Console.");
@@ -91,7 +183,9 @@ try {
   assert(primerText.includes("Green helps") && primerText.includes("Red hurts") && primerText.includes("Gold is chaos"), "Expected primer to explain power-up color tones.");
   assert(await page.locator(".play-console .designer-panel, .play-console .pack-browser, .play-console .settings, .play-console .agent-trace").count() === 0, "Expected heavy tools outside the play console.");
   assert(await page.locator("[data-tool-surface]").isHidden(), "Expected tool panels to be closed by default.");
-  assert(await page.locator('[data-action="save-board"]').isDisabled(), "Expected Keep board to be disabled for authored boards.");
+  assert(await page.locator('[data-action="save-board"]').isHidden(), "Expected Keep board to stay hidden for authored boards.");
+  assert((await page.locator('.play-console [data-action="reset"]').count()) === 0, "Expected Clear save to stay out of primary play actions.");
+  assert((await page.locator('[data-action="save"]').count()) === 0, "Expected autosave to replace the old manual save action.");
   assert(await hasFocusedOverlayAction(page), "Expected ready overlay to focus its primary action.");
   await page.locator('[data-action="dismiss-powerup-primer"]').click();
   assert((await snapshot(page)).powerupPrimerDismissed, "Expected power-up primer dismissal in debug state.");
@@ -107,32 +201,30 @@ try {
   await page.locator('[data-tool-panel="designer"]').click();
   assert((await page.locator("[data-tool-title]").innerText()) === "Board Designer", "Expected Board Designer title.");
   assert(await page.locator(".designer-panel").isVisible(), "Expected Board Designer controls in a focused panel.");
-  const agentPipelineText = await page.locator("[data-agent-pipeline]").innerText();
-  assert(agentPipelineText.includes("Intent → composer-2 → validation → playable wall"), "Expected Board Designer to explain the Cursor SDK agent pipeline.");
-  assert(agentPipelineText.includes("server-side") && agentPipelineText.includes("fallback"), "Expected agent pipeline to explain credential safety and fallback behavior.");
-  assert((await page.locator("[data-designer-targets]").innerText()).includes("66 bricks"), "Expected visible designer target counts.");
+  assert((await page.locator('.play-console [data-action="new-board"]').count()) === 0, "Expected Design board action to live in the Board Designer panel.");
+  assert((await page.locator('.designer-panel [data-action="new-board"]').count()) === 1, "Expected Board Designer panel to own the Design board action.");
+  assert((await page.locator("[data-agent-pipeline]").count()) === 0, "Expected SDK plumbing to stay out of the player-facing Board Designer.");
   const canvasLabel = await page.locator('[data-testid="ricochet-rush-canvas"]').getAttribute("aria-label");
   assert(canvasLabel?.includes("Level 1") === true, "Expected canvas to expose current game state.");
 
-  await page.selectOption('[data-designer="style"]', "bomb-chains");
-  await page.locator('[data-designer="seed"]').fill("smoke sparks");
+  const promptInput = page.locator('[data-designer="brief"]');
+  await promptInput.fill("");
+  await promptInput.pressSequentially("heart shape, only bomb bricks");
+  assert((await promptInput.inputValue()) === "heart shape, only bomb bricks", "Expected the board prompt to preserve typed spaces while focused.");
   assert(await hasLocalStorageKey(page, "ricochet-rush-designer-intent"), "Expected designer intent to persist.");
   await page.locator('[data-action="new-board"]').click();
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().boardSource === "generated");
   const designed = await snapshot(page);
-  assert(designed.designerIntent.style === "bomb-chains", `Expected designer style to apply, got ${designed.designerIntent.style}.`);
+  assert(designed.designerIntent.brief === "heart shape, only bomb bricks", `Expected designer brief to apply, got ${designed.designerIntent.brief}.`);
   assert(designed.boardTheme.wallGlow === "#7ef1ff", `Expected generated board theme, got ${designed.boardTheme.wallGlow}.`);
-  assert(designed.generationSummary?.title === "Local fallback board", "Expected public generation summary for forced fallback.");
+  assert(designed.generationSummary?.title === "Local backup board", "Expected public generation summary for forced fallback.");
   assert(await page.locator("[data-generation-summary]").isVisible(), "Expected visible public generation summary.");
   assert(await page.locator("[data-compact-generation-summary]").isVisible(), "Expected compact generated-board summary in the play console.");
   const compactSummaryText = await page.locator("[data-compact-generation-summary]").innerText();
-  assert(compactSummaryText.toLowerCase().includes("fallback generated"), "Expected compact summary to foreground fallback status.");
+  assert(compactSummaryText.toLowerCase().includes("local backup used"), "Expected compact summary to foreground fallback status.");
   assert((await page.locator("[data-compact-generation-summary].is-fallback em").innerText()).length > 0, "Expected compact summary to surface fallback warning text.");
   assert(await page.locator("[data-compact-generation-summary].is-fallback").count() === 1, "Expected compact summary to expose fallback source styling.");
   assert(await page.locator('[data-action="save-board"]').isEnabled(), "Expected generated boards to be keepable.");
-  await page.locator('[data-action="rate-up"]').click();
-  assert((await snapshot(page)).currentBoardVote === "up", "Expected generated board feedback to be captured.");
-  assert(await hasLocalStorageKey(page, "ricochet-rush-designer-feedback"), "Expected designer feedback to persist.");
   await page.locator('[data-action="save-board"]').click();
   assert(await hasLocalStorageKey(page, "ricochet-rush-saved-boards"), "Expected kept generated board to persist in Saved Designs.");
   assert(!(await page.locator('[data-pack-id="saved-designs"]').isDisabled()), "Expected Saved Designs to unlock after keeping a board.");
@@ -157,6 +249,9 @@ try {
 
   const playing = await snapshot(page);
   assert(playing.phase === "playing", `Expected playing phase after launch, got ${playing.phase}.`);
+  assert(playing.audio.musicEnabled, "Expected music to be enabled after launch.");
+  assert(playing.audio.musicPlaying, `Expected music to be playing after launch, got context ${playing.audio.contextState}.`);
+  assert(playing.audio.musicMelodyOutputPeak >= 0.008, `Expected audible music output peak, got ${playing.audio.musicMelodyOutputPeak}.`);
   assert(playing.balls.some((ball) => !ball.stuck && ball.vy < 0), "Expected launched ball moving upward.");
   assert(playing.balls.some((ball) => !ball.stuck && Math.abs(ball.vx) > 70), "Expected launched ball to avoid near-vertical loops.");
   assert(playing.paddleX > ready.paddleX, "Expected keyboard movement to move the paddle right.");
@@ -175,13 +270,30 @@ try {
   assert((await page.locator(".floating-text.is-powerupVolatile").count()) === 1, "Expected volatile pickup label.");
   assert((await page.locator(".power-timer.is-reward").count()) >= 2, "Expected active power timers to use reward tone styling.");
 
-  await page.locator('[data-action="save"]').click();
   const saved = await snapshot(page);
-  assert(saved.hasSave, "Expected save action to mark a checkpoint.");
+  assert(saved.hasSave, "Expected autosave to keep a run checkpoint.");
   assert(await hasLocalStorageKey(page, "ricochet-rush-save"), "Expected checkpoint in localStorage.");
+
+  await page.evaluate(() => {
+    const game = window.__ricochetRushGame as unknown as { bricks: unknown[]; completeLevel: () => void };
+    game.bricks.splice(0);
+    game.completeLevel();
+  });
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "levelComplete");
+  assert(!(await hasLocalStorageKey(page, "ricochet-rush-save")), "Expected level clear to remove the stale pre-clear checkpoint.");
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
+  const afterClearReload = await snapshot(page);
+  assert(afterClearReload.bricks >= 34, `Expected reload after level clear to start a fresh playable board, got ${afterClearReload.bricks}.`);
+  assert(!afterClearReload.recentEvents.includes("Saved run restored."), "Expected reload after level clear not to restore the pre-clear checkpoint.");
 
   await page.locator('[data-tool-panel="options"]').click();
   assert((await page.locator("[data-tool-title]").innerText()) === "Options", "Expected Options panel title.");
+  assert((await page.locator('.settings-panel [data-action="reset"]').count()) === 1, "Expected Clear save to live in Options.");
+  assert((await page.locator('.settings-panel [data-action="reset"]').innerText()) === "Clear local save", "Expected save reset copy to be explicit and secondary.");
+  assert(await page.locator('[data-setting="sfx"]').isChecked(), "Expected SFX to be enabled by default.");
+  assert(await page.locator('[data-setting="music"]').isChecked(), "Expected music to be enabled by default.");
   await page.locator('[data-setting="high-contrast"]').check();
   await page.locator('[data-setting="reduced-motion"]').check();
   await page.locator('[data-setting="sfx"]').check();
@@ -210,19 +322,39 @@ try {
   assert(restoredSettings.powerupPrimerDismissed, "Expected dismissed power-up primer to persist after reload.");
   assert(await page.locator("[data-powerup-primer]").isHidden(), "Expected dismissed power-up primer to stay hidden after reload.");
 
-  await page.locator('[data-action="clear-save"], [data-action="reset"]').click();
+  await page.locator('[data-tool-panel="options"]').click();
+  await page.locator('.settings-panel [data-action="reset"]').click();
   const confirmText = await page.locator(".overlay-card").innerText();
   assert(confirmText.includes("Clear Saved Run?"), "Expected clear-save confirmation dialog.");
   await page.locator("[data-overlay-secondary]").click();
   await page.waitForFunction(() => document.querySelector(".overlay-card") === null);
   assert(await hasLocalStorageKey(page, "ricochet-rush-save"), "Expected cancel to preserve checkpoint.");
 
-  await page.locator('[data-action="reset"]').click();
+  await page.evaluate(() => {
+    const game = window.__ricochetRushGame as unknown as { handlePrimaryAction: () => void };
+    game.handlePrimaryAction();
+  });
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "playing");
+  await page.locator('.settings-panel [data-action="reset"]').click();
   await page.locator("[data-overlay-action]").click();
-  assert(!(await hasLocalStorageKey(page, "ricochet-rush-save")), "Expected confirmed clear-save to remove checkpoint.");
+  await page.waitForTimeout(1200);
+  assert(!(await hasLocalStorageKey(page, "ricochet-rush-save")), "Expected confirmed clear-save during active play to remove checkpoint without autosave recreating it.");
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
+  await page.evaluate(() => {
+    const game = window.__ricochetRushGame as unknown as { hideOverlay: () => void; refreshHud: () => void };
+    game.hideOverlay();
+    game.refreshHud();
+  });
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
   assert(!overflow, "Expected desktop layout without horizontal overflow.");
+
+  if (await page.locator("[data-tool-surface]").isVisible()) {
+    await page.locator('[data-action="close-tool-panel"]').click();
+  }
+  assert(await page.locator("[data-tool-surface]").isHidden(), "Expected tool panel to close before mobile touch controls.");
 
   await page.setViewportSize({ width: 390, height: 760 });
   const mobileOverflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
@@ -272,23 +404,32 @@ async function hasFocusedOverlayAction(page: { evaluate: <T>(callback: () => T) 
   return page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.hasAttribute("data-overlay-action"));
 }
 
-async function canvasHasVisiblePixels(page: { evaluate: <T>(callback: () => T) => Promise<T> }): Promise<boolean> {
-  return page.evaluate(() => {
-    const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="ricochet-rush-canvas"]');
-    if (!canvas || canvas.width === 0 || canvas.height === 0) return false;
-    const probe = document.createElement("canvas");
-    probe.width = 64;
-    probe.height = 64;
-    const context = probe.getContext("2d", { willReadFrequently: true });
-    if (!context) return false;
-    context.drawImage(canvas, 0, 0, probe.width, probe.height);
-    const pixels = context.getImageData(0, 0, probe.width, probe.height).data;
-    let litPixels = 0;
-    for (let index = 0; index < pixels.length; index += 4) {
-      if (pixels[index] + pixels[index + 1] + pixels[index + 2] > 36) litPixels += 1;
-    }
-    return litPixels > 300;
-  });
+async function canvasHasVisiblePixels(page: Page): Promise<boolean> {
+  try {
+    await page.waitForFunction(
+      () => {
+        const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="ricochet-rush-canvas"]');
+        if (!canvas || canvas.width === 0 || canvas.height === 0) return false;
+        const probe = document.createElement("canvas");
+        probe.width = 64;
+        probe.height = 64;
+        const context = probe.getContext("2d", { willReadFrequently: true });
+        if (!context) return false;
+        context.drawImage(canvas, 0, 0, probe.width, probe.height);
+        const pixels = context.getImageData(0, 0, probe.width, probe.height).data;
+        let litPixels = 0;
+        for (let index = 0; index < pixels.length; index += 4) {
+          if (pixels[index] + pixels[index + 1] + pixels[index + 2] > 36) litPixels += 1;
+        }
+        return litPixels > 300;
+      },
+      undefined,
+      { polling: "raf", timeout: 3000 }
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function stageOverlapsPlayConsole(page: { evaluate: <T>(callback: () => T) => Promise<T> }): Promise<boolean> {
@@ -309,4 +450,37 @@ async function injectPowerupClarityState(page: { evaluate: <T>(callback: () => T
 
 function assert(condition: boolean, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+function staleEmptyBrickSave() {
+  const rows = Array.from({ length: 9 }, (_, y) =>
+    Array.from({ length: 14 }, (_, x) => (y < 3 || (y === 3 && x < 2) ? { kind: "basic", hp: 1 } : null))
+  );
+  return {
+    version: 3,
+    savedAt: new Date(0).toISOString(),
+    level: 2,
+    clearedLevels: 1,
+    boardSource: "generated",
+    packId: null,
+    packBoardIndex: 0,
+    score: 1200,
+    bestScore: 1200,
+    lives: 2,
+    combo: 1,
+    paddleWidth: 116,
+    levelBlueprint: {
+      name: "Stale Empty Save",
+      briefing: "A stale save should rebuild into a playable wall.",
+      paddleHint: "Launch from the center.",
+      speed: 1,
+      rows
+    },
+    bricks: [],
+    recentEvents: ["Stale empty save."],
+    laserTimer: 0,
+    grabTimer: 0,
+    explosionScale: 1,
+    balls: null
+  };
 }

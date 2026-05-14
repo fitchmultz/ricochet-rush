@@ -6,20 +6,20 @@ import {
   MAX_BRICKS,
   MIN_BRICKS,
   type ComposerAgentTrace,
+  type ComposerStreamStats,
   type GenerationSummary,
   type LevelBlueprint,
   type LevelRequest,
   type LevelResponse,
+  analyzeDesignerBrief,
   describeDesignerIntent,
-  designerStyleGoal,
   designerTargets,
   fallbackLevel,
   normalizeDesignerIntent,
-  normalizeLevel,
-  designerStyleLabel
+  normalizeLevel
 } from "../shared/evolution.js";
 
-interface WorkerInvocationResult {
+export interface WorkerInvocationResult {
   parsed: unknown | null;
   parseStatus: "success" | "parse-failed" | "worker-failed";
   parseError?: string;
@@ -28,11 +28,41 @@ interface WorkerInvocationResult {
   startedAt: number;
   finishedAt: number;
   workerExitCode?: number | null;
+  streamStats?: ComposerStreamStats;
+}
+
+interface CursorWorkerEnvelope {
+  parsed: unknown | null;
+  parseStatus: "success" | "parse-failed";
+  parseError?: string;
+  rawOutput: string;
+  streamError?: string;
+  durationMs?: number;
+  streamStats?: ComposerStreamStats;
+}
+
+const CURSOR_WORKER_TIMEOUT_MS = 60_000;
+const CURSOR_WORKER_SIGKILL_GRACE_MS = 5_000;
+
+interface CursorWorkerProcess {
+  stdout: { setEncoding: (encoding: BufferEncoding) => void; on: (event: "data", listener: (chunk: string) => void) => unknown };
+  stderr: { setEncoding: (encoding: BufferEncoding) => void; on: (event: "data", listener: (chunk: string) => void) => unknown };
+  stdin: { end: (data: string) => unknown };
+  on(event: "error", listener: (error: Error) => void): unknown;
+  on(event: "close", listener: (code: number | null) => void): unknown;
+  kill: (signal: NodeJS.Signals) => boolean;
+}
+
+interface RunCursorWorkerOptions {
+  timeoutMs?: number;
+  sigkillGraceMs?: number;
+  spawnWorker?: () => CursorWorkerProcess;
 }
 
 export async function requestEvolution(request: LevelRequest): Promise<LevelResponse> {
   const requestJson = JSON.stringify(request);
   const prompt = buildPrompt(request);
+  const apiKey = readCursorApiKey();
 
   if (process.env.RICOCHET_RUSH_FORCE_FALLBACK === "1") {
     const level = fallbackLevel(request);
@@ -45,7 +75,7 @@ export async function requestEvolution(request: LevelRequest): Promise<LevelResp
     };
   }
 
-  if (!process.env.CURSOR_API_KEY) {
+  if (!apiKey) {
     const warning = "Cursor SDK authentication is unavailable.";
     const now = Date.now();
     const trace = toTrace(request, requestJson, prompt, {
@@ -70,7 +100,7 @@ export async function requestEvolution(request: LevelRequest): Promise<LevelResp
   }
 
   try {
-    const workerResult = await runCursorWorker(request);
+    const workerResult = await runCursorWorker(requestJson, apiKey);
     const trace = toTrace(request, requestJson, prompt, workerResult);
 
     if (workerResult.parseStatus === "success") {
@@ -110,15 +140,22 @@ export async function requestEvolution(request: LevelRequest): Promise<LevelResp
 export function buildPrompt(request: LevelRequest): string {
   const designer = normalizeDesignerIntent(request.designer);
   const targets = designerTargets(designer, request.level);
-  const feedbackLines =
-    designer.feedback.length > 0
-      ? designer.feedback.map((entry) => `- ${entry.vote === "up" ? "Liked" : "Rejected"} ${entry.levelName} (${designerStyleLabel(entry.style)}, seed "${entry.seed}")`).join("\n")
-      : "- No direct feedback yet.";
+  const playerPrompt = designer.brief || "None.";
+  const requestContext = {
+    level: request.level,
+    score: request.score,
+    lives: request.lives,
+    clearedLevels: request.clearedLevels,
+    recentEvents: request.recentEvents.slice(0, 3)
+  };
   return `You are the level designer for Ricochet Rush, a fast 3D brick-breaker with adaptive arcade boards.
 
-Model contract:
+Fast contract:
 - You are composer-2 in fast mode.
-- Return only valid JSON. No markdown, no comments, no prose outside JSON.
+- Return one compact JSON object only. No markdown, comments, prose, tool calls, shell commands, file inspection, or helper code.
+- Keep the full response under 1,000 characters.
+- Do not calculate exact brick counts. Do not verify with code. Pick a strong playable approximation and return immediately.
+- The server validates, repairs, and rejects unsafe boards, so do not spend time proving the grid.
 - Generate a fresh playable level, not a generic rectangle and not a board that instantly clears.
 - Make the level visually interesting in a 3D arcade arena: diagonals, holes, shields, weak spots, traps, rewards.
 - Difficulty should rise, but the first ball must always have reachable targets.
@@ -127,38 +164,44 @@ Game rules:
 - Grid is ${BRICK_COLUMNS} columns by ${BRICK_ROWS} rows.
 - Brick kinds: basic, hard, bomb, prize, penalty, laser, grab, fire, thru, split, wide, slow, boss.
 - basic hp 1, hard hp 2-4, boss hp 5-12, all other special bricks hp 1.
-- null means empty space.
+- Use exactly 9 grid strings. Each string must be exactly 14 characters. "." means empty.
+- If every occupied brick is the same kind, set "brick" to that kind and use "x" for occupied cells.
+- For mixed grids, omit "brick" and use codes: b basic, h hard, o bomb, p prize, n penalty, l laser, g grab, f fire, t thru, s split, w wide, m slow, c boss.
 - Use at least ${MIN_BRICKS} bricks and at most ${MAX_BRICKS} bricks. This is mandatory; too few or too many bricks are rejected.
-- Use bombs sparingly. Use powerup bricks enough to be fun.
+- Target about ${targets.brickTarget} bricks, but any count inside ${MIN_BRICKS}-${MAX_BRICKS} is acceptable if the motif is clear.
+- Target about ${targets.specialTarget} specials and ${targets.hardTarget} hard bricks only when that does not fight the prompt.
+- Use bombs sparingly unless the player prompt explicitly asks for bombs, exploding blocks, or all-bomb boards.
 - Leave some empty lanes for bank shots.
 
-Visible design intent:
-- Style: ${designerStyleLabel(designer.style)} (${designer.style}).
-- Style goal: ${designerStyleGoal(designer.style)}
-- Difficulty: ${designer.difficulty}/5.
-- Difficulty target: ${targets.difficultyLabel}; use this for speed, hard-brick pressure, risk, and recovery-room generosity.
-- Target density: ${Math.round(designer.density * 100)}% of the board.
-- Target brick count: about ${targets.brickTarget} bricks, still obeying the mandatory ${BRICK_COLUMNS}x${BRICK_ROWS} grid and ${MIN_BRICKS}-${MAX_BRICKS} brick limits.
-- Special-brick mix: about ${targets.specialTarget} special bricks. Specials are bomb, prize, penalty, laser, grab, fire, thru, split, wide, slow, or boss; hard is not a special.
-- Hard-brick pressure: about ${targets.hardTarget} hard bricks unless the style needs boss bricks instead.
-- Speed target: about ${targets.speedTarget.toFixed(2)}.
-- Seed phrase: "${designer.seed}". Treat this as an arcade design motif, not random text to print.
-- Intent summary: ${describeDesignerIntent(designer)}.
+Player board prompt:
+- ${JSON.stringify(playerPrompt)}
+- Prompt locks: ${describePromptLocks(designer.brief)}.
+- Priority order: prompt shape/material, playable lanes, rough tuning. Exact density, special count, and hard count are soft.
+- If the prompt says "only", "all", "nothing but", or equivalent, every occupied brick must use that requested brick kind.
+- For "exploding blocks", use bomb bricks.
 
-Recent player feedback:
-${feedbackLines}
+Tuning:
+- ${targets.difficultyLabel} difficulty, speed near ${targets.speedTarget.toFixed(2)}, seed "${designer.seed}".
+- Intent: ${describeDesignerIntent(designer)}.
+- Run context: ${JSON.stringify(requestContext)}.
 
-Current run:
-${JSON.stringify(request, null, 2)}
-
-Return this exact shape:
+Return exactly this compact shape:
 {
   "name": "short level name",
   "briefing": "one punchy sentence",
   "paddleHint": "one useful tactical hint",
   "speed": 1.0,
-  "rows": [
-    [null, {"kind":"basic","hp":1}]
+  "brick": "basic",
+  "grid": [
+    "..............",
+    "..xxxx..xxxx..",
+    ".xxxxxxxxxxxx.",
+    ".xxxxxxxxxxxx.",
+    "..xxxxxxxxxx..",
+    "...xxxxxxxx...",
+    "....xxxxxx....",
+    ".....xxxx.....",
+    ".............."
   ]
 }`;
 }
@@ -173,13 +216,13 @@ export function buildGenerationSummary(
   const designer = normalizeDesignerIntent(request.designer);
   const targets = designerTargets(designer, request.level);
   const brickCount = level.rows.flat().filter(Boolean).length;
-  const sourceLabel = source === "cursor-sdk" ? "Cursor SDK" : "Local fallback";
+  const sourceLabel = source === "cursor-sdk" ? "Board designer" : "Local backup";
   return {
     source,
     title: `${sourceLabel} board`,
-    detail: `${sourceLabel} built ${level.name} from ${describeDesignerIntent(designer)}. Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; Validation kept ${brickCount} playable bricks.`,
+    detail: `${sourceLabel} built ${level.name} from ${describeDesignerIntent(designer)}. Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; final wall has ${brickCount} playable bricks.`,
     chips: [
-      designerStyleLabel(designer.style),
+      designer.brief ? "prompt" : "default prompt",
       `difficulty ${designer.difficulty}/5`,
       `${Math.round(designer.density * 100)}% density`,
       `${Math.round(designer.specialBias * 100)}% specials`,
@@ -194,31 +237,66 @@ export function summarizeLevelError(error: unknown): string {
   if (/unauthenticated|authentication|api key|required for cloud operations/i.test(message)) {
     return "Cursor SDK authentication is unavailable.";
   }
+  if (/agent[_ -]?busy|active run/i.test(message)) return "Cursor SDK agent is busy.";
+  if (/stream_buffer_overflow|message buffer overflow/i.test(message)) return "Cursor SDK stream buffer overflowed.";
+  if (/invalid_model|model .*not available|model id is required/i.test(message)) return "Cursor SDK model is unavailable.";
   if (/timed out/i.test(message)) return "Cursor SDK worker timed out.";
   if (/JSON/i.test(message)) return "Cursor SDK returned invalid JSON.";
   const firstLine = message.split("\n").find((line) => line.trim().length > 0)?.trim();
   return firstLine ? firstLine.slice(0, 140) : "Cursor SDK request failed.";
 }
 
-function runCursorWorker(request: LevelRequest): Promise<WorkerInvocationResult> {
+function readCursorApiKey(): string | undefined {
+  const value = process.env.CURSOR_API_KEY?.trim();
+  return value && value.length > 0 ? value : undefined;
+}
+
+export function runCursorWorker(requestJson: string, apiKey: string, options: RunCursorWorkerOptions = {}): Promise<WorkerInvocationResult> {
   return new Promise((resolve) => {
+    const timeoutMs = options.timeoutMs ?? CURSOR_WORKER_TIMEOUT_MS;
+    const sigkillGraceMs = options.sigkillGraceMs ?? CURSOR_WORKER_SIGKILL_GRACE_MS;
     const startedAt = Date.now();
-    const worker = spawn(process.execPath, ["--import", "tsx", "src/server/cursorWorker.ts"], {
-      cwd: process.cwd(),
-      stdio: ["pipe", "pipe", "pipe"]
-    });
+    const worker: CursorWorkerProcess = options.spawnWorker
+      ? options.spawnWorker()
+      : spawn(process.execPath, ["--import", "tsx", "src/server/cursorWorker.ts"], {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            CURSOR_API_KEY: apiKey
+          },
+          stdio: ["pipe", "pipe", "pipe"]
+        });
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let killTimeout: ReturnType<typeof setTimeout> | undefined;
 
-    const finish = (result: WorkerInvocationResult): void => {
+    const clearTimers = (includeKillTimeout = true): void => {
+      if (timeout) {
+        clearTimeout(timeout);
+        timeout = undefined;
+      }
+      if (includeKillTimeout && killTimeout) {
+        clearTimeout(killTimeout);
+        killTimeout = undefined;
+      }
+    };
+
+    const finish = (result: WorkerInvocationResult, options: { keepKillTimeout?: boolean } = {}): void => {
       if (settled) return;
       settled = true;
+      clearTimers(!options.keepKillTimeout);
       resolve(result);
     };
 
-    const timeout = setTimeout(() => {
+    timeout = setTimeout(() => {
+      timeout = undefined;
       worker.kill("SIGTERM");
+      killTimeout = setTimeout(() => {
+        worker.kill("SIGKILL");
+      }, sigkillGraceMs);
+      killTimeout.unref?.();
       finish({
         parsed: null,
         parseStatus: "worker-failed",
@@ -228,8 +306,8 @@ function runCursorWorker(request: LevelRequest): Promise<WorkerInvocationResult>
         startedAt,
         finishedAt: Date.now(),
         workerExitCode: null
-      });
-    }, 90_000);
+      }, { keepKillTimeout: true });
+    }, timeoutMs);
 
     worker.stdout.setEncoding("utf8");
     worker.stderr.setEncoding("utf8");
@@ -240,7 +318,7 @@ function runCursorWorker(request: LevelRequest): Promise<WorkerInvocationResult>
       stderr += chunk;
     });
     worker.on("error", (error) => {
-      clearTimeout(timeout);
+      clearTimers();
       finish({
         parsed: null,
         parseStatus: "worker-failed",
@@ -252,7 +330,7 @@ function runCursorWorker(request: LevelRequest): Promise<WorkerInvocationResult>
       });
     });
     worker.on("close", (code) => {
-      clearTimeout(timeout);
+      clearTimers();
       if (settled) return;
       if (code !== 0) {
         finish({
@@ -268,14 +346,17 @@ function runCursorWorker(request: LevelRequest): Promise<WorkerInvocationResult>
         return;
       }
       try {
-        const parsed = parseWorkerOutput(stdout);
+        const envelope = parseWorkerEnvelope(stdout);
+        const streamNote = envelope.streamError ? `Stream warning: ${envelope.streamError}` : "";
         finish({
-          parsed,
-          parseStatus: "success",
-          rawOutput: stdout,
-          rawError: stderr,
+          parsed: envelope.parsed,
+          parseStatus: envelope.parseStatus,
+          parseError: envelope.parseError,
+          rawOutput: envelope.rawOutput || stdout,
+          rawError: [stderr.trim(), streamNote].filter(Boolean).join("\n"),
           startedAt,
-          finishedAt: Date.now()
+          finishedAt: Date.now(),
+          streamStats: envelope.streamStats
         });
       } catch (error) {
         finish({
@@ -290,11 +371,15 @@ function runCursorWorker(request: LevelRequest): Promise<WorkerInvocationResult>
       }
     });
 
-    worker.stdin.end(JSON.stringify(request));
+    worker.stdin.end(requestJson);
   });
 }
 
 export function parseWorkerOutput(stdout: string): unknown {
+  return parseWorkerEnvelope(stdout).parsed;
+}
+
+function parseWorkerEnvelope(stdout: string): CursorWorkerEnvelope {
   for (const line of stdout
     .trim()
     .split(/\r?\n/)
@@ -302,10 +387,28 @@ export function parseWorkerOutput(stdout: string): unknown {
     const candidate = line.trim();
     if (candidate.startsWith("{") && candidate.endsWith("}")) {
       const parsed = JSON.parse(candidate);
-      return extractParsedOutput(parsed);
+      if (isRecord(parsed) && "parseStatus" in parsed) return normalizeWorkerEnvelope(parsed, candidate);
+      return {
+        parsed: extractParsedOutput(parsed),
+        parseStatus: "success",
+        rawOutput: candidate
+      };
     }
   }
   throw new Error("Cursor SDK worker did not return JSON.");
+}
+
+function normalizeWorkerEnvelope(payload: Record<string, unknown>, fallbackRawOutput: string): CursorWorkerEnvelope {
+  const parseStatus = payload.parseStatus === "parse-failed" ? "parse-failed" : "success";
+  return {
+    parsed: "parsed" in payload ? payload.parsed : null,
+    parseStatus,
+    parseError: typeof payload.parseError === "string" ? payload.parseError : undefined,
+    rawOutput: typeof payload.rawOutput === "string" ? payload.rawOutput : fallbackRawOutput,
+    streamError: typeof payload.streamError === "string" ? payload.streamError : undefined,
+    durationMs: typeof payload.durationMs === "number" && Number.isFinite(payload.durationMs) ? payload.durationMs : undefined,
+    streamStats: normalizeStreamStats(payload.streamStats)
+  };
 }
 
 function extractParsedOutput(payload: unknown): unknown {
@@ -317,6 +420,39 @@ function extractParsedOutput(payload: unknown): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function describePromptLocks(brief: string): string {
+  const analysis = analyzeDesignerBrief(brief);
+  const locks: string[] = [];
+  if (analysis.shape) locks.push(`shape=${analysis.shape}`);
+  if (analysis.exclusiveKind) locks.push(`exclusive occupied brick kind=${analysis.exclusiveKind}`);
+  else if (analysis.preferredKind) locks.push(`preferred brick kind=${analysis.preferredKind}`);
+  else if (analysis.mentionedKinds.length > 1) locks.push(`components=${analysis.mentionedKinds.join(",")}`);
+  return locks.length > 0 ? locks.join(", ") : "none";
+}
+
+function normalizeStreamStats(input: unknown): ComposerStreamStats | undefined {
+  if (!isRecord(input)) return undefined;
+  const firstToolCalls = Array.isArray(input.firstToolCalls)
+    ? input.firstToolCalls.filter((entry): entry is string => typeof entry === "string").slice(0, 8)
+    : [];
+  return {
+    requestEvents: numberStat(input.requestEvents),
+    statusEvents: numberStat(input.statusEvents),
+    thinkingEvents: numberStat(input.thinkingEvents),
+    assistantEvents: numberStat(input.assistantEvents),
+    toolCallEvents: numberStat(input.toolCallEvents),
+    taskEvents: numberStat(input.taskEvents),
+    systemEvents: numberStat(input.systemEvents),
+    userEvents: numberStat(input.userEvents),
+    otherEvents: numberStat(input.otherEvents),
+    firstToolCalls
+  };
+}
+
+function numberStat(input: unknown): number {
+  return typeof input === "number" && Number.isFinite(input) && input > 0 ? Math.floor(input) : 0;
 }
 
 function toTrace(
@@ -337,7 +473,8 @@ function toTrace(
     durationMs: Math.max(0, result.finishedAt - result.startedAt),
     startedAt: new Date(result.startedAt).toISOString(),
     finishedAt: new Date(result.finishedAt).toISOString(),
-    workerExitCode: result.workerExitCode ?? null
+    workerExitCode: result.workerExitCode ?? null,
+    streamStats: result.streamStats
   };
 }
 

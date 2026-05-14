@@ -2,7 +2,7 @@
 .env
 .env.*
 .scratchpad.md
+.pi/cache/
 dist/
 docs/media/.capture-tmp/
 node_modules/
-

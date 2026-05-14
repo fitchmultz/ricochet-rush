@@ -41,8 +41,7 @@ try {
   await page.waitForTimeout(900);
   await page.locator('[data-tool-panel="designer"]').click();
   await page.waitForTimeout(450);
-  await page.selectOption('[data-designer="style"]', "bomb-chains");
-  await page.locator('[data-designer="seed"]').fill("demo sparks");
+  await page.locator('[data-designer="brief"]').fill("diagonal bomb pockets with open side lanes");
   await page.locator('[data-action="new-board"]').click();
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().boardSource === "generated");
   await page.waitForTimeout(1200);

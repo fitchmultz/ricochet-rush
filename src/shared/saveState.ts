@@ -61,8 +61,8 @@ export const DEFAULT_SETTINGS: GameSettings = {
   particles: true,
   reducedMotion: false,
   highContrast: false,
-  sfx: false,
-  music: false
+  sfx: true,
+  music: true
 };
 
 const BRICK_KINDS = new Set<BrickKind>(["basic", "hard", "bomb", "prize", "penalty", "laser", "grab", "fire", "thru", "split", "wide", "slow", "boss"]);

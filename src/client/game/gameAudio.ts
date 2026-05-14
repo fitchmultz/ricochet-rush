@@ -34,6 +34,14 @@ interface SoundProfile {
   voices: ToneVoice[];
 }
 
+export interface GameAudioDebugState {
+  contextState: AudioContextState | "not-created" | "unavailable";
+  musicEnabled: boolean;
+  musicPlaying: boolean;
+  musicMasterGain: number;
+  musicMelodyOutputPeak: number;
+}
+
 declare global {
   interface Window {
     webkitAudioContext?: typeof AudioContext;
@@ -125,6 +133,9 @@ const PROFILES: Record<GameSoundKind, SoundProfile> = {
 };
 
 const MUSIC_NOTES = [196, 246.94, 293.66, 329.63, 293.66, 246.94, 220, 261.63];
+export const MUSIC_MASTER_GAIN = 0.35;
+export const MUSIC_MELODY_PEAK = 0.026;
+const MUSIC_BASS_PEAK = 0.018;
 
 export function createGameAudio() {
   let ctx: AudioContext | null = null;
@@ -141,8 +152,15 @@ export function createGameAudio() {
       if (!Ctx) return null;
       ctx = new Ctx();
     }
-    if (ctx.state === "suspended") void ctx.resume();
+    requestResume(ctx);
     return ctx;
+  };
+
+  const requestResume = (context: AudioContext) => {
+    if (context.state !== "suspended") return;
+    void context.resume().then(() => {
+      if (musicEnabled) startMusic(context);
+    }).catch(() => undefined);
   };
 
   const play = (kind: GameSoundKind, enabled: boolean) => {
@@ -170,11 +188,29 @@ export function createGameAudio() {
       stopMusic();
       return;
     }
+    if (ctx) startMusic(ctx);
+  };
+
+  const unlock = () => {
+    if (!musicEnabled) return;
     const context = ensureContext();
     if (context) startMusic(context);
   };
 
+  const debugSnapshot = (): GameAudioDebugState => ({
+    contextState: audioContextState(),
+    musicEnabled,
+    musicPlaying: musicTimer !== null,
+    musicMasterGain: MUSIC_MASTER_GAIN,
+    musicMelodyOutputPeak: MUSIC_MASTER_GAIN * MUSIC_MELODY_PEAK
+  });
+
   const startMusic = (context: AudioContext) => {
+    if (context.state === "suspended") {
+      requestResume(context);
+      return;
+    }
+    if (context.state === "closed") return;
     if (musicTimer !== null) return;
     if (!musicGain) {
       musicGain = context.createGain();
@@ -182,14 +218,14 @@ export function createGameAudio() {
     }
     musicGain.gain.cancelScheduledValues(context.currentTime);
     musicGain.gain.setValueAtTime(Math.max(0.0001, musicGain.gain.value), context.currentTime);
-    musicGain.gain.exponentialRampToValueAtTime(0.018, context.currentTime + 0.25);
+    musicGain.gain.exponentialRampToValueAtTime(MUSIC_MASTER_GAIN, context.currentTime + 0.25);
 
     const tick = () => {
-      if (!musicEnabled || !musicGain || !ctx) return;
+      if (!musicEnabled || !musicGain || !ctx || ctx.state !== "running") return;
       const note = MUSIC_NOTES[musicStep % MUSIC_NOTES.length] ?? MUSIC_NOTES[0];
       const now = ctx.currentTime;
-      playTone(ctx, now, { frequency: note, duration: 0.18, peak: 0.026, type: "triangle" }, musicGain);
-      if (musicStep % 4 === 0) playTone(ctx, now, { frequency: note / 2, duration: 0.32, peak: 0.018, type: "sine" }, musicGain);
+      playTone(ctx, now, { frequency: note, duration: 0.18, peak: MUSIC_MELODY_PEAK, type: "triangle" }, musicGain);
+      if (musicStep % 4 === 0) playTone(ctx, now, { frequency: note / 2, duration: 0.32, peak: MUSIC_BASS_PEAK, type: "sine" }, musicGain);
       musicStep += 1;
     };
 
@@ -208,7 +244,13 @@ export function createGameAudio() {
     musicGain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
   };
 
-  return { play, setMusicEnabled };
+  const audioContextState = (): GameAudioDebugState["contextState"] => {
+    if (ctx) return ctx.state;
+    if (typeof window === "undefined") return "unavailable";
+    return window.AudioContext ?? window.webkitAudioContext ? "not-created" : "unavailable";
+  };
+
+  return { play, setMusicEnabled, unlock, debugSnapshot };
 }
 
 function playTone(context: AudioContext, start: number, voice: ToneVoice, destination: AudioNode) {
