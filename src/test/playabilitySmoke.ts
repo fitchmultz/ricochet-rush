@@ -42,15 +42,16 @@ interface DebugSnapshot {
     detail: string;
   };
   settings: {
-    ballSpeed: number;
     particles: boolean;
     reducedMotion: boolean;
     highContrast: boolean;
-    sfx: boolean;
-    music: boolean;
+    sfxVolume: number;
+    musicVolume: number;
   };
   audio: {
     contextState: string;
+    sfxVolume: number;
+    musicVolume: number;
     musicEnabled: boolean;
     musicPlaying: boolean;
     musicMasterGain: number;
@@ -90,7 +91,6 @@ try {
     localStorage.setItem(
       "ricochet-rush-settings",
       JSON.stringify({
-        ballSpeed: 1,
         particles: true,
         reducedMotion: false,
         highContrast: false,
@@ -108,16 +108,14 @@ try {
     return mark && mark.complete && mark.naturalWidth > 0;
   });
   const explicitOptOut = await snapshot(page);
-  assert(!explicitOptOut.settings.sfx, "Expected explicit SFX opt-out to survive audio-defaults migration.");
-  assert(!explicitOptOut.settings.music, "Expected explicit music opt-out to survive audio-defaults migration.");
-  assert(await hasLocalStorageKey(page, "ricochet-rush-audio-defaults-v1"), "Expected audio defaults migration marker after preserving explicit opt-outs.");
+  assert(explicitOptOut.settings.sfxVolume === 0, `Expected explicit SFX opt-out to migrate to volume 0, got ${explicitOptOut.settings.sfxVolume}.`);
+  assert(explicitOptOut.settings.musicVolume === 0, `Expected explicit music opt-out to migrate to volume 0, got ${explicitOptOut.settings.musicVolume}.`);
 
   await page.evaluate(() => {
     localStorage.clear();
     localStorage.setItem(
       "ricochet-rush-settings",
       JSON.stringify({
-        ballSpeed: 1,
         particles: true,
         reducedMotion: false,
         highContrast: false,
@@ -129,9 +127,8 @@ try {
   await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
   const legacySoundOff = await snapshot(page);
-  assert(!legacySoundOff.settings.sfx, "Expected legacy Sound opt-out to survive audio-defaults migration.");
-  assert(legacySoundOff.settings.music, "Expected missing legacy music setting to default on.");
-  assert(await hasLocalStorageKey(page, "ricochet-rush-audio-defaults-v1"), "Expected audio defaults migration marker after legacy sound migration.");
+  assert(legacySoundOff.settings.sfxVolume === 0, `Expected legacy Sound opt-out to migrate to SFX volume 0, got ${legacySoundOff.settings.sfxVolume}.`);
+  assert(legacySoundOff.settings.musicVolume === 1, `Expected missing legacy music setting to default to full volume, got ${legacySoundOff.settings.musicVolume}.`);
 
   await page.evaluate(() => localStorage.clear());
   await page.reload({ waitUntil: "domcontentloaded" });
@@ -172,9 +169,8 @@ try {
   assert(repairedReady.boardSource === "pack" && repairedReady.currentPackId === "starter", "Expected repaired corrupt checkpoint to stay on Starter pack.");
   assert(repairedReady.bricks === ready.bricks, `Expected repaired Starter brick count ${ready.bricks}, got ${repairedReady.bricks}.`);
   assert(repairedReady.recentEvents.includes("Saved board rebuilt."), "Expected corrupt checkpoint repair to be visible in recent events.");
-  assert(repairedReady.settings.sfx, "Expected missing settings to default SFX on.");
-  assert(repairedReady.settings.music, "Expected missing settings to default music on.");
-  assert(await hasLocalStorageKey(page, "ricochet-rush-audio-defaults-v1"), "Expected audio defaults migration marker.");
+  assert(repairedReady.settings.sfxVolume === 1, `Expected missing settings to default SFX volume to 1, got ${repairedReady.settings.sfxVolume}.`);
+  assert(repairedReady.settings.musicVolume === 1, `Expected missing settings to default music volume to 1, got ${repairedReady.settings.musicVolume}.`);
   assert((await page.locator('link[rel="icon"][href="/assets/ricochet-rush-icon.svg"]').count()) === 1, "Expected branded favicon asset.");
   assert(await page.locator(".play-console").count() === 1, "Expected a compact play console.");
   assert((await page.locator(".brand-mark").count()) === 1, "Expected the original brand mark in the Play Console.");
@@ -250,6 +246,7 @@ try {
   const playing = await snapshot(page);
   assert(playing.phase === "playing", `Expected playing phase after launch, got ${playing.phase}.`);
   assert(playing.audio.musicEnabled, "Expected music to be enabled after launch.");
+  assert(playing.audio.musicVolume === 1, `Expected music to launch at full volume, got ${playing.audio.musicVolume}.`);
   assert(playing.audio.musicPlaying, `Expected music to be playing after launch, got context ${playing.audio.contextState}.`);
   assert(playing.audio.musicMelodyOutputPeak >= 0.008, `Expected audible music output peak, got ${playing.audio.musicMelodyOutputPeak}.`);
   assert(playing.balls.some((ball) => !ball.stuck && ball.vy < 0), "Expected launched ball moving upward.");
@@ -292,21 +289,24 @@ try {
   assert((await page.locator("[data-tool-title]").innerText()) === "Options", "Expected Options panel title.");
   assert((await page.locator('.settings-panel [data-action="reset"]').count()) === 1, "Expected Clear save to live in Options.");
   assert((await page.locator('.settings-panel [data-action="reset"]').innerText()) === "Clear local save", "Expected save reset copy to be explicit and secondary.");
-  assert(await page.locator('[data-setting="sfx"]').isChecked(), "Expected SFX to be enabled by default.");
-  assert(await page.locator('[data-setting="music"]').isChecked(), "Expected music to be enabled by default.");
+  assert((await page.locator('[data-setting="ball-speed"]').count()) === 0, "Expected Ball speed setting to be removed.");
+  assert((await page.locator('[data-setting="sfx"]').count()) === 0, "Expected SFX checkbox to be removed.");
+  assert((await page.locator('[data-setting="music"]').count()) === 0, "Expected music checkbox to be removed.");
+  assert((await page.locator('[data-setting="sfx-volume"]').inputValue()) === "1", "Expected SFX volume to default to full.");
+  assert((await page.locator('[data-setting="music-volume"]').inputValue()) === "1", "Expected music volume to default to full.");
   await page.locator('[data-setting="high-contrast"]').check();
   await page.locator('[data-setting="reduced-motion"]').check();
-  await page.locator('[data-setting="sfx"]').check();
-  await page.locator('[data-setting="music"]').check();
+  await page.locator('[data-setting="sfx-volume"]').fill("0.45");
+  await page.locator('[data-setting="music-volume"]').fill("0.65");
   await page.locator('[data-setting="particles"]').uncheck();
-  await page.locator('[data-setting="ball-speed"]').fill("1.15");
   const tuned = await snapshot(page);
   assert(tuned.settings.highContrast, "Expected high contrast setting to apply.");
   assert(tuned.settings.reducedMotion, "Expected reduced motion setting to apply.");
-  assert(tuned.settings.sfx, "Expected SFX setting to apply.");
-  assert(tuned.settings.music, "Expected music setting to apply.");
+  assert(tuned.settings.sfxVolume === 0.45, `Expected SFX volume setting to apply, got ${tuned.settings.sfxVolume}.`);
+  assert(tuned.settings.musicVolume === 0.65, `Expected music volume setting to apply, got ${tuned.settings.musicVolume}.`);
+  assert(tuned.audio.sfxVolume === 0.45, `Expected live SFX volume to apply, got ${tuned.audio.sfxVolume}.`);
+  assert(tuned.audio.musicVolume === 0.65, `Expected live music volume to apply, got ${tuned.audio.musicVolume}.`);
   assert(!tuned.settings.particles, "Expected particles setting to apply.");
-  assert(tuned.settings.ballSpeed === 1.15, `Expected ball speed 1.15, got ${tuned.settings.ballSpeed}.`);
   assert(await page.locator(".shell.is-high-contrast.is-reduced-motion").count() === 1, "Expected visual settings classes to apply.");
   assert((await page.locator("[data-live-announcement]").textContent()) === tuned.announcement, "Expected live region to mirror game announcements.");
 
@@ -316,8 +316,8 @@ try {
   const restoredSettings = await snapshot(page);
   assert(restoredSettings.settings.highContrast, "Expected high contrast setting to persist after reload.");
   assert(restoredSettings.settings.reducedMotion, "Expected reduced motion setting to persist after reload.");
-  assert(restoredSettings.settings.sfx, "Expected SFX setting to persist after reload.");
-  assert(restoredSettings.settings.music, "Expected music setting to persist after reload.");
+  assert(restoredSettings.settings.sfxVolume === 0.45, `Expected SFX volume setting to persist after reload, got ${restoredSettings.settings.sfxVolume}.`);
+  assert(restoredSettings.settings.musicVolume === 0.65, `Expected music volume setting to persist after reload, got ${restoredSettings.settings.musicVolume}.`);
   assert(!restoredSettings.settings.particles, "Expected particles setting to persist after reload.");
   assert(restoredSettings.powerupPrimerDismissed, "Expected dismissed power-up primer to persist after reload.");
   assert(await page.locator("[data-powerup-primer]").isHidden(), "Expected dismissed power-up primer to stay hidden after reload.");

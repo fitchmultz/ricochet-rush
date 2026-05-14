@@ -36,6 +36,8 @@ interface SoundProfile {
 
 export interface GameAudioDebugState {
   contextState: AudioContextState | "not-created" | "unavailable";
+  sfxVolume: number;
+  musicVolume: number;
   musicEnabled: boolean;
   musicPlaying: boolean;
   musicMasterGain: number;
@@ -142,7 +144,8 @@ export function createGameAudio() {
   let musicGain: GainNode | null = null;
   let musicTimer: number | null = null;
   let musicStep = 0;
-  let musicEnabled = false;
+  let sfxVolume = 1;
+  let musicVolume = 1;
   const lastPlayed = new Map<GameSoundKind, number>();
 
   const ensureContext = (): AudioContext | null => {
@@ -159,16 +162,17 @@ export function createGameAudio() {
   const requestResume = (context: AudioContext) => {
     if (context.state !== "suspended") return;
     void context.resume().then(() => {
-      if (musicEnabled) startMusic(context);
+      if (musicVolume > 0) startMusic(context);
     }).catch(() => undefined);
   };
 
-  const play = (kind: GameSoundKind, enabled: boolean) => {
-    if (!enabled && !musicEnabled) return;
+  const play = (kind: GameSoundKind, volume: number) => {
+    sfxVolume = clamp(volume, 0, 1);
+    if (sfxVolume <= 0 && musicVolume <= 0) return;
     const context = ensureContext();
     if (!context) return;
-    if (musicEnabled) startMusic(context);
-    if (!enabled) return;
+    if (musicVolume > 0) startMusic(context);
+    if (sfxVolume <= 0) return;
 
     const profile = PROFILES[kind];
     const nowMs = performance.now();
@@ -178,13 +182,17 @@ export function createGameAudio() {
 
     const now = context.currentTime;
     for (const voice of profile.voices) {
-      playTone(context, now + (voice.delay ?? 0), voice, context.destination);
+      playTone(context, now + (voice.delay ?? 0), { ...voice, peak: voice.peak * sfxVolume }, context.destination);
     }
   };
 
-  const setMusicEnabled = (enabled: boolean) => {
-    musicEnabled = enabled;
-    if (!enabled) {
+  const setSfxVolume = (volume: number) => {
+    sfxVolume = clamp(volume, 0, 1);
+  };
+
+  const setMusicVolume = (volume: number) => {
+    musicVolume = clamp(volume, 0, 1);
+    if (musicVolume <= 0) {
       stopMusic();
       return;
     }
@@ -192,36 +200,40 @@ export function createGameAudio() {
   };
 
   const unlock = () => {
-    if (!musicEnabled) return;
+    if (musicVolume <= 0) return;
     const context = ensureContext();
     if (context) startMusic(context);
   };
 
   const debugSnapshot = (): GameAudioDebugState => ({
     contextState: audioContextState(),
-    musicEnabled,
+    sfxVolume,
+    musicVolume,
+    musicEnabled: musicVolume > 0,
     musicPlaying: musicTimer !== null,
-    musicMasterGain: MUSIC_MASTER_GAIN,
-    musicMelodyOutputPeak: MUSIC_MASTER_GAIN * MUSIC_MELODY_PEAK
+    musicMasterGain: musicTargetGain(),
+    musicMelodyOutputPeak: musicTargetGain() * MUSIC_MELODY_PEAK
   });
 
   const startMusic = (context: AudioContext) => {
+    if (musicVolume <= 0) {
+      stopMusic();
+      return;
+    }
     if (context.state === "suspended") {
       requestResume(context);
       return;
     }
     if (context.state === "closed") return;
-    if (musicTimer !== null) return;
     if (!musicGain) {
       musicGain = context.createGain();
       musicGain.connect(context.destination);
     }
-    musicGain.gain.cancelScheduledValues(context.currentTime);
-    musicGain.gain.setValueAtTime(Math.max(0.0001, musicGain.gain.value), context.currentTime);
-    musicGain.gain.exponentialRampToValueAtTime(MUSIC_MASTER_GAIN, context.currentTime + 0.25);
+    rampMusicGain(context, musicTargetGain(), 0.25);
+    if (musicTimer !== null) return;
 
     const tick = () => {
-      if (!musicEnabled || !musicGain || !ctx || ctx.state !== "running") return;
+      if (musicVolume <= 0 || !musicGain || !ctx || ctx.state !== "running") return;
       const note = MUSIC_NOTES[musicStep % MUSIC_NOTES.length] ?? MUSIC_NOTES[0];
       const now = ctx.currentTime;
       playTone(ctx, now, { frequency: note, duration: 0.18, peak: MUSIC_MELODY_PEAK, type: "triangle" }, musicGain);
@@ -239,9 +251,16 @@ export function createGameAudio() {
       musicTimer = null;
     }
     if (!musicGain || !ctx) return;
-    musicGain.gain.cancelScheduledValues(ctx.currentTime);
-    musicGain.gain.setValueAtTime(Math.max(0.0001, musicGain.gain.value), ctx.currentTime);
-    musicGain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+    rampMusicGain(ctx, 0.0001, 0.18);
+  };
+
+  const musicTargetGain = () => MUSIC_MASTER_GAIN * musicVolume;
+
+  const rampMusicGain = (context: AudioContext, target: number, duration: number) => {
+    if (!musicGain) return;
+    musicGain.gain.cancelScheduledValues(context.currentTime);
+    musicGain.gain.setValueAtTime(Math.max(0.0001, musicGain.gain.value), context.currentTime);
+    musicGain.gain.exponentialRampToValueAtTime(Math.max(0.0001, target), context.currentTime + duration);
   };
 
   const audioContextState = (): GameAudioDebugState["contextState"] => {
@@ -250,7 +269,7 @@ export function createGameAudio() {
     return window.AudioContext ?? window.webkitAudioContext ? "not-created" : "unavailable";
   };
 
-  return { play, setMusicEnabled, unlock, debugSnapshot };
+  return { play, setSfxVolume, setMusicVolume, unlock, debugSnapshot };
 }
 
 function playTone(context: AudioContext, start: number, voice: ToneVoice, destination: AudioNode) {
@@ -293,4 +312,8 @@ function playNoise(context: AudioContext, start: number, duration: number, peak:
   });
   source.start(start);
   source.stop(start + duration);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }

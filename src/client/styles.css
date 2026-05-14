@@ -1172,6 +1172,18 @@ body {
   gap: 6px;
 }
 
+.settings label > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings output {
+  color: #ffe066;
+  font-weight: 900;
+}
+
 .settings input[type="range"] {
   width: 100%;
   accent-color: #ffe066;

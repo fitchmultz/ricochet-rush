@@ -615,10 +615,11 @@ good power-up, bad power-up, extra life, level warp, laser, explosion,
 ball lost, level clear, game over, pause, and resume.</li>
 <li>Added lightweight sound cooldowns so rapid brick chains stay
 readable instead of turning into a harsh wall of noise.</li>
-<li>Added separate SFX and Music toggles in Options, with backward
-migration from the previous single Sound setting.</li>
+<li>Added separate SFX and Music volume sliders in Options, with
+backward migration from the previous single Sound setting and audio
+toggles.</li>
 <li>Added a quiet original procedural music pulse that is enabled by
-default, starts after the first browser audio gesture, and can be toggled
+default, starts after the first browser audio gesture, and can be mixed
 separately from SFX.</li>
 <li>Kept audio asset-free: no third-party or extracted audio files are
 committed.</li>
@@ -626,10 +627,10 @@ committed.</li>
 <p>Verified:</p>
 <ul>
 <li><code>npm run ci</code> passes.</li>
-<li>Unit coverage verifies new settings normalization, legacy
-Sound-to-SFX migration, and the one-time SFX/Music default-on migration.</li>
-<li>Playwright smoke coverage verifies SFX and Music settings apply and
-persist.</li>
+<li>Unit coverage verifies volume settings normalization and legacy
+Sound/SFX/Music boolean migration.</li>
+<li>Playwright smoke coverage verifies SFX and Music volume settings
+apply and persist.</li>
 </ul>
 <p>Acceptance criteria:</p>
 <ul>

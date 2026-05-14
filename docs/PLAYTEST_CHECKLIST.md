@@ -18,7 +18,7 @@ The gate must pass before calling the build ready.
 - Open Boards, choose Starter, and confirm the drawer closes on selection.
 - Open Designer, type a short board prompt with spaces, generate a board, and keep it.
 - Confirm Saved Designs unlocks after keeping a generated board.
-- Open Options and toggle high contrast, reduced motion, SFX, music, particles, and ball speed.
+- Open Options, toggle high contrast, reduced motion, and particles, then adjust SFX and music volume.
 - Confirm autosave restores after reload, then clear the save from Options and confirm cancellation preserves it.
 - Inspect Log and confirm raw generation trace is behind that panel, not in the default play view.
 

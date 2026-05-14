@@ -146,7 +146,7 @@ function withFakeAudioWindow<T>(run: (context: FakeAudioContext) => T): T {
   });
   try {
     const audio = createGameAudio();
-    audio.setMusicEnabled(true);
+    audio.setMusicVolume(1);
     audio.unlock();
     if (!context) throw new Error("Fake AudioContext was not created.");
     return run(context);
@@ -723,24 +723,30 @@ describe("Cursor SDK level generation contract", () => {
   });
 
   it("normalizes local settings into safe gameplay bounds", () => {
-    expect(normalizeSettings({ ballSpeed: 4, particles: "yes", reducedMotion: true, highContrast: true })).toEqual({
+    expect(normalizeSettings({ ballSpeed: 4, particles: "yes", reducedMotion: true, highContrast: true, sfxVolume: 4, musicVolume: -1 })).toEqual({
       ...DEFAULT_SETTINGS,
-      ballSpeed: 1.2,
       reducedMotion: true,
-      highContrast: true
+      highContrast: true,
+      sfxVolume: 1,
+      musicVolume: 0
     });
     expect(normalizeSettings({ sound: true })).toEqual({
       ...DEFAULT_SETTINGS,
-      sfx: true
+      sfxVolume: 1
     });
     expect(normalizeSettings({ sound: false })).toEqual({
       ...DEFAULT_SETTINGS,
-      sfx: false
+      sfxVolume: 0
     });
-    expect(normalizeSettings({ ballSpeed: 0.1, particles: false })).toEqual({
+    expect(normalizeSettings({ music: false })).toEqual({
       ...DEFAULT_SETTINGS,
-      ballSpeed: 0.8,
-      particles: false
+      musicVolume: 0
+    });
+    expect(normalizeSettings({ ballSpeed: 0.1, particles: false, sfxVolume: 0.45, musicVolume: 0.65 })).toEqual({
+      ...DEFAULT_SETTINGS,
+      particles: false,
+      sfxVolume: 0.45,
+      musicVolume: 0.65
     });
   });
 

@@ -3,12 +3,11 @@ import { normalizeLevel, type BrickKind, type LevelBlueprint } from "./evolution
 export const SAVE_VERSION = 3;
 
 export interface GameSettings {
-  ballSpeed: number;
   particles: boolean;
   reducedMotion: boolean;
   highContrast: boolean;
-  sfx: boolean;
-  music: boolean;
+  sfxVolume: number;
+  musicVolume: number;
 }
 
 export interface SavedBrick {
@@ -57,26 +56,26 @@ export interface GameSave {
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
-  ballSpeed: 1,
   particles: true,
   reducedMotion: false,
   highContrast: false,
-  sfx: true,
-  music: true
+  sfxVolume: 1,
+  musicVolume: 1
 };
 
 const BRICK_KINDS = new Set<BrickKind>(["basic", "hard", "bomb", "prize", "penalty", "laser", "grab", "fire", "thru", "split", "wide", "slow", "boss"]);
 
 export function normalizeSettings(input: unknown): GameSettings {
   const raw = isRecord(input) ? input : {};
-  const legacySound = booleanValue(raw.sound, DEFAULT_SETTINGS.sfx);
+  const legacySoundVolume = booleanVolume(raw.sound, DEFAULT_SETTINGS.sfxVolume);
+  const legacySfxVolume = booleanVolume(raw.sfx, legacySoundVolume);
+  const legacyMusicVolume = booleanVolume(raw.music, DEFAULT_SETTINGS.musicVolume);
   return {
-    ballSpeed: clamp(numberValue(raw.ballSpeed, DEFAULT_SETTINGS.ballSpeed), 0.8, 1.2),
     particles: booleanValue(raw.particles, DEFAULT_SETTINGS.particles),
     reducedMotion: booleanValue(raw.reducedMotion, DEFAULT_SETTINGS.reducedMotion),
     highContrast: booleanValue(raw.highContrast, DEFAULT_SETTINGS.highContrast),
-    sfx: booleanValue(raw.sfx, legacySound),
-    music: booleanValue(raw.music, DEFAULT_SETTINGS.music)
+    sfxVolume: volumeValue(raw.sfxVolume, legacySfxVolume),
+    musicVolume: volumeValue(raw.musicVolume, legacyMusicVolume)
   };
 }
 
@@ -181,6 +180,14 @@ function numberValue(value: unknown, fallback: number): number {
 
 function booleanValue(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function booleanVolume(value: unknown, fallback: number): number {
+  return typeof value === "boolean" ? Number(value) : fallback;
+}
+
+function volumeValue(value: unknown, fallback: number): number {
+  return clamp(numberValue(value, fallback), 0, 1);
 }
 
 function clamp(value: number, min: number, max: number): number {

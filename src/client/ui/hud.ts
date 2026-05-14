@@ -30,12 +30,11 @@ export interface HudState {
   pending: boolean;
   hasSave: boolean;
   settings: {
-    ballSpeed: number;
     particles: boolean;
     reducedMotion: boolean;
     highContrast: boolean;
-    sfx: boolean;
-    music: boolean;
+    sfxVolume: number;
+    musicVolume: number;
   };
   activePowers: { label: string; seconds: number; maxSeconds: number; tone: "reward" | "hazard" | "volatile" }[];
   powerupPrimerDismissed: boolean;
@@ -179,8 +178,12 @@ export function createHud(root: HTMLDivElement | null): HudApi {
             <div class="panel-heading">Options</div>
             <form class="settings" aria-label="Settings">
               <label>
-                <span>Ball speed</span>
-                <input data-setting="ball-speed" type="range" min="0.8" max="1.2" step="0.05" value="1" />
+                <span>SFX volume <output data-setting-output="sfx-volume">100%</output></span>
+                <input data-setting="sfx-volume" type="range" min="0" max="1" step="0.05" value="1" />
+              </label>
+              <label>
+                <span>Music volume <output data-setting-output="music-volume">100%</output></span>
+                <input data-setting="music-volume" type="range" min="0" max="1" step="0.05" value="1" />
               </label>
               <label class="toggle">
                 <span>Particles</span>
@@ -193,14 +196,6 @@ export function createHud(root: HTMLDivElement | null): HudApi {
               <label class="toggle">
                 <span>High contrast</span>
                 <input data-setting="high-contrast" type="checkbox" />
-              </label>
-              <label class="toggle">
-                <span>SFX</span>
-                <input data-setting="sfx" type="checkbox" />
-              </label>
-              <label class="toggle">
-                <span>Music</span>
-                <input data-setting="music" type="checkbox" />
               </label>
             </form>
             <div class="settings-actions" aria-label="Save management">
@@ -272,12 +267,13 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   const designerPending = query(root, "[data-designer-pending]");
   const generationSummary = query(root, "[data-generation-summary]");
   const compactGenerationSummary = query(root, "[data-compact-generation-summary]");
-  const ballSpeed = queryInput(root, '[data-setting="ball-speed"]');
+  const sfxVolume = queryInput(root, '[data-setting="sfx-volume"]');
+  const musicVolume = queryInput(root, '[data-setting="music-volume"]');
+  const sfxVolumeOutput = queryOutput(root, '[data-setting-output="sfx-volume"]');
+  const musicVolumeOutput = queryOutput(root, '[data-setting-output="music-volume"]');
   const particles = queryInput(root, '[data-setting="particles"]');
   const reducedMotion = queryInput(root, '[data-setting="reduced-motion"]');
   const highContrast = queryInput(root, '[data-setting="high-contrast"]');
-  const sfx = queryInput(root, '[data-setting="sfx"]');
-  const music = queryInput(root, '[data-setting="music"]');
   const activePowersEl = query(root, "[data-active-powers]");
   const packList = query(root, "[data-pack-list]");
   const liveAnnouncement = query(root, "[data-live-announcement]");
@@ -302,12 +298,11 @@ export function createHud(root: HTMLDivElement | null): HudApi {
 
   const emitSettings = () => {
     actions?.updateSettings({
-      ballSpeed: Number(ballSpeed.value),
       particles: particles.checked,
       reducedMotion: reducedMotion.checked,
       highContrast: highContrast.checked,
-      sfx: sfx.checked,
-      music: music.checked
+      sfxVolume: Number(sfxVolume.value),
+      musicVolume: Number(musicVolume.value)
     });
   };
 
@@ -397,12 +392,11 @@ export function createHud(root: HTMLDivElement | null): HudApi {
     actions?.selectPack(button.dataset.packId ?? "");
   });
   designerBrief.addEventListener("input", emitDesigner);
-  ballSpeed.addEventListener("input", emitSettings);
+  sfxVolume.addEventListener("input", emitSettings);
+  musicVolume.addEventListener("input", emitSettings);
   particles.addEventListener("change", emitSettings);
   reducedMotion.addEventListener("change", emitSettings);
   highContrast.addEventListener("change", emitSettings);
-  sfx.addEventListener("change", emitSettings);
-  music.addEventListener("change", emitSettings);
 
   return {
     setActions(nextActions) {
@@ -436,12 +430,13 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       renderSummary(generationSummary, state.designer.generationSummary);
       renderCompactSummary(compactGenerationSummary, state);
       powerupPrimer.hidden = state.powerupPrimerDismissed;
-      ballSpeed.value = String(state.settings.ballSpeed);
+      sfxVolume.value = String(state.settings.sfxVolume);
+      musicVolume.value = String(state.settings.musicVolume);
+      sfxVolumeOutput.textContent = formatVolume(state.settings.sfxVolume);
+      musicVolumeOutput.textContent = formatVolume(state.settings.musicVolume);
       particles.checked = state.settings.particles;
       reducedMotion.checked = state.settings.reducedMotion;
       highContrast.checked = state.settings.highContrast;
-      sfx.checked = state.settings.sfx;
-      music.checked = state.settings.music;
       score.classList.toggle("is-pulsing", state.score > previousScore);
       combo.classList.toggle("is-pulsing", state.combo > previousCombo + 0.05);
       previousScore = state.score;
@@ -483,6 +478,12 @@ function queryInput(root: ParentNode, selector: string): HTMLInputElement {
   return element;
 }
 
+function queryOutput(root: ParentNode, selector: string): HTMLOutputElement {
+  const element = root.querySelector<HTMLOutputElement>(selector);
+  if (!element) throw new Error(`Missing HUD output ${selector}`);
+  return element;
+}
+
 function queryTextArea(root: ParentNode, selector: string): HTMLTextAreaElement {
   const element = root.querySelector<HTMLTextAreaElement>(selector);
   if (!element) throw new Error(`Missing HUD textarea ${selector}`);
@@ -506,6 +507,10 @@ function escapeAttribute(value: string): string {
 function normalizeToolPanel(value: string | undefined): HudToolPanel | null {
   if (value === "designer" || value === "packs" || value === "options" || value === "diagnostics") return value;
   return null;
+}
+
+function formatVolume(value: number): string {
+  return `${Math.round(value * 100)}%`;
 }
 
 function renderBoardMeta(state: HudState): string {
