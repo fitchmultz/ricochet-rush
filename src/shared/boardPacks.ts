@@ -248,8 +248,18 @@ export function materializeAuthoredBoard(packId: string, boardIndex: number, req
       speed: authored.speed,
       rows: patternToRows(authored.pattern)
     },
-    request
+    authoredBoardRequest(request)
   );
+}
+
+function authoredBoardRequest(request: LevelRequest): LevelRequest {
+  return {
+    level: request.level,
+    score: request.score,
+    lives: request.lives,
+    clearedLevels: request.clearedLevels,
+    recentEvents: request.recentEvents
+  };
 }
 
 export function getBuiltInPack(packId: string): BoardPack | undefined {

@@ -872,6 +872,24 @@ describe("Ricochet Rush curated board packs", () => {
     }
   });
 
+  it("keeps generated-board prompts from rewriting authored pack boards", () => {
+    const level = materializeAuthoredBoard("starter", 1, {
+      ...request,
+      level: 2,
+      clearedLevels: 1,
+      designer: {
+        ...DEFAULT_DESIGNER_INTENT,
+        brief: "heart shape, only bomb bricks"
+      }
+    });
+
+    expect(level?.name).toBe("Starter Wave");
+    expect(level?.rows.map((row) => row.filter(Boolean).length)).toEqual([10, 6, 10, 4, 10, 4, 0, 0, 0]);
+    expect(new Set(level?.rows.flat().filter((brick): brick is NonNullable<typeof brick> => brick !== null).map((brick) => brick.kind))).toEqual(
+      new Set(["basic", "wide", "split", "prize", "hard"])
+    );
+  });
+
   it("unlocks the next built-in pack after the previous pack is cleared", () => {
     let progress = normalizePackProgress(null, 0);
     expect(progress.starter?.unlocked).toBe(true);
