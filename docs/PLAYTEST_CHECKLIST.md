@@ -10,6 +10,14 @@ npm run ci
 
 The gate must pass before calling the build ready.
 
+For a focused automated visual/playability pass, run:
+
+```sh
+npm run ux
+```
+
+The UX audit captures desktop and mobile screenshots in `dist/playtest-report/screenshots/` and writes `dist/playtest-report/report.md` plus `report.json`. Treat failures as blockers. Treat warnings as the next polish queue for Codex before asking for manual visual review.
+
 ## Desktop
 
 - Boot at `1280x820`.

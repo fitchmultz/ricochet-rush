@@ -732,6 +732,8 @@ Readiness</h3>
 complete.</li>
 <li>Visual smoke test for canvas rendering and no layout overlap:
 complete.</li>
+<li>Automated desktop/mobile UX audit with screenshot artifacts and
+agent-readable report: complete.</li>
 <li>Demo script that shows gameplay first, then the Cursor SDK value:
 complete.</li>
 <li>Public issue list with known limitations and next bets:
@@ -750,16 +752,26 @@ and next bets.</li>
 loading, canvas pixel rendering, desktop panel overlap, mobile
 rendering, pack-to-generated board theme changes, and power-up
 tone/label/timer UI.</li>
+<li>Added <code>npm run ux</code> and <code>npm run ux:preview</code>
+for a production-preview UX audit that drives keyboard and touch play,
+opens the focused tool panels, captures desktop/mobile screenshots, and
+checks console health, WebGL pixel clarity, horizontal overflow,
+text/control fit, playfield overlap, focus movement, and touch
+controls.</li>
 </ul>
 <p>Verified:</p>
 <ul>
 <li><code>npm run ci</code> passes.</li>
+<li><code>npm run ci</code> now includes the UX audit after build, unit
+tests, and the playability smoke.</li>
 <li>README, roadmap, checklist, demo script, known limitations, and
 generated screenshot are aligned.</li>
 </ul>
 <p>Acceptance criteria:</p>
 <ul>
 <li><code>npm run ci</code> is green.</li>
+<li><code>dist/playtest-report/</code> gives agents current screenshots
+and machine-readable UX findings for the next polish pass.</li>
 <li>A fresh checkout can install, run, play, save, generate/fallback,
 and clear progress.</li>
 <li>The first 20 seconds show real gameplay and the AI board-designer

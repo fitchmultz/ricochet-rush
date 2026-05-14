@@ -8,9 +8,11 @@
     "build": "tsc -p tsconfig.json && vite build",
     "preview": "tsx src/server/previewServer.ts",
     "smoke": "tsx src/test/playabilitySmoke.ts",
+    "ux": "npm run build && tsx src/test/uxAudit.ts",
+    "ux:preview": "tsx src/test/uxAudit.ts",
     "capture:demo": "npm run build && tsx src/test/captureDemoClip.ts",
     "test": "vitest run",
-    "ci": "npm run build && npm run test && npm run smoke"
+    "ci": "npm run build && npm run test && npm run smoke && npm run ux:preview"
   },
   "dependencies": {
     "@cursor/sdk": "1.0.13",

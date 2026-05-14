@@ -39,7 +39,7 @@ Open `http://127.0.0.1:4177`.
 - Saved Designs pack for generated boards you decide to keep
 - Local fallback levels for offline or unauthenticated play
 - Autosaved run checkpoints, restore, Options-only clear-save confirmation, and best score
-- Settings for ball speed, particles, reduced motion, and high contrast
+- Settings for SFX volume, music volume, particles, reduced motion, and high contrast
 - Reward, hazard, and volatile power-up categories with readable pickup labels
 - Pack/source board theme tints and original Ricochet Rush logo/icon assets
 - Responsive desktop and mobile layout
@@ -51,6 +51,8 @@ npm run ci
 ```
 
 The CI gate builds the app, runs unit tests for level/save/pack/designer/power-up contracts, and runs a Playwright smoke against the production preview. The smoke verifies curated-pack boot, designer prompt persistence, fallback generation summaries, saved generated boards, board selection, paddle movement, autosave/clear behavior, settings persistence, canvas rendering, and layout overflow.
+
+The CI gate also runs the automated UX audit. It drives desktop and mobile play, opens the main tool panels, checks WebGL pixel clarity, detects console errors, horizontal overflow, obvious text/control fit issues, playfield overlap, focus traps, and touch controls, then writes screenshots plus a Markdown/JSON report under `dist/playtest-report/`. Run `npm run ux` when you want the standalone visual/playability audit with a fresh build.
 
 After a Playwright package update, run `npx playwright install chromium` once if the smoke reports a missing browser executable.
 

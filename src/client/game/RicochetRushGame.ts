@@ -804,6 +804,7 @@ export class RicochetRushGame {
     const wasPaused = this.phase === "ready" && this.balls.some((ball) => !ball.stuck);
     this.phase = "playing";
     this.hideOverlay();
+    this.scrollStageIntoView();
     this.launchBalls();
     if (wasPaused) this.audio.play("resume", this.settings.sfxVolume);
   }
@@ -817,6 +818,7 @@ export class RicochetRushGame {
     } else if (this.phase === "ready" && this.balls.some((ball) => !ball.stuck)) {
       this.phase = "playing";
       this.hideOverlay();
+      this.scrollStageIntoView();
       this.pushEvent("Resumed.");
       this.audio.play("resume", this.settings.sfxVolume);
     }
@@ -2071,6 +2073,11 @@ export class RicochetRushGame {
     this.overlay.innerHTML = "";
     if (this.previouslyFocusedElement?.isConnected) this.previouslyFocusedElement.focus({ preventScroll: true });
     this.previouslyFocusedElement = null;
+  }
+
+  private scrollStageIntoView() {
+    if (!window.matchMedia("(max-width: 860px)").matches) return;
+    this.mount.closest<HTMLElement>(".stage")?.scrollIntoView({ block: "start", inline: "nearest" });
   }
 }
 
