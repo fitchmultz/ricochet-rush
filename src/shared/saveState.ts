@@ -33,6 +33,17 @@ export interface SavedBallState {
   megaTimer: number;
 }
 
+export interface SavedRunStats {
+  runStartedAt: number;
+  levelStartedAt: number;
+  scoreAtRunStart: number;
+  bestScoreAtRunStart: number;
+  bricksBroken: number;
+  longestCombo: number;
+  powerupsCaught: number;
+  boardsCleared: number;
+}
+
 export interface GameSave {
   version: typeof SAVE_VERSION;
   savedAt: string;
@@ -53,6 +64,7 @@ export interface GameSave {
   grabTimer: number;
   explosionScale: number;
   balls: SavedBallState[] | null;
+  runStats: SavedRunStats;
 }
 
 export const DEFAULT_SETTINGS: GameSettings = {
@@ -102,16 +114,18 @@ export function normalizeSaveState(input: unknown): GameSave | null {
   const boardSource = rawVersion === SAVE_VERSION && input.boardSource === "pack" ? "pack" : "generated";
 
   const levelBlueprint = normalizeLevel(input.levelBlueprint, { level, score, lives, clearedLevels: 0, recentEvents: [] });
+  const clearedLevels = nonNegativeInteger(input.clearedLevels) ?? Math.max(0, level - 1);
+  const bestScore = Math.max(score, nonNegativeInteger(input.bestScore) ?? score);
   return {
     version: SAVE_VERSION,
     savedAt: stringValue(input.savedAt, new Date(0).toISOString()),
     level,
-    clearedLevels: nonNegativeInteger(input.clearedLevels) ?? Math.max(0, level - 1),
+    clearedLevels,
     boardSource,
     packId: boardSource === "pack" && typeof input.packId === "string" && input.packId.trim().length > 0 ? input.packId.trim().slice(0, 80) : null,
     packBoardIndex: boardSource === "pack" ? nonNegativeInteger(input.packBoardIndex) ?? 0 : 0,
     score,
-    bestScore: Math.max(score, nonNegativeInteger(input.bestScore) ?? score),
+    bestScore,
     lives,
     combo: clamp(numberValue(input.combo, 1), 1, 8),
     paddleWidth: clamp(numberValue(input.paddleWidth, 116), 58, 210),
@@ -121,8 +135,30 @@ export function normalizeSaveState(input: unknown): GameSave | null {
     laserTimer,
     grabTimer,
     explosionScale,
-    balls
+    balls,
+    runStats: normalizeRunStats(input.runStats, score, bestScore, clearedLevels)
   };
+}
+
+function normalizeRunStats(input: unknown, score: number, bestScore: number, clearedLevels: number): SavedRunStats {
+  const raw = isRecord(input) ? input : {};
+  const now = Date.now();
+  const runStartedAt = timestampValue(raw.runStartedAt, now);
+  return {
+    runStartedAt,
+    levelStartedAt: timestampValue(raw.levelStartedAt, runStartedAt),
+    scoreAtRunStart: nonNegativeInteger(raw.scoreAtRunStart) ?? score,
+    bestScoreAtRunStart: nonNegativeInteger(raw.bestScoreAtRunStart) ?? bestScore,
+    bricksBroken: nonNegativeInteger(raw.bricksBroken) ?? 0,
+    longestCombo: clamp(numberValue(raw.longestCombo, 1), 1, 99),
+    powerupsCaught: nonNegativeInteger(raw.powerupsCaught) ?? 0,
+    boardsCleared: nonNegativeInteger(raw.boardsCleared) ?? clearedLevels
+  };
+}
+
+function timestampValue(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return clamp(Math.round(value), 0, Date.now() + 86_400_000);
 }
 
 function normalizeSavedBall(input: unknown): SavedBallState | null {

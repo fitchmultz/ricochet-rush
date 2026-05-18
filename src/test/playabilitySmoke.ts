@@ -22,6 +22,7 @@ interface DebugSnapshot {
   boardSource: "pack" | "generated";
   currentPackId: string | null;
   packBoardIndex: number;
+  runStats: Array<{ label: string; value: string; tone?: "reward" | "neutral" | "warning" }>;
   boardTheme: {
     scene: string;
     floor: string;
@@ -294,6 +295,23 @@ try {
     game.completeLevel();
   });
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "levelComplete");
+  const clearSummaryText = await page.locator('[data-run-summary="clear"]').innerText();
+  const clearSummaryLower = clearSummaryText.toLowerCase();
+  assert(clearSummaryLower.includes("level cleared"), "Expected level-clear summary title.");
+  assert(clearSummaryLower.includes("score"), "Expected level-clear summary to show score.");
+  assert(clearSummaryLower.includes("best delta"), "Expected level-clear summary to show best score delta.");
+  assert(clearSummaryLower.includes("bricks broken"), "Expected level-clear summary to show bricks broken.");
+  assert(clearSummaryLower.includes("longest streak"), "Expected level-clear summary to show longest streak.");
+  assert(clearSummaryLower.includes("power-ups caught"), "Expected level-clear summary to show power-ups caught.");
+  assert(clearSummaryLower.includes("boards cleared"), "Expected level-clear summary to show boards cleared.");
+  assert(clearSummaryLower.includes("clear time"), "Expected level-clear summary to show clear time.");
+  assert((await page.locator('[data-summary-action]').count()) >= 4, "Expected level-clear summary to expose direct next actions.");
+  assert(/continue|next board|generate board/i.test(await page.locator('[data-summary-action="0"]').innerText()), "Expected level-clear summary primary action to continue the loop.");
+  assert((await page.locator('[data-summary-action]:has-text("Retry Run")').count()) === 1, "Expected level-clear summary to expose a retry action.");
+  assert((await page.locator('[data-summary-action]:has-text("Choose Board")').count()) === 1, "Expected level-clear summary to expose a board chooser action.");
+  await page.locator('[data-summary-action]:has-text("Choose Board")').press("Enter");
+  await page.waitForFunction(() => document.querySelector("[data-tool-title]")?.textContent === "Board Select");
+  assert((await page.locator('[data-tool-title]').innerText()) === "Board Select", "Expected keyboard-activated summary secondary action to open board picker.");
   assert(!(await hasLocalStorageKey(page, "ricochet-rush-save")), "Expected level clear to remove the stale pre-clear checkpoint.");
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
@@ -301,6 +319,23 @@ try {
   const afterClearReload = await snapshot(page);
   assert(afterClearReload.bricks >= 34, `Expected reload after level clear to start a fresh playable board, got ${afterClearReload.bricks}.`);
   assert(!afterClearReload.recentEvents.includes("Saved run restored."), "Expected reload after level clear not to restore the pre-clear checkpoint.");
+
+  await page.locator("[data-overlay-action]").click();
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "playing");
+  await page.evaluate(() => {
+    const game = window.__ricochetRushGame as unknown as { lives: number; loseLife: () => void };
+    game.lives = 1;
+    game.loseLife();
+  });
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "gameOver");
+  const gameOverSummaryText = await page.locator('[data-run-summary="gameOver"]').innerText();
+  const gameOverSummaryLower = gameOverSummaryText.toLowerCase();
+  assert(gameOverSummaryLower.includes("game over"), "Expected game-over summary title.");
+  assert(gameOverSummaryLower.includes("survival time"), "Expected game-over summary to show survival time.");
+  assert((await page.locator('[data-summary-action]:has-text("Retry Run")').count()) === 1, "Expected game-over summary to expose retry.");
+  assert((await page.locator('[data-summary-action]:has-text("Choose Board")').count()) === 1, "Expected game-over summary to expose board chooser.");
+  await page.locator('[data-summary-action]:has-text("Retry Run")').click();
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
 
   await page.locator('[data-tool-panel="options"]').click();
   assert((await page.locator("[data-tool-title]").innerText()) === "Options", "Expected Options panel title.");

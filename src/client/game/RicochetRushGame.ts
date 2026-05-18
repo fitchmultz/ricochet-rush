@@ -36,6 +36,7 @@ import {
   type GameSettings,
   type SavedBallState,
   type SavedBrick,
+  type SavedRunStats,
   normalizeSaveState,
   normalizeSettings
 } from "../../shared/saveState";
@@ -185,6 +186,30 @@ interface BoardTheme {
   wall: string;
   wallGlow: string;
   rim: string;
+}
+
+interface RunStats {
+  runStartedAt: number;
+  levelStartedAt: number;
+  scoreAtRunStart: number;
+  bestScoreAtRunStart: number;
+  bricksBroken: number;
+  longestCombo: number;
+  powerupsCaught: number;
+  boardsCleared: number;
+}
+
+interface SummaryStat {
+  label: string;
+  value: string;
+  tone?: "reward" | "neutral" | "warning";
+}
+
+interface SummaryAction {
+  label: string;
+  action: () => void;
+  primary?: boolean;
+  disabled?: boolean;
 }
 
 interface BrickVisualProfile {
@@ -468,6 +493,7 @@ export class RicochetRushGame {
   private bestScore = 0;
   private lives = 3;
   private combo = 1;
+  private runStats: RunStats = createRunStats(0, 0);
   private laserTimer = 0;
   private laserCooldown = 0;
   private grabTimer = 0;
@@ -573,6 +599,7 @@ export class RicochetRushGame {
       packBoardIndex: this.boardContext.boardIndex,
       boardTheme: boardThemeFor(this.boardContext),
       packProgress: this.packProgress,
+      runStats: this.summaryStats("debug"),
       designerIntent: this.designerIntent,
       generationSummary: this.latestGenerationSummary,
       settings: this.settings,
@@ -756,7 +783,12 @@ export class RicochetRushGame {
       if (isEditableTarget(event.target)) return;
       this.keys.add(event.code);
       if (event.code === "Space" || event.code === "Enter") {
+        const actionControl = actionControlTarget(event.target);
         event.preventDefault();
+        if (actionControl) {
+          actionControl.click();
+          return;
+        }
         this.handlePrimaryAction();
       }
       if (event.code === "KeyN" && this.phase !== "loading") {
@@ -1020,6 +1052,7 @@ export class RicochetRushGame {
     this.score = 0;
     this.lives = 3;
     this.combo = 1;
+    this.runStats = createRunStats(this.score, this.bestScore);
     this.latestAgentTrace = undefined;
     this.autosaveSuppressed = false;
     localStorage.removeItem(SAVE_KEY);
@@ -1102,6 +1135,7 @@ export class RicochetRushGame {
     this.latestGenerationSummary = context.source === "generated" ? summary : undefined;
     this.levelBlueprint = level;
     this.bricks = materializeLevelBricks(level);
+    this.runStats.levelStartedAt = Date.now();
     this.powerups.splice(0);
     this.sparks.splice(0);
     this.laserBeams.splice(0);
@@ -1136,6 +1170,7 @@ export class RicochetRushGame {
     this.bestScore = save.bestScore;
     this.lives = save.lives;
     this.combo = save.combo;
+    this.runStats = fromSavedRunStats(save.runStats, save.score, save.bestScore);
     this.paddleWidth = save.paddleWidth;
     const restoredPackLevel = restoredContext.source === "pack" ? this.materializePackBoard(restoredContext.packId, restoredContext.boardIndex) : null;
     const restoredLevel = restoredPackLevel ?? save.levelBlueprint;
@@ -1320,11 +1355,13 @@ export class RicochetRushGame {
     }
     this.audio.play(soundForBrickDestroy(brick.kind), this.settings.sfxVolume, brickAudioOptions(brick, this.combo, true));
     this.bricks = this.bricks.filter((candidate) => candidate !== brick);
+    this.runStats.bricksBroken += 1;
     const points = Math.round(40 * this.combo * (brick.kind === "boss" ? 5 : brick.maxHp));
     this.score += points;
     this.bestScore = Math.max(this.bestScore, this.score);
     writeBestScore(this.bestScore);
     this.combo = Math.min(8, this.combo + 0.22);
+    this.runStats.longestCombo = Math.max(this.runStats.longestCombo, this.combo);
     const centerX = brick.x + brick.width / 2;
     const centerY = brick.y + brick.height / 2;
     this.addFloatingText(centerX, centerY, `+${points}`, "score");
@@ -1372,6 +1409,7 @@ export class RicochetRushGame {
     }
     this.bestScore = Math.max(this.bestScore, this.score);
     writeBestScore(this.bestScore);
+    this.runStats.bricksBroken += blast.length;
     this.bricks = this.bricks.filter((brick) => brick.hp > 0);
     this.saveCheckpoint();
   }
@@ -1387,6 +1425,7 @@ export class RicochetRushGame {
       const caught = powerup.y > PADDLE_Y - 16 && powerup.y < PADDLE_Y + 24 && Math.abs(powerup.x - this.paddleX) < this.paddleWidth / 2 + 18;
       if (caught) {
         const visual = powerupVisualFor(powerup.kind);
+        this.runStats.powerupsCaught += 1;
         this.emitPowerupCatchBurst(powerup, visual.spark);
         this.audio.play(soundForPowerup(powerup.kind), this.settings.sfxVolume, powerupAudioOptions(powerup.kind));
         this.paddleFlashTimer = 0.24;
@@ -1659,8 +1698,16 @@ export class RicochetRushGame {
       this.pushEvent("Run ended.");
       this.announce("Game over.");
       this.audio.play("gameOver", this.settings.sfxVolume);
-      this.showOverlay("Game Over", `Final score ${this.score}. Restart at Level 1 with a fresh generated board.`, "Restart", () => void this.restartRun());
-      this.refreshHud("Game over.");
+      this.showRunSummaryOverlay("gameOver", {
+        title: "Game Over",
+        body: "Run complete. Review the haul, then jump back in or choose a board pack.",
+        actions: [
+          { label: "Retry Run", primary: true, action: () => void this.restartRun() },
+          { label: "Choose Board", action: () => this.openBoardPicker() },
+          { label: "Share Hook Soon", disabled: true, action: () => undefined }
+        ]
+      });
+      this.refreshHud("Game over. Summary ready.");
       return;
     }
     this.phase = "ready";
@@ -1676,6 +1723,7 @@ export class RicochetRushGame {
     const completedContext = this.boardContext;
     this.phase = "levelComplete";
     this.clearedLevels += 1;
+    this.runStats.boardsCleared += 1;
     const bonus = 500 + this.lives * 100 + Math.round(this.combo * 60);
     this.score += bonus;
     this.bestScore = Math.max(this.bestScore, this.score);
@@ -1694,13 +1742,19 @@ export class RicochetRushGame {
     this.shakeBoard(0.28, 2.6);
     this.saveCheckpoint("Level checkpoint saved.");
     const nextStep = this.nextLevelCompleteStep(completedContext);
-    this.showOverlay(
-      "Level Cleared",
-      nextStep.body,
-      nextStep.actionLabel,
-      () => void this.continueToNextLevel()
-    );
-    this.refreshHud(nextStep.status);
+    const actions: SummaryAction[] = [
+      { label: nextStep.actionLabel, primary: true, action: () => void this.continueToNextLevel() },
+      { label: "Retry Run", action: () => void this.restartRun() },
+      { label: "Choose Board", action: () => this.openBoardPicker() }
+    ];
+    if (completedContext.source === "generated") actions.splice(1, 0, { label: "Keep Board", action: () => this.saveCurrentBoardToPack() });
+    actions.push({ label: "Share Hook Soon", disabled: true, action: () => undefined });
+    this.showRunSummaryOverlay("clear", {
+      title: "Level Cleared",
+      body: nextStep.body,
+      actions
+    });
+    this.refreshHud(`${nextStep.status} Summary ready.`);
   }
 
   private async continueToNextLevel() {
@@ -1730,6 +1784,7 @@ export class RicochetRushGame {
     this.score = 0;
     this.lives = 3;
     this.combo = 1;
+    this.runStats = createRunStats(this.score, this.bestScore);
     this.autosaveSuppressed = false;
     localStorage.removeItem(SAVE_KEY);
     this.hasSave = false;
@@ -1962,7 +2017,8 @@ export class RicochetRushGame {
       laserTimer: this.laserTimer,
       grabTimer: this.grabTimer,
       explosionScale: this.explosionScale,
-      balls: this.balls.length > 0 ? this.balls.map(toSavedBall) : null
+      balls: this.balls.length > 0 ? this.balls.map(toSavedBall) : null,
+      runStats: toSavedRunStats(this.runStats)
     };
     writeJson(SAVE_KEY, save);
     this.hasSave = true;
@@ -2408,6 +2464,7 @@ export class RicochetRushGame {
     }
     this.bestScore = Math.max(this.bestScore, this.score);
     writeBestScore(this.bestScore);
+    this.runStats.bricksBroken += targets.length;
     this.bricks = this.bricks.filter((brick) => !targets.includes(brick));
     this.saveCheckpoint();
   }
@@ -2428,6 +2485,63 @@ export class RicochetRushGame {
       .at(0);
     if (!target) return;
     this.hitBrick(target);
+  }
+
+  private summaryStats(mode: "clear" | "gameOver" | "debug"): SummaryStat[] {
+    const bestDelta = Math.max(0, this.bestScore - this.runStats.bestScoreAtRunStart);
+    const now = Date.now();
+    const elapsed = mode === "clear" ? now - this.runStats.levelStartedAt : now - this.runStats.runStartedAt;
+    return [
+      { label: "Score", value: this.score.toLocaleString(), tone: "reward" },
+      { label: "Best Delta", value: bestDelta > 0 ? `+${bestDelta.toLocaleString()}` : "Even", tone: bestDelta > 0 ? "reward" : "neutral" },
+      { label: "Bricks Broken", value: this.runStats.bricksBroken.toLocaleString(), tone: "neutral" },
+      { label: "Longest Streak", value: `x${this.runStats.longestCombo.toFixed(1)}`, tone: this.runStats.longestCombo >= 2 ? "reward" : "neutral" },
+      { label: "Power-Ups Caught", value: this.runStats.powerupsCaught.toLocaleString(), tone: "neutral" },
+      { label: "Boards Cleared", value: this.runStats.boardsCleared.toLocaleString(), tone: this.runStats.boardsCleared > 0 ? "reward" : "neutral" },
+      { label: mode === "clear" ? "Clear Time" : "Survival Time", value: formatRunDuration(elapsed), tone: "neutral" }
+    ];
+  }
+
+  private showRunSummaryOverlay(mode: "clear" | "gameOver", content: { title: string; body: string; actions: SummaryAction[] }) {
+    this.previouslyFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const stage = this.mount.closest<HTMLElement>(".stage");
+    stage?.classList.add("has-visible-overlay", "has-priority-overlay");
+    this.overlay.classList.add("is-visible");
+    const stats = this.summaryStats(mode);
+    this.overlay.innerHTML = `
+      <div class="overlay-card run-summary" role="dialog" aria-modal="true" aria-label="${escapeAttribute(content.title)}" data-run-summary="${mode}">
+        <div class="overlay-kicker">${mode === "clear" ? "Board Clear" : "Run Summary"}</div>
+        <h1>${escapeHtml(content.title)}</h1>
+        <p>${escapeHtml(content.body)}</p>
+        <dl class="summary-grid" aria-label="Run stats">
+          ${stats
+            .map(
+              (stat) => `<div class="summary-stat is-${stat.tone ?? "neutral"}"><dt>${escapeHtml(stat.label)}</dt><dd>${escapeHtml(stat.value)}</dd></div>`
+            )
+            .join("")}
+        </dl>
+        <div class="overlay-actions summary-actions">
+          ${content.actions
+            .map(
+              (action, index) =>
+                `<button type="button" class="${action.primary ? "" : "secondary"}" data-summary-action="${index}"${action.disabled ? " disabled aria-disabled=\"true\"" : ""}>${escapeHtml(action.label)}</button>`
+            )
+            .join("")}
+        </div>
+      </div>
+    `;
+    for (const [index, action] of content.actions.entries()) {
+      const button = this.overlay.querySelector<HTMLButtonElement>(`[data-summary-action="${index}"]`);
+      if (button && !action.disabled) button.addEventListener("click", action.action, { once: true });
+    }
+    this.overlay.querySelector<HTMLButtonElement>("[data-summary-action]:not([disabled])")?.focus({ preventScroll: true });
+  }
+
+  private openBoardPicker() {
+    this.hideOverlay();
+    const packsButton = this.mount.closest<HTMLElement>(".shell")?.querySelector<HTMLButtonElement>('[data-tool-panel="packs"]');
+    packsButton?.click();
+    this.refreshHud("Choose a board pack.");
   }
 
   private showLevelReadyOverlay(event: string) {
@@ -2533,6 +2647,45 @@ function fract(value: number): number {
 function boardThemeFor(context: BoardContext): BoardTheme {
   if (context.source === "generated") return BOARD_THEMES.generated;
   return BOARD_THEMES[context.packId] ?? BOARD_THEMES.starter;
+}
+
+function createRunStats(scoreAtRunStart: number, bestScoreAtRunStart: number): RunStats {
+  const now = Date.now();
+  return {
+    runStartedAt: now,
+    levelStartedAt: now,
+    scoreAtRunStart,
+    bestScoreAtRunStart,
+    bricksBroken: 0,
+    longestCombo: 1,
+    powerupsCaught: 0,
+    boardsCleared: 0
+  };
+}
+
+function toSavedRunStats(stats: RunStats): SavedRunStats {
+  return { ...stats };
+}
+
+function fromSavedRunStats(stats: SavedRunStats, score: number, bestScore: number): RunStats {
+  return {
+    ...createRunStats(score, bestScore),
+    runStartedAt: stats.runStartedAt,
+    levelStartedAt: stats.levelStartedAt,
+    scoreAtRunStart: stats.scoreAtRunStart,
+    bestScoreAtRunStart: stats.bestScoreAtRunStart,
+    bricksBroken: stats.bricksBroken,
+    longestCombo: stats.longestCombo,
+    powerupsCaught: stats.powerupsCaught,
+    boardsCleared: stats.boardsCleared
+  };
+}
+
+function formatRunDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return minutes > 0 ? `${minutes}:${String(remainder).padStart(2, "0")}` : `${remainder}s`;
 }
 
 function soundForBrickDestroy(kind: BrickKind): GameSoundKind {
@@ -2745,6 +2898,11 @@ function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
   return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+}
+
+function actionControlTarget(target: EventTarget | null): HTMLElement | null {
+  if (!(target instanceof HTMLElement)) return null;
+  return target.closest<HTMLElement>("button:not(:disabled), a[href], [role='button']:not([aria-disabled='true'])");
 }
 
 function readBestScore(): number {

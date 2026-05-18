@@ -411,6 +411,59 @@ body {
   color: #edf4ef;
 }
 
+.overlay-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.54;
+}
+
+.run-summary {
+  width: min(560px, calc(100vw - 34px));
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.summary-stat {
+  min-height: 74px;
+  padding: 11px;
+  border: 1px solid rgba(126, 241, 255, 0.18);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.025));
+}
+
+.summary-stat dt {
+  margin: 0 0 7px;
+  color: #9fb5b5;
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.summary-stat dd {
+  margin: 0;
+  color: #f6fbf7;
+  font-size: 1.18rem;
+  font-weight: 900;
+}
+
+.summary-stat.is-reward {
+  border-color: rgba(255, 224, 102, 0.36);
+  background: linear-gradient(180deg, rgba(255, 224, 102, 0.15), rgba(126, 241, 255, 0.04));
+}
+
+.summary-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.summary-actions button:first-child {
+  grid-column: 1 / -1;
+}
+
 .overlay-card button:focus-visible {
   outline: 3px solid #7ef1ff;
   outline-offset: 3px;
@@ -1633,6 +1686,11 @@ body {
     display: none;
   }
 
+  .run-summary {
+    max-height: calc(100vh - 42px);
+    overflow: auto;
+  }
+
   .hint {
     right: 14px;
     bottom: 8px;
@@ -1740,6 +1798,19 @@ body {
 
   .status {
     display: none;
+  }
+
+  .summary-grid,
+  .summary-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-actions button:first-child {
+    grid-column: auto;
+  }
+
+  .summary-stat {
+    min-height: 62px;
   }
 
   .combo-badge {

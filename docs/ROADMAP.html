@@ -515,7 +515,14 @@ state without needing the HUD.</li>
 Loop</h3>
 <p>Goal: close the loop after level clear or game over so a run ends with
 meaningful feedback and a clear next action.</p>
-<p>Status: planned.</p>
+<p>Status: complete as of 2026-05-18.</p>
+<p>Delivery notes: level clears and game-over states now use a full run
+summary overlay with score, best-score delta, bricks broken, longest
+streak, power-ups caught, boards cleared, and clear/survival time. The
+actions are keyboard-focusable and touch-sized, covering continue, retry,
+choose board, keep generated board when eligible, and a disabled share
+hook placeholder for the future export task. Run stats are saved with
+checkpoints so normal transition timing does not erase the summary.</p>
 <p>Scope:</p>
 <ul>
 <li>Add a level-clear summary and a game-over summary.</li>

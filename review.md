@@ -1,22 +1,23 @@
 # Review
 
 ## Verdict
-Acceptable as-is. I found no blocker, high, medium, or low findings in the current RQ-0004 diff; the prior low clipping-guard issue is resolved.
+Acceptable as-is. The prior keyboard activation issue is fixed, and the implementation matches the RQ-0005 plan and acceptance criteria from the inspected diff.
 
 ## Findings
-No material findings.
+No material blocker/high/medium/low findings.
 
 ## Verified
-- Reviewed `docs/ROADMAP.html`, `src/client/game/gameAudio.ts`, `src/client/game/RicochetRushGame.ts`, and `src/test/playabilitySmoke.ts` against the task acceptance criteria.
-- Confirmed procedural audio identity changes: layered paddle hits, brick pitch/intensity variation, throttled streak tones, and rumble/noise for explosions, boss damage, and volatile power-ups.
-- Confirmed the previous clipping-guard problem is avoided: `lastSfxOutputPeak` is no longer clamped to the assertion threshold, SFX routes through an `SFX_MASTER_GAIN` bus and `DynamicsCompressorNode`, and smoke coverage asserts the limiter is active plus the reported peak is below the guard.
-- Confirmed SFX/music controls remain independent and persistent in the settings flow and smoke assertions.
-- Confirmed no audio asset files were added; implementation remains procedural.
-- Ran `git diff --check`; it passed.
+- Read CueLoop task RQ-0005 and its plan with `cueloop machine task show RQ-0005`.
+- Inspected the working tree diff for `docs/ROADMAP.html`, `src/shared/saveState.ts`, `src/client/game/RicochetRushGame.ts`, `src/client/styles.css`, and `src/test/playabilitySmoke.ts`.
+- Confirmed Space/Enter on focused action controls now dispatches the control click before falling back to the game primary action.
+- Confirmed level-clear and game-over summaries expose the required stats and next actions, including retry/choose board, generated-board keep eligibility, and a disabled future share hook.
+- Confirmed run stats are normalized/restored in save state and written in checkpoints.
+- Confirmed smoke coverage now keyboard-activates `Choose Board` from the clear summary and checks game-over summary behavior.
+- Confirmed `git diff --check` is clean.
 
 ## Risks
-- I did not rerun `npm run ci`; I relied on the provided passing run and performed targeted inspection.
-- Subjective “not tacky/overdone” audio feel was reviewed from implementation shape, not live listening.
+- I did not rerun `npm run ci`; the handoff reports it passed, including build, 44 Vitest tests, smoke, and UX audit 100/0/0.
+- Smoke asserts Enter activation for `Choose Board`; Space uses the same code path but is not separately asserted.
 
 ## Recommended Next Step
-- Proceed with RQ-0004 as ready for merge/acceptance.
+- Proceed with task completion; no review-driven fix is required.
