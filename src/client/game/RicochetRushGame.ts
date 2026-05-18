@@ -174,6 +174,24 @@ interface BoardTheme {
   rim: string;
 }
 
+interface BrickVisualProfile {
+  rim: string;
+  shadow: string;
+  metalness: number;
+  roughness: number;
+  emissiveIntensity: number;
+  depthScale: number;
+  hpDepthBoost: number;
+  rimOpacity: number;
+  impactGlow: number;
+  wobble: number;
+}
+
+interface BallVisual {
+  glow: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
+  trail: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>;
+}
+
 const WIDTH = 960;
 const HEIGHT = 640;
 const WALL = 18;
@@ -241,6 +259,24 @@ const COLORS: Record<BrickKind, string> = {
   slow: "#8e7dff",
   boss: "#ff9f43"
 };
+
+const BRICK_VISUALS: Record<BrickKind, BrickVisualProfile> = {
+  basic: { rim: "#bffcf8", shadow: "#082a2a", metalness: 0.54, roughness: 0.24, emissiveIntensity: 0.26, depthScale: 1.08, hpDepthBoost: 0.16, rimOpacity: 0.5, impactGlow: 0.75, wobble: 0 },
+  hard: { rim: "#d5e4ff", shadow: "#0b1324", metalness: 0.9, roughness: 0.16, emissiveIntensity: 0.18, depthScale: 1.34, hpDepthBoost: 0.2, rimOpacity: 0.7, impactGlow: 0.72, wobble: 0 },
+  bomb: { rim: "#ffd3d3", shadow: "#431015", metalness: 0.62, roughness: 0.18, emissiveIntensity: 0.5, depthScale: 1.2, hpDepthBoost: 0.22, rimOpacity: 0.76, impactGlow: 1.24, wobble: 0.04 },
+  prize: { rim: "#ddffe9", shadow: "#07321d", metalness: 0.44, roughness: 0.22, emissiveIntensity: 0.42, depthScale: 1.14, hpDepthBoost: 0.18, rimOpacity: 0.72, impactGlow: 0.9, wobble: 0.012 },
+  penalty: { rim: "#ffadbd", shadow: "#2b0710", metalness: 0.58, roughness: 0.28, emissiveIntensity: 0.3, depthScale: 1.1, hpDepthBoost: 0.16, rimOpacity: 0.62, impactGlow: 1.0, wobble: 0.018 },
+  laser: { rim: "#ffc6e2", shadow: "#381025", metalness: 0.68, roughness: 0.16, emissiveIntensity: 0.46, depthScale: 1.16, hpDepthBoost: 0.18, rimOpacity: 0.76, impactGlow: 1.0, wobble: 0.012 },
+  grab: { rim: "#ecfffd", shadow: "#0c3538", metalness: 0.46, roughness: 0.2, emissiveIntensity: 0.42, depthScale: 1.12, hpDepthBoost: 0.18, rimOpacity: 0.72, impactGlow: 0.92, wobble: 0.01 },
+  fire: { rim: "#ffd5a8", shadow: "#401708", metalness: 0.62, roughness: 0.2, emissiveIntensity: 0.48, depthScale: 1.18, hpDepthBoost: 0.18, rimOpacity: 0.74, impactGlow: 1.04, wobble: 0.014 },
+  thru: { rim: "#fbffbd", shadow: "#2d3308", metalness: 0.5, roughness: 0.18, emissiveIntensity: 0.46, depthScale: 1.12, hpDepthBoost: 0.16, rimOpacity: 0.7, impactGlow: 0.94, wobble: 0.008 },
+  split: { rim: "#fff2af", shadow: "#3b2f08", metalness: 0.48, roughness: 0.22, emissiveIntensity: 0.44, depthScale: 1.12, hpDepthBoost: 0.18, rimOpacity: 0.7, impactGlow: 0.92, wobble: 0.01 },
+  wide: { rim: "#ddffe9", shadow: "#07321d", metalness: 0.42, roughness: 0.2, emissiveIntensity: 0.42, depthScale: 1.16, hpDepthBoost: 0.18, rimOpacity: 0.72, impactGlow: 0.92, wobble: 0.008 },
+  slow: { rim: "#d8d1ff", shadow: "#161139", metalness: 0.56, roughness: 0.2, emissiveIntensity: 0.4, depthScale: 1.12, hpDepthBoost: 0.16, rimOpacity: 0.72, impactGlow: 0.9, wobble: 0.008 },
+  boss: { rim: "#ffe0ad", shadow: "#4a2305", metalness: 0.88, roughness: 0.12, emissiveIntensity: 0.58, depthScale: 1.72, hpDepthBoost: 0.42, rimOpacity: 0.9, impactGlow: 1.28, wobble: 0.016 }
+};
+
+const BALL_TRAIL_MIN_SPEED = 80;
 
 const POWERUP_ORDER: PowerupKind[] = [
   "expandPaddle",
@@ -330,6 +366,7 @@ export class RicochetRushGame {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.OrthographicCamera(-WIDTH / 2, WIDTH / 2, HEIGHT / 2, -HEIGHT / 2, 1, 1800);
   private readonly board = new THREE.Group();
+  private readonly backgroundGroup = new THREE.Group();
   private readonly bricksGroup = new THREE.Group();
   private readonly ballsGroup = new THREE.Group();
   private readonly powerupsGroup = new THREE.Group();
@@ -344,25 +381,41 @@ export class RicochetRushGame {
   private readonly floatingTexts: FloatingText[] = [];
   private readonly laserBeams: LaserBeam[] = [];
   private readonly brickMeshes = new Map<Brick, THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>>();
+  private readonly brickRims = new Map<Brick, THREE.LineSegments<THREE.EdgesGeometry, THREE.LineBasicMaterial>>();
+  private readonly brickShadows = new Map<Brick, THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>>();
   private readonly ballMeshes = new Map<Ball, THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMaterial>>();
+  private readonly ballVisuals = new Map<Ball, BallVisual>();
   private readonly powerupObjects = new Map<Powerup, THREE.Object3D>();
   private readonly laserObjects = new Map<LaserBeam, THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>>();
   private readonly brickImpactTimers = new Map<Brick, number>();
   private readonly floatingTextNodes = new Map<number, HTMLDivElement>();
   private readonly brickGeometry = new THREE.BoxGeometry(BRICK_WIDTH, BRICK_HEIGHT, 22, 2, 2, 1);
+  private readonly brickRimGeometry = new THREE.EdgesGeometry(this.brickGeometry, 28);
+  private readonly brickShadowGeometry = new THREE.PlaneGeometry(BRICK_WIDTH * 1.16, BRICK_HEIGHT * 1.42);
   private readonly paddleGeometry = new THREE.BoxGeometry(1, 1, 1, 3, 1, 1);
+  private readonly paddleGlowGeometry = new THREE.BoxGeometry(1, 1, 1, 1, 1, 1);
+  private readonly paddleSpecularGeometry = new THREE.BoxGeometry(1, 1, 1, 1, 1, 1);
   private readonly ballGeometry = new THREE.SphereGeometry(1, 28, 18);
+  private readonly ballGlowGeometry = new THREE.SphereGeometry(1, 24, 12);
   private readonly fallbackPowerupGeometry = new THREE.BoxGeometry(38, 24, 10, 2, 1, 1);
+  private readonly backdropMaterial = new THREE.MeshBasicMaterial({ color: "#07111d", transparent: true, opacity: 0.74, depthWrite: false });
+  private readonly backdropFogMaterial = new THREE.MeshBasicMaterial({ color: "#4ecdc4", transparent: true, opacity: 0.16, depthWrite: false, blending: THREE.AdditiveBlending });
+  private readonly backdropGridMaterial = new THREE.LineBasicMaterial({ color: "#7ef1ff", transparent: true, opacity: 0.24, depthWrite: false });
+  private readonly backdropStarMaterial = new THREE.PointsMaterial({ color: "#8aefff", size: 2.4, transparent: true, opacity: 0.66, sizeAttenuation: false, depthWrite: false });
   private readonly floorMaterial = new THREE.MeshStandardMaterial({ color: "#07111d", metalness: 0.35, roughness: 0.58 });
   private readonly wallMaterial = new THREE.MeshStandardMaterial({ color: "#18263a", emissive: "#4ecdc4", emissiveIntensity: 0.22, metalness: 0.74, roughness: 0.2 });
   private readonly brickMaterials = new Map<BrickKind, THREE.MeshStandardMaterial>();
   private readonly powerupMaterials = new Map<PowerupKind, THREE.SpriteMaterial>();
   private readonly fallbackPowerupMaterials = new Map<PowerupTone, THREE.MeshStandardMaterial>();
-  private readonly rimLight = new THREE.PointLight("#ff4d8d", 1.6, 900);
+  private readonly paddleGlowMaterial = new THREE.MeshBasicMaterial({ color: "#7ef1ff", transparent: true, opacity: 0.28, depthWrite: false, blending: THREE.AdditiveBlending });
+  private readonly paddleSpecularMaterial = new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.34, depthWrite: false, blending: THREE.AdditiveBlending });
+  private readonly rimLight = new THREE.PointLight("#ff4d8d", 1.8, 940);
   private readonly paddleMesh = new THREE.Mesh(
     this.paddleGeometry,
     new THREE.MeshStandardMaterial({ color: "#e9ffff", emissive: "#35f3ff", emissiveIntensity: 0.45, metalness: 0.82, roughness: 0.18 })
   );
+  private readonly paddleGlowMesh = new THREE.Mesh(this.paddleGlowGeometry, this.paddleGlowMaterial);
+  private readonly paddleSpecularMesh = new THREE.Mesh(this.paddleSpecularGeometry, this.paddleSpecularMaterial);
   private sparksPoints: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial> | null = null;
   private bricks: Brick[] = [];
   private levelBlueprint: LevelBlueprint = fallbackLevel({ level: 1, score: 0, lives: 3, clearedLevels: 0, recentEvents: [] });
@@ -521,16 +574,29 @@ export class RicochetRushGame {
   private setupScene() {
     this.board.rotation.x = -0.08;
     this.scene.add(this.board);
-    this.board.add(this.bricksGroup, this.ballsGroup, this.powerupsGroup, this.lasersGroup, this.sparksGroup, this.paddleMesh);
+    this.board.add(
+      this.backgroundGroup,
+      this.bricksGroup,
+      this.ballsGroup,
+      this.powerupsGroup,
+      this.lasersGroup,
+      this.sparksGroup,
+      this.paddleGlowMesh,
+      this.paddleMesh,
+      this.paddleSpecularMesh
+    );
 
-    const ambient = new THREE.AmbientLight("#b8d4ff", 1.25);
-    const key = new THREE.DirectionalLight("#ffffff", 2.35);
-    key.position.set(-260, 300, 780);
+    const ambient = new THREE.AmbientLight("#bfd8ff", 1.38);
+    const key = new THREE.DirectionalLight("#ffffff", 2.75);
+    key.position.set(-290, 330, 820);
     key.castShadow = true;
-    key.shadow.mapSize.width = 1024;
-    key.shadow.mapSize.height = 1024;
-    this.rimLight.position.set(460, 120, 320);
+    key.shadow.mapSize.width = 1536;
+    key.shadow.mapSize.height = 1536;
+    key.shadow.camera.near = 120;
+    key.shadow.camera.far = 1200;
+    this.rimLight.position.set(470, 125, 340);
     this.scene.add(ambient, key, this.rimLight);
+    this.setupBackdrop();
 
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(WIDTH - WALL * 2, HEIGHT - WALL * 2), this.floorMaterial);
     floor.position.set(0, 0, -20);
@@ -547,31 +613,59 @@ export class RicochetRushGame {
     bottomWall.position.copy(toWorld(WIDTH / 2, HEIGHT - WALL / 2, -2));
     this.board.add(topWall, leftWall, rightWall, bottomWall);
 
-    const starGeometry = new THREE.BufferGeometry();
-    const stars = new Float32Array(180 * 3);
-    for (let index = 0; index < 180; index += 1) {
-      stars[index * 3] = Math.random() * WIDTH - WIDTH / 2;
-      stars[index * 3 + 1] = Math.random() * HEIGHT - HEIGHT / 2;
-      stars[index * 3 + 2] = -36 - Math.random() * 38;
-    }
-    starGeometry.setAttribute("position", new THREE.BufferAttribute(stars, 3));
-    this.board.add(new THREE.Points(starGeometry, new THREE.PointsMaterial({ color: "#8aefff", size: 1.8, transparent: true, opacity: 0.48 })));
-
     for (const kind of Object.keys(COLORS) as BrickKind[]) {
       const color = COLORS[kind];
+      const visual = BRICK_VISUALS[kind];
       this.brickMaterials.set(
         kind,
         new THREE.MeshStandardMaterial({
           color,
           emissive: color,
-          emissiveIntensity: kind === "boss" ? 0.45 : 0.24,
-          metalness: kind === "hard" || kind === "boss" ? 0.82 : 0.48,
-          roughness: 0.22
+          emissiveIntensity: visual.emissiveIntensity,
+          metalness: visual.metalness,
+          roughness: visual.roughness
         })
       );
     }
     this.paddleMesh.castShadow = true;
     this.paddleMesh.receiveShadow = true;
+    this.paddleGlowMesh.renderOrder = 2;
+    this.paddleSpecularMesh.renderOrder = 4;
+  }
+
+  private setupBackdrop() {
+    const field = new THREE.Mesh(new THREE.PlaneGeometry(WIDTH * 1.08, HEIGHT * 1.1), this.backdropMaterial);
+    field.position.set(0, 0, -72);
+    const fog = new THREE.Mesh(new THREE.PlaneGeometry(WIDTH * 0.96, HEIGHT * 0.54), this.backdropFogMaterial);
+    fog.position.set(0, 74, -16);
+    fog.scale.set(1, 1.18, 1);
+    this.backgroundGroup.add(field, fog, this.createBackdropGrid(), this.createStarfield());
+  }
+
+  private createBackdropGrid() {
+    const points: number[] = [];
+    const left = -WIDTH / 2 + WALL;
+    const right = WIDTH / 2 - WALL;
+    const top = HEIGHT / 2 - WALL;
+    const bottom = -HEIGHT / 2 + WALL;
+    for (let x = left; x <= right; x += 64) points.push(x, bottom, -15, x, top, -15);
+    for (let y = bottom; y <= top; y += 48) points.push(left, y, -15, right, y, -15);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
+    return new THREE.LineSegments(geometry, this.backdropGridMaterial);
+  }
+
+  private createStarfield() {
+    const count = 260;
+    const positions = new Float32Array(count * 3);
+    for (let index = 0; index < count; index += 1) {
+      positions[index * 3] = pseudoRandom(index, 17) * WIDTH - WIDTH / 2;
+      positions[index * 3 + 1] = pseudoRandom(index, 41) * HEIGHT - HEIGHT / 2;
+      positions[index * 3 + 2] = -13 - pseudoRandom(index, 73) * 6;
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    return new THREE.Points(geometry, this.backdropStarMaterial);
   }
 
   private loadPowerupAtlas() {
@@ -1717,9 +1811,14 @@ export class RicochetRushGame {
     this.floorMaterial.color.set(theme.floor);
     this.wallMaterial.color.set(theme.wall);
     this.wallMaterial.emissive.set(theme.wallGlow);
+    this.backdropMaterial.color.set(theme.floor);
+    this.backdropFogMaterial.color.set(theme.wallGlow);
+    this.backdropGridMaterial.color.set(theme.rim);
+    this.backdropStarMaterial.color.set(theme.rim);
     this.rimLight.color.set(theme.rim);
     const stage = this.mount.closest<HTMLElement>(".stage");
     stage?.style.setProperty("--stage-border-color", `${theme.wallGlow}66`);
+    stage?.style.setProperty("--stage-glow-color", `${theme.wallGlow}2f`);
   }
 
   private setSidebarCollapsed(collapsed: boolean) {
@@ -1743,10 +1842,14 @@ export class RicochetRushGame {
     this.syncLasers();
     this.syncSparks();
     this.syncFloatingTexts();
+    const now = performance.now();
     const shake = this.boardShakeTimer > 0 && !this.settings.reducedMotion ? (Math.random() - 0.5) * this.boardShakeStrength : 0;
-    this.board.rotation.z = this.settings.reducedMotion ? 0 : Math.sin(performance.now() / 3600) * 0.006 + shake * 0.002;
+    this.board.rotation.z = this.settings.reducedMotion ? 0 : Math.sin(now / 3600) * 0.006 + shake * 0.002;
     this.board.position.x = shake;
-    this.board.position.y = this.levelClearFlashTimer > 0 && !this.settings.reducedMotion ? Math.sin(performance.now() / 38) * 1.2 : 0;
+    this.board.position.y = this.levelClearFlashTimer > 0 && !this.settings.reducedMotion ? Math.sin(now / 38) * 1.2 : 0;
+    this.backgroundGroup.rotation.z = this.settings.reducedMotion ? 0 : Math.sin(now / 12000) * 0.004;
+    this.backgroundGroup.position.x = this.settings.reducedMotion ? 0 : Math.sin(now / 9000) * 3.2;
+    this.backgroundGroup.position.y = this.settings.reducedMotion ? 0 : Math.cos(now / 11000) * 2.2;
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -1756,10 +1859,15 @@ export class RicochetRushGame {
         this.bricksGroup.remove(mesh);
         mesh.material.dispose();
         this.brickMeshes.delete(brick);
+        this.removeBrickAccents(brick);
       }
     }
+    const now = performance.now();
     for (const brick of this.bricks) {
+      const visual = BRICK_VISUALS[brick.kind];
       let mesh = this.brickMeshes.get(brick);
+      let rim = this.brickRims.get(brick);
+      let shadow = this.brickShadows.get(brick);
       if (!mesh) {
         const template = this.brickMaterials.get(brick.kind) ?? this.brickMaterials.get("basic");
         if (!template) continue;
@@ -1767,33 +1875,96 @@ export class RicochetRushGame {
         mesh = new THREE.Mesh(this.brickGeometry, material);
         mesh.castShadow = true;
         mesh.receiveShadow = true;
+        mesh.renderOrder = 2;
+        rim = new THREE.LineSegments(
+          this.brickRimGeometry,
+          new THREE.LineBasicMaterial({ color: visual.rim, transparent: true, opacity: visual.rimOpacity, depthWrite: false })
+        );
+        rim.renderOrder = 3;
+        shadow = new THREE.Mesh(
+          this.brickShadowGeometry,
+          new THREE.MeshBasicMaterial({ color: visual.shadow, transparent: true, opacity: 0.22, depthWrite: false })
+        );
+        shadow.renderOrder = 1;
         this.brickMeshes.set(brick, mesh);
-        this.bricksGroup.add(mesh);
+        this.brickRims.set(brick, rim);
+        this.brickShadows.set(brick, shadow);
+        this.bricksGroup.add(shadow, mesh, rim);
       }
+      if (!rim || !shadow) continue;
       const material = mesh.material;
-      const baseIntensity = brick.kind === "boss" ? 0.45 : 0.24;
       const hpRatio = brick.maxHp > 0 ? brick.hp / brick.maxHp : 1;
+      const damageRatio = 1 - hpRatio;
       const impact = clamp((this.brickImpactTimers.get(brick) ?? 0) / 0.16, 0, 1);
-      material.emissiveIntensity = baseIntensity * (0.38 + 0.62 * hpRatio) + impact * 0.85;
-      mesh.position.copy(toWorld(brick.x + brick.width / 2, brick.y + brick.height / 2, brick.kind === "boss" ? 22 : 10));
-      const punch = this.settings.reducedMotion ? 0 : impact * 0.06;
-      mesh.scale.set(1 + punch, 1 + punch, brick.kind === "boss" ? 1.75 : 1 + (brick.hp / brick.maxHp) * 0.35 + punch);
-      mesh.rotation.z = brick.kind === "bomb" && !this.settings.reducedMotion ? Math.sin(performance.now() / 180) * 0.035 : 0;
+      material.emissiveIntensity = visual.emissiveIntensity * (0.42 + 0.58 * hpRatio) + impact * visual.impactGlow;
+      material.metalness = visual.metalness;
+      material.roughness = visual.roughness + damageRatio * 0.08;
+      const centerX = brick.x + brick.width / 2;
+      const centerY = brick.y + brick.height / 2;
+      const z = 12 + visual.depthScale * 6 + hpRatio * visual.hpDepthBoost * 12;
+      mesh.position.copy(toWorld(centerX, centerY, z));
+      const punch = this.settings.reducedMotion ? 0 : impact * 0.07;
+      const wobble = this.settings.reducedMotion ? 0 : Math.sin(now / 170 + centerX * 0.03) * visual.wobble;
+      const zScale = visual.depthScale + hpRatio * visual.hpDepthBoost + punch;
+      mesh.scale.set(1 + punch, 1 + punch * 0.7, zScale);
+      mesh.rotation.z = brick.kind === "bomb" && !this.settings.reducedMotion ? Math.sin(now / 180) * 0.04 : wobble;
+
+      rim.position.copy(mesh.position);
+      rim.scale.copy(mesh.scale);
+      rim.rotation.copy(mesh.rotation);
+      rim.material.color.set(visual.rim);
+      rim.material.opacity = clamp(visual.rimOpacity + impact * 0.22 + (brick.kind === "boss" ? 0.08 : 0), 0, 1);
+
+      shadow.position.copy(toWorld(centerX + 5, centerY + 7, -5));
+      shadow.scale.set(1 + damageRatio * 0.06 + impact * 0.04, 1.06 + visual.depthScale * 0.05, 1);
+      shadow.rotation.z = mesh.rotation.z;
+      shadow.material.color.set(visual.shadow);
+      shadow.material.opacity = clamp(0.16 + visual.depthScale * 0.05 + impact * 0.06, 0, 0.4);
+    }
+  }
+
+  private removeBrickAccents(brick: Brick) {
+    const rim = this.brickRims.get(brick);
+    if (rim) {
+      this.bricksGroup.remove(rim);
+      rim.material.dispose();
+      this.brickRims.delete(brick);
+    }
+    const shadow = this.brickShadows.get(brick);
+    if (shadow) {
+      this.bricksGroup.remove(shadow);
+      shadow.material.dispose();
+      this.brickShadows.delete(brick);
     }
   }
 
   private syncPaddle() {
     const flash = clamp(this.paddleFlashTimer / 0.2, 0, 1);
-    this.paddleMesh.scale.set(this.paddleWidth, 16 + flash * 2, this.laserTimer > 0 ? 28 : 20 + flash * 8);
-    this.paddleMesh.position.copy(toWorld(this.paddleX, PADDLE_Y + 7, 36));
-    this.paddleMesh.material.emissiveIntensity = 0.45 + flash * 0.8 + (this.lifeFlashTimer > 0 ? 0.35 : 0);
+    const now = performance.now();
+    const width = this.paddleWidth + flash * 10;
+    const height = 15 + flash * 5;
+    const depth = this.laserTimer > 0 ? 30 : 21 + flash * 10;
+    this.paddleMesh.scale.set(width, height, depth);
+    this.paddleMesh.position.copy(toWorld(this.paddleX, PADDLE_Y + 7 + flash * 0.8, 37));
+    this.paddleMesh.material.emissiveIntensity = 0.48 + flash * 1.05 + (this.lifeFlashTimer > 0 ? 0.35 : 0);
+
+    this.paddleGlowMesh.position.copy(toWorld(this.paddleX, PADDLE_Y + 9, 30));
+    this.paddleGlowMesh.scale.set(width * 1.16, 27 + flash * 12, 1);
+    this.paddleGlowMaterial.opacity = this.settings.reducedMotion ? 0.22 + flash * 0.08 : 0.3 + flash * 0.18;
+
+    const sweep = this.settings.reducedMotion ? 0 : Math.sin(now / 520) * this.paddleWidth * 0.34;
+    this.paddleSpecularMesh.position.copy(toWorld(this.paddleX + sweep, PADDLE_Y + 1, 56));
+    this.paddleSpecularMesh.scale.set(Math.max(38, this.paddleWidth * 0.24), 3 + flash * 2.4, 1);
+    this.paddleSpecularMaterial.opacity = this.settings.reducedMotion ? 0.16 + flash * 0.1 : 0.26 + flash * 0.24;
   }
 
   private syncBalls() {
     for (const [ball, mesh] of this.ballMeshes) {
       if (!this.balls.includes(ball)) {
         this.ballsGroup.remove(mesh);
+        mesh.material.dispose();
         this.ballMeshes.delete(ball);
+        this.removeBallVisual(ball);
       }
     }
     for (const ball of this.balls) {
@@ -1808,19 +1979,76 @@ export class RicochetRushGame {
         });
         mesh = new THREE.Mesh(this.ballGeometry, material);
         mesh.castShadow = true;
+        mesh.renderOrder = 5;
         this.ballMeshes.set(ball, mesh);
         this.ballsGroup.add(mesh);
       }
-      mesh.position.copy(toWorld(ball.x, ball.y, 52));
+      const visual = this.ballVisuals.get(ball) ?? this.createBallVisual(ball);
+      const head = toWorld(ball.x, ball.y, 56);
+      mesh.position.copy(head);
       mesh.scale.setScalar(ball.radius);
       if (!this.settings.reducedMotion) {
         mesh.rotation.x += 0.08;
         mesh.rotation.y += 0.055;
       }
       const material = mesh.material;
-      material.emissive.set(ball.fireTimer > 0 ? "#ff5c5c" : ball.thruTimer > 0 ? "#d6ff4d" : "#ffe066");
-      material.emissiveIntensity = ball.megaTimer > 0 ? 0.85 : 0.55;
+      const ballColor = ball.fireTimer > 0 ? "#ff5c5c" : ball.thruTimer > 0 ? "#d6ff4d" : "#ffe066";
+      material.emissive.set(ballColor);
+      material.emissiveIntensity = ball.megaTimer > 0 ? 0.92 : 0.62;
+      this.syncBallVisual(ball, visual, ballColor, head);
     }
+  }
+
+  private createBallVisual(ball: Ball): BallVisual {
+    const glow = new THREE.Mesh(
+      this.ballGlowGeometry,
+      new THREE.MeshBasicMaterial({ color: "#ffe066", transparent: true, opacity: 0.26, depthWrite: false, blending: THREE.AdditiveBlending })
+    );
+    glow.renderOrder = 4;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(6), 3));
+    const trail = new THREE.Line(
+      geometry,
+      new THREE.LineBasicMaterial({ color: "#ffe066", transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending })
+    );
+    trail.renderOrder = 3;
+    const visual = { glow, trail };
+    this.ballVisuals.set(ball, visual);
+    this.ballsGroup.add(trail, glow);
+    return visual;
+  }
+
+  private syncBallVisual(ball: Ball, visual: BallVisual, color: string, head: THREE.Vector3) {
+    const speed = Math.hypot(ball.vx, ball.vy);
+    const trailMaterial = visual.trail.material;
+    const glowMaterial = visual.glow.material;
+    visual.glow.position.copy(head);
+    visual.glow.scale.setScalar(ball.radius * (this.settings.reducedMotion ? 1.65 : 2.2));
+    glowMaterial.color.set(color);
+    glowMaterial.opacity = this.settings.reducedMotion ? 0.18 : ball.megaTimer > 0 ? 0.36 : 0.28;
+
+    const trailPositions = visual.trail.geometry.getAttribute("position");
+    const hasTrail = speed > BALL_TRAIL_MIN_SPEED && !ball.stuck;
+    const trailLength = hasTrail ? (this.settings.reducedMotion ? 18 : clamp(speed * 0.08, 34, 86)) : 0;
+    const normalizedX = speed > 0 ? ball.vx / speed : 0;
+    const normalizedY = speed > 0 ? ball.vy / speed : 0;
+    const tail = toWorld(ball.x - normalizedX * trailLength, ball.y - normalizedY * trailLength, 49);
+    trailPositions.setXYZ(0, tail.x, tail.y, tail.z);
+    trailPositions.setXYZ(1, head.x, head.y, head.z);
+    trailPositions.needsUpdate = true;
+    visual.trail.geometry.computeBoundingSphere();
+    trailMaterial.color.set(color);
+    trailMaterial.opacity = hasTrail ? (this.settings.reducedMotion ? 0.18 : clamp(speed / MAX_BALL_SPEED, 0.28, 0.68)) : 0;
+  }
+
+  private removeBallVisual(ball: Ball) {
+    const visual = this.ballVisuals.get(ball);
+    if (!visual) return;
+    this.ballsGroup.remove(visual.trail, visual.glow);
+    visual.trail.geometry.dispose();
+    visual.trail.material.dispose();
+    visual.glow.material.dispose();
+    this.ballVisuals.delete(ball);
   }
 
   private syncPowerups() {
@@ -2117,6 +2345,14 @@ function pickupLabelFor(kind: PowerupKind): string {
 
 function powerupPressure(input: PowerupPoolInput): number {
   return clamp((input.level + input.clearedLevels - 1) / 10, 0, 1);
+}
+
+function pseudoRandom(index: number, salt: number): number {
+  return fract(Math.sin(index * 12.9898 + salt * 78.233) * 43758.5453);
+}
+
+function fract(value: number): number {
+  return value - Math.floor(value);
 }
 
 function boardThemeFor(context: BoardContext): BoardTheme {

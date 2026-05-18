@@ -39,8 +39,10 @@ interface ConsoleEntry {
 }
 
 interface CanvasMetrics {
+  accentPixels: number;
   canvasPixels: number;
   colorBuckets: number;
+  depthPixels: number;
   displayWidth: number;
   displayHeight: number;
   height: number;
@@ -285,8 +287,10 @@ async function assertCanvasClarity(page: Page, label: string) {
     const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="ricochet-rush-canvas"]');
     if (!canvas) {
       return {
+        accentPixels: 0,
         canvasPixels: 0,
         colorBuckets: 0,
+        depthPixels: 0,
         displayHeight: 0,
         displayWidth: 0,
         height: 0,
@@ -302,8 +306,10 @@ async function assertCanvasClarity(page: Page, label: string) {
     const context = probe.getContext("2d", { willReadFrequently: true });
     if (!context) {
       return {
+        accentPixels: 0,
         canvasPixels: canvas.width * canvas.height,
         colorBuckets: 0,
+        depthPixels: 0,
         displayHeight: canvas.getBoundingClientRect().height,
         displayWidth: canvas.getBoundingClientRect().width,
         height: canvas.height,
@@ -316,6 +322,8 @@ async function assertCanvasClarity(page: Page, label: string) {
     context.drawImage(canvas, 0, 0, probe.width, probe.height);
     const pixels = context.getImageData(0, 0, probe.width, probe.height).data;
     const buckets = new Set<string>();
+    let accentPixels = 0;
+    let depthPixels = 0;
     let litPixels = 0;
     let lowerBandLitPixels = 0;
 
@@ -327,7 +335,11 @@ async function assertCanvasClarity(page: Page, label: string) {
       const pixel = index / 4;
       const y = Math.floor(pixel / probe.width);
       const brightness = red + green + blue;
+      const brightestChannel = Math.max(red, green, blue);
+      const darkestChannel = Math.min(red, green, blue);
       if (alpha > 0 && brightness > 42) {
+        if (brightestChannel > 92 && brightestChannel - darkestChannel > 28) accentPixels += 1;
+        if (brightness > 70 && brightness < 230) depthPixels += 1;
         litPixels += 1;
         if (y > probe.height * 0.62) lowerBandLitPixels += 1;
       }
@@ -338,8 +350,10 @@ async function assertCanvasClarity(page: Page, label: string) {
 
     const rect = canvas.getBoundingClientRect();
     return {
+      accentPixels,
       canvasPixels: canvas.width * canvas.height,
       colorBuckets: buckets.size,
+      depthPixels,
       displayHeight: rect.height,
       displayWidth: rect.width,
       height: canvas.height,
@@ -352,7 +366,9 @@ async function assertCanvasClarity(page: Page, label: string) {
   recordCheck(metrics.canvasPixels > 0, `${label}: canvas has backing pixels`, `${metrics.width}x${metrics.height}`);
   recordCheck(metrics.displayWidth >= 320 && metrics.displayHeight >= 210, `${label}: canvas is large enough to play`, `${Math.round(metrics.displayWidth)}x${Math.round(metrics.displayHeight)} displayed`);
   recordCheck(metrics.litPixels > 900, `${label}: canvas is not visually blank`, `${metrics.litPixels} lit sample pixels`);
-  recordCheck(metrics.colorBuckets >= 10, `${label}: canvas has enough visual variety`, `${metrics.colorBuckets} color buckets`);
+  recordCheck(metrics.colorBuckets >= 16, `${label}: canvas has rich arcade color`, `${metrics.colorBuckets} color buckets`);
+  recordCheck(metrics.accentPixels > 140, `${label}: bright arcade accents are visible`, `${metrics.accentPixels} accent sample pixels`);
+  recordCheck(metrics.depthPixels > 650, `${label}: depth and shadow detail is visible`, `${metrics.depthPixels} mid-tone sample pixels`);
   recordCheck(metrics.lowerBandLitPixels > 90, `${label}: paddle/lower playfield is visible`, `${metrics.lowerBandLitPixels} lower-band lit pixels`);
 }
 
