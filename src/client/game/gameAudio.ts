@@ -7,6 +7,9 @@ export type GameSoundKind =
   | "brickDestroy"
   | "specialBrick"
   | "bossBrick"
+  | "streak"
+  | "bossDamage"
+  | "volatilePowerup"
   | "goodPowerup"
   | "badPowerup"
   | "extraLife"
@@ -34,6 +37,13 @@ interface SoundProfile {
   voices: ToneVoice[];
 }
 
+export interface GameAudioPlayOptions {
+  pitch?: number;
+  intensity?: number;
+  streak?: number;
+  rumble?: number;
+}
+
 export interface GameAudioDebugState {
   contextState: AudioContextState | "not-created" | "unavailable";
   sfxVolume: number;
@@ -42,6 +52,9 @@ export interface GameAudioDebugState {
   musicPlaying: boolean;
   musicMasterGain: number;
   musicMelodyOutputPeak: number;
+  lastSfxOutputPeak: number;
+  lastSfxKind: GameSoundKind | null;
+  sfxLimiterActive: boolean;
 }
 
 declare global {
@@ -51,16 +64,29 @@ declare global {
 }
 
 const PROFILES: Record<GameSoundKind, SoundProfile> = {
-  paddle: { cooldownMs: 24, voices: [{ frequency: 260, duration: 0.045, peak: 0.055, type: "triangle", sweep: 80 }] },
+  paddle: {
+    cooldownMs: 24,
+    voices: [
+      { frequency: 170, duration: 0.07, peak: 0.035, type: "triangle", sweep: -24 },
+      { frequency: 305, duration: 0.052, peak: 0.045, type: "triangle", sweep: 92 }
+    ]
+  },
   paddleEdge: {
     cooldownMs: 24,
     voices: [
-      { frequency: 360, duration: 0.048, peak: 0.056, type: "triangle", sweep: 190 },
-      { frequency: 820, duration: 0.026, peak: 0.024, type: "sine", delay: 0.01 }
+      { frequency: 180, duration: 0.065, peak: 0.032, type: "triangle", sweep: -20 },
+      { frequency: 400, duration: 0.052, peak: 0.05, type: "triangle", sweep: 210 },
+      { frequency: 860, duration: 0.03, peak: 0.022, type: "sine", delay: 0.012 }
     ]
   },
-  grab: { cooldownMs: 80, voices: [{ frequency: 240, duration: 0.09, peak: 0.045, type: "sine", sweep: -60 }] },
-  brickChip: { cooldownMs: 18, voices: [{ frequency: 560, duration: 0.034, peak: 0.038, type: "square", sweep: -70 }] },
+  grab: {
+    cooldownMs: 80,
+    voices: [
+      { frequency: 150, duration: 0.12, peak: 0.028, type: "triangle", sweep: -22 },
+      { frequency: 250, duration: 0.1, peak: 0.038, type: "sine", sweep: -60 }
+    ]
+  },
+  brickChip: { cooldownMs: 18, voices: [{ frequency: 560, duration: 0.038, peak: 0.036, type: "square", sweep: -76 }] },
   hardBrick: {
     cooldownMs: 20,
     voices: [
@@ -79,8 +105,29 @@ const PROFILES: Record<GameSoundKind, SoundProfile> = {
   bossBrick: {
     cooldownMs: 40,
     voices: [
-      { frequency: 110, duration: 0.12, peak: 0.062, type: "sawtooth", sweep: -28 },
-      { frequency: 260, duration: 0.07, peak: 0.036, type: "square", delay: 0.018 }
+      { frequency: 92, duration: 0.16, peak: 0.052, type: "sawtooth", sweep: -26, noise: true },
+      { frequency: 238, duration: 0.075, peak: 0.032, type: "square", delay: 0.018 }
+    ]
+  },
+  streak: {
+    cooldownMs: 115,
+    voices: [
+      { frequency: 520, duration: 0.052, peak: 0.032, type: "triangle", sweep: 80 },
+      { frequency: 780, duration: 0.06, peak: 0.024, type: "sine", delay: 0.035, sweep: 120 }
+    ]
+  },
+  bossDamage: {
+    cooldownMs: 90,
+    voices: [
+      { frequency: 70, duration: 0.18, peak: 0.052, type: "sawtooth", sweep: -16, noise: true },
+      { frequency: 132, duration: 0.14, peak: 0.034, type: "triangle", delay: 0.02, sweep: -18 }
+    ]
+  },
+  volatilePowerup: {
+    cooldownMs: 95,
+    voices: [
+      { frequency: 330, duration: 0.12, peak: 0.038, type: "triangle", sweep: 220 },
+      { frequency: 115, duration: 0.16, peak: 0.028, type: "sawtooth", delay: 0.02, sweep: -34, noise: true }
     ]
   },
   goodPowerup: {
@@ -138,14 +185,19 @@ const MUSIC_NOTES = [196, 246.94, 293.66, 329.63, 293.66, 246.94, 220, 261.63];
 export const MUSIC_MASTER_GAIN = 0.35;
 export const MUSIC_MELODY_PEAK = 0.026;
 const MUSIC_BASS_PEAK = 0.018;
+const SFX_MASTER_GAIN = 0.82;
 
 export function createGameAudio() {
   let ctx: AudioContext | null = null;
   let musicGain: GainNode | null = null;
+  let sfxGain: GainNode | null = null;
+  let sfxLimiter: DynamicsCompressorNode | null = null;
   let musicTimer: number | null = null;
   let musicStep = 0;
   let sfxVolume = 1;
   let musicVolume = 1;
+  let lastSfxOutputPeak = 0;
+  let lastSfxKind: GameSoundKind | null = null;
   const lastPlayed = new Map<GameSoundKind, number>();
 
   const ensureContext = (): AudioContext | null => {
@@ -166,7 +218,7 @@ export function createGameAudio() {
     }).catch(() => undefined);
   };
 
-  const play = (kind: GameSoundKind, volume: number) => {
+  const play = (kind: GameSoundKind, volume: number, options: GameAudioPlayOptions = {}) => {
     sfxVolume = clamp(volume, 0, 1);
     if (sfxVolume <= 0 && musicVolume <= 0) return;
     const context = ensureContext();
@@ -180,10 +232,49 @@ export function createGameAudio() {
     if (nowMs - lastMs < profile.cooldownMs) return;
     lastPlayed.set(kind, nowMs);
 
+    const pitch = clamp(options.pitch ?? 1, 0.45, 2.35);
+    const intensity = clamp(options.intensity ?? 1, 0.2, 1.45);
     const now = context.currentTime;
+    const destination = sfxDestination(context);
+    let outputPeak = 0;
     for (const voice of profile.voices) {
-      playTone(context, now + (voice.delay ?? 0), { ...voice, peak: voice.peak * sfxVolume }, context.destination);
+      const peak = clamp(voice.peak * sfxVolume * intensity, 0.0001, 0.085);
+      outputPeak += peak;
+      playTone(
+        context,
+        now + (voice.delay ?? 0),
+        {
+          ...voice,
+          frequency: voice.frequency * pitch,
+          sweep: voice.sweep === undefined ? undefined : voice.sweep * pitch,
+          peak
+        },
+        destination
+      );
     }
+    if ((options.rumble ?? 0) > 0) {
+      const rumblePeak = clamp((options.rumble ?? 0) * sfxVolume * 0.05, 0.0001, 0.06);
+      outputPeak += rumblePeak;
+      playNoise(context, now, 0.14 + clamp(options.rumble ?? 0, 0, 1) * 0.12, rumblePeak, destination);
+    }
+    lastSfxOutputPeak = outputPeak * SFX_MASTER_GAIN;
+    lastSfxKind = kind;
+  };
+
+  const sfxDestination = (context: AudioContext): AudioNode => {
+    if (!sfxGain || !sfxLimiter) {
+      sfxGain = context.createGain();
+      sfxGain.gain.value = SFX_MASTER_GAIN;
+      sfxLimiter = context.createDynamicsCompressor();
+      sfxLimiter.threshold.value = -10;
+      sfxLimiter.knee.value = 8;
+      sfxLimiter.ratio.value = 10;
+      sfxLimiter.attack.value = 0.003;
+      sfxLimiter.release.value = 0.18;
+      sfxGain.connect(sfxLimiter);
+      sfxLimiter.connect(context.destination);
+    }
+    return sfxGain;
   };
 
   const setSfxVolume = (volume: number) => {
@@ -212,7 +303,10 @@ export function createGameAudio() {
     musicEnabled: musicVolume > 0,
     musicPlaying: musicTimer !== null,
     musicMasterGain: musicTargetGain(),
-    musicMelodyOutputPeak: musicTargetGain() * MUSIC_MELODY_PEAK
+    musicMelodyOutputPeak: musicTargetGain() * MUSIC_MELODY_PEAK,
+    lastSfxOutputPeak,
+    lastSfxKind,
+    sfxLimiterActive: sfxLimiter !== null
   });
 
   const startMusic = (context: AudioContext) => {

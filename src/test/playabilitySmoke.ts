@@ -56,6 +56,9 @@ interface DebugSnapshot {
     musicPlaying: boolean;
     musicMasterGain: number;
     musicMelodyOutputPeak: number;
+    lastSfxOutputPeak: number;
+    lastSfxKind: string | null;
+    sfxLimiterActive: boolean;
   };
   effects: {
     sparks: number;
@@ -254,6 +257,12 @@ try {
   assert(playing.audio.musicVolume === 1, `Expected music to launch at full volume, got ${playing.audio.musicVolume}.`);
   assert(playing.audio.musicPlaying, `Expected music to be playing after launch, got context ${playing.audio.contextState}.`);
   assert(playing.audio.musicMelodyOutputPeak >= 0.008, `Expected audible music output peak, got ${playing.audio.musicMelodyOutputPeak}.`);
+  await page.evaluate(() => window.__ricochetRushGame?.debugAudioIdentitySmokeState());
+  const audioIdentity = await snapshot(page);
+  assert(audioIdentity.audio.lastSfxKind === "volatilePowerup", `Expected audio identity smoke to end on volatile power-up, got ${audioIdentity.audio.lastSfxKind}.`);
+  assert(audioIdentity.audio.sfxLimiterActive, "Expected procedural SFX bus limiter to be active.");
+  assert(audioIdentity.audio.lastSfxOutputPeak > 0.01, `Expected procedural SFX output peak, got ${audioIdentity.audio.lastSfxOutputPeak}.`);
+  assert(audioIdentity.audio.lastSfxOutputPeak <= 0.16, `Expected procedural SFX to stay below clipping guard, got ${audioIdentity.audio.lastSfxOutputPeak}.`);
   assert(playing.balls.some((ball) => !ball.stuck && ball.vy < 0), "Expected launched ball moving upward.");
   assert(playing.balls.some((ball) => !ball.stuck && Math.abs(ball.vx) > 70), "Expected launched ball to avoid near-vertical loops.");
   assert(playing.paddleX > ready.paddleX, "Expected keyboard movement to move the paddle right.");

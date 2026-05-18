@@ -40,7 +40,7 @@ import {
   normalizeSettings
 } from "../../shared/saveState";
 import type { HudApi, HudPackItem } from "../ui/hud";
-import { createGameAudio, type GameSoundKind } from "./gameAudio";
+import { createGameAudio, type GameAudioPlayOptions, type GameSoundKind } from "./gameAudio";
 import { requestGeneratedLevel } from "./levelApi";
 
 interface Ball {
@@ -487,6 +487,7 @@ export class RicochetRushGame {
   private lastPaddleHit: PaddleHitDebug | null = null;
   private lastLoopCorrection: LoopCorrectionDebug | null = null;
   private nextFloatingTextId = 1;
+  private lastStreakToneAt = 0;
   private boardShakeTimer = 0;
   private boardShakeStrength = 0;
   private paddleFlashTimer = 0;
@@ -606,6 +607,15 @@ export class RicochetRushGame {
     this.emitComboFeedback(WIDTH / 2, 380, this.combo);
     this.emitPowerupCatchBurst({ x: 320, y: PADDLE_Y - 18, vy: 0, kind: "expandPaddle" }, "#7bf1a8");
     this.refreshHud();
+  }
+
+  debugAudioIdentitySmokeState() {
+    const sampleBrick: Brick = { x: 0, y: 0, width: BRICK_WIDTH, height: BRICK_HEIGHT, kind: "boss", hp: 2, maxHp: 4 };
+    this.audio.play("paddle", this.settings.sfxVolume, { intensity: 1.08, pitch: 1.05 });
+    this.audio.play("hardBrick", this.settings.sfxVolume, brickAudioOptions({ ...sampleBrick, kind: "hard", hp: 1, maxHp: 3 }, 2.4, false));
+    this.audio.play("streak", this.settings.sfxVolume, { pitch: 1.35, intensity: 0.94, streak: 3.2 });
+    this.audio.play("explosion", this.settings.sfxVolume, { intensity: 1.12, rumble: 0.7 });
+    this.audio.play("volatilePowerup", this.settings.sfxVolume, powerupAudioOptions("eightBall"));
   }
 
   private setupRenderer() {
@@ -1245,7 +1255,10 @@ export class RicochetRushGame {
     ball.vy = rebound.vy;
     this.lastPaddleHit = { ...rebound, hitZone: hit, paddleVelocityX: this.paddleVelocityX };
     ball.y = PADDLE_Y - 10 - ball.radius;
-    this.audio.play(Math.abs(hit) > 0.72 ? "paddleEdge" : "paddle", this.settings.sfxVolume);
+    this.audio.play(Math.abs(hit) > 0.72 ? "paddleEdge" : "paddle", this.settings.sfxVolume, {
+      intensity: 0.88 + Math.min(0.36, Math.abs(this.paddleVelocityX) / MAX_PADDLE_VELOCITY),
+      pitch: 0.94 + Math.abs(hit) * 0.16
+    });
     this.paddleFlashTimer = 0.16;
     this.shakeBoard(0.08, 1.6);
     this.combo = Math.max(1, this.combo - 0.15);
@@ -1301,10 +1314,11 @@ export class RicochetRushGame {
       this.emitImpactRing(brick.x + brick.width / 2, brick.y + brick.height / 2, COLORS.boss, "boss");
     }
     if (brick.hp > 0) {
-      this.audio.play(brick.kind === "hard" || brick.kind === "boss" ? "hardBrick" : "brickChip", this.settings.sfxVolume);
+      this.audio.play(brick.kind === "hard" || brick.kind === "boss" ? "hardBrick" : "brickChip", this.settings.sfxVolume, brickAudioOptions(brick, this.combo, false));
+      if (brick.kind === "boss") this.audio.play("bossDamage", this.settings.sfxVolume, { intensity: 1.06, rumble: 0.46 });
       return;
     }
-    this.audio.play(soundForBrickDestroy(brick.kind), this.settings.sfxVolume);
+    this.audio.play(soundForBrickDestroy(brick.kind), this.settings.sfxVolume, brickAudioOptions(brick, this.combo, true));
     this.bricks = this.bricks.filter((candidate) => candidate !== brick);
     const points = Math.round(40 * this.combo * (brick.kind === "boss" ? 5 : brick.maxHp));
     this.score += points;
@@ -1317,6 +1331,7 @@ export class RicochetRushGame {
     if (this.combo >= 2) {
       this.addFloatingText(centerX, centerY - 28, `Streak x${this.combo.toFixed(1)}`, "combo");
       this.emitComboFeedback(centerX, centerY - 12, this.combo);
+      this.playStreakTone(this.combo);
     }
     this.shakeBoard(brick.kind === "boss" ? 0.2 : 0.1, brick.kind === "boss" ? 3.6 : 1.35);
     this.resolveBrickPrize(brick);
@@ -1346,7 +1361,7 @@ export class RicochetRushGame {
     this.emitSparks(centerX, centerY, "#ff5c5c", 58, { minSpeed: 120, maxSpeed: 360, minSize: 4.8, maxSize: 8.6, ring: true, gravity: 150 });
     this.emitImpactRing(centerX, centerY, "#ff5c5c", "blast");
     this.emitScreenFlash("#ff5c5c", 0.2);
-    this.audio.play("explosion", this.settings.sfxVolume);
+    this.audio.play("explosion", this.settings.sfxVolume, { intensity: 1.12, rumble: 0.7 });
     this.shakeBoard(0.24, 5.2);
     const blast = this.bricks.filter(
       (brick) => Math.abs(brick.x - source.x) < BRICK_WIDTH * 1.8 * this.explosionScale && Math.abs(brick.y - source.y) < BRICK_HEIGHT * 2 * this.explosionScale
@@ -1373,7 +1388,7 @@ export class RicochetRushGame {
       if (caught) {
         const visual = powerupVisualFor(powerup.kind);
         this.emitPowerupCatchBurst(powerup, visual.spark);
-        this.audio.play(soundForPowerup(powerup.kind), this.settings.sfxVolume);
+        this.audio.play(soundForPowerup(powerup.kind), this.settings.sfxVolume, powerupAudioOptions(powerup.kind));
         this.paddleFlashTimer = 0.24;
         this.addFloatingText(powerup.x, PADDLE_Y - 38, pickupLabelFor(powerup.kind), visual.floatingKind);
         this.applyPowerup(powerup.kind);
@@ -1428,6 +1443,18 @@ export class RicochetRushGame {
     });
     this.emitImpactRing(x, y, "#7ef1ff", "combo");
     if (combo >= 3) this.emitScreenFlash("#7ef1ff", 0.12 + intensity * 0.08);
+  }
+
+  private playStreakTone(combo: number) {
+    const now = performance.now();
+    if (now - this.lastStreakToneAt < 135) return;
+    this.lastStreakToneAt = now;
+    const normalizedCombo = clamp((combo - 2) / 6, 0, 1);
+    this.audio.play("streak", this.settings.sfxVolume, {
+      pitch: 1 + normalizedCombo * 0.72,
+      intensity: 0.74 + normalizedCombo * 0.38,
+      streak: combo
+    });
   }
 
   private emitPowerupCatchBurst(powerup: Powerup, color: string) {
@@ -2515,11 +2542,44 @@ function soundForBrickDestroy(kind: BrickKind): GameSoundKind {
   return "specialBrick";
 }
 
+function brickAudioOptions(brick: Brick, combo: number, destroyed: boolean): GameAudioPlayOptions {
+  const materialPitch: Record<BrickKind, number> = {
+    basic: 1,
+    hard: 0.72,
+    bomb: 0.82,
+    prize: 1.24,
+    penalty: 0.86,
+    laser: 1.36,
+    grab: 1.18,
+    fire: 0.98,
+    thru: 1.3,
+    split: 1.2,
+    wide: 1.12,
+    slow: 0.92,
+    boss: 0.58
+  };
+  const hpRatio = brick.maxHp > 0 ? clamp(brick.hp / brick.maxHp, 0, 1) : 0;
+  const comboLift = clamp((combo - 1) * 0.035, 0, 0.24);
+  return {
+    pitch: materialPitch[brick.kind] + comboLift + (destroyed ? 0.08 : 0),
+    intensity: clamp(0.82 + (1 - hpRatio) * 0.24 + (destroyed ? 0.18 : 0) + comboLift * 0.5, 0.72, 1.34),
+    rumble: brick.kind === "boss" ? 0.58 : brick.kind === "bomb" && destroyed ? 0.46 : brick.kind === "hard" ? 0.18 : 0
+  };
+}
+
 function soundForPowerup(kind: PowerupKind): GameSoundKind {
   if (kind === "extraLife") return "extraLife";
   if (kind === "levelWarp") return "levelWarp";
+  if (VOLATILE_POWERUPS.has(kind)) return "volatilePowerup";
   if (NEGATIVE_POWERUPS.includes(kind)) return "badPowerup";
   return "goodPowerup";
+}
+
+function powerupAudioOptions(kind: PowerupKind): GameAudioPlayOptions {
+  const tone = powerupToneFor(kind);
+  if (tone === "volatile") return { pitch: 0.96, intensity: 1.12, rumble: 0.44 };
+  if (tone === "hazard") return { pitch: 0.82, intensity: 1.04, rumble: 0.28 };
+  return { pitch: kind === "extraLife" ? 1.16 : 1.04, intensity: 0.94 };
 }
 
 function circleRect(ball: Ball, brick: Brick): boolean {
