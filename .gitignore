@@ -5,4 +5,5 @@
 .pi/cache/
 dist/
 docs/media/.capture-tmp/
+dogfood-output/
 node_modules/
