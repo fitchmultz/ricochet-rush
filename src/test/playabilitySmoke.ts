@@ -94,6 +94,11 @@ const browser = await chromium.launch({ headless: true });
 
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
+  const browserFailures: string[] = [];
+  page.on("pageerror", (error) => browserFailures.push(`pageerror: ${error.message}`));
+  page.on("console", (message) => {
+    if (message.type() === "error") browserFailures.push(`console: ${message.text()}`);
+  });
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.evaluate((save) => {
     localStorage.clear();
@@ -519,6 +524,7 @@ try {
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
   assert((await page.locator(".overlay-card").innerText()).includes("Paused"), "Expected touch pause to open the pause overlay.");
   assert(await page.locator(".touch-controls").isHidden(), "Expected touch controls to hide while an overlay is visible.");
+  assert(browserFailures.length === 0, `Expected extended smoke flow without console/page errors: ${browserFailures.join("; ")}`);
 } finally {
   await browser.close();
   await new Promise<void>((resolveClose, rejectClose) => {

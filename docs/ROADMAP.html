@@ -689,7 +689,17 @@ progress.</li>
 Gates And Live SDK Probe</h3>
 <p>Goal: keep confidence high while the game becomes more polished and
 stateful.</p>
-<p>Status: planned and ongoing.</p>
+<p>Status: complete as of 2026-05-18 for the roadmap batch; keep ongoing
+as a maintenance gate.</p>
+<p>Delivery notes: <code>npm run sdk:probe</code> now skips cleanly without
+<code>CURSOR_API_KEY</code> and, with credentials, runs one server-side Cursor
+SDK generation, verifies trace evidence, validates board dimensions and
+compact preview rows, and confirms playable brick counts. The smoke gate
+now records browser console/page errors across the extended run covering
+level clear, game over, summaries, Saved Designs replay, daily boards,
+import/export, score-card rendering, cosmetics, mobile drag/touch, and
+save clearing. <code>npm run ci</code> stays deterministic without SDK
+credentials.</p>
 <p>Constraints:</p>
 <ul>
 <li>The live SDK probe must use the current Cursor SDK path and stay

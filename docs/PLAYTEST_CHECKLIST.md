@@ -16,6 +16,14 @@ For a focused automated visual/playability pass, run:
 npm run ux
 ```
 
+Optional live Cursor SDK probe, only when credentials are available:
+
+```sh
+npm run sdk:probe
+```
+
+The probe skips cleanly without `CURSOR_API_KEY`. With a key, it runs one server-side SDK generation, verifies trace evidence, validates the compact grid/board shape, and confirms the board is playable.
+
 The UX audit captures desktop and mobile screenshots in `dist/playtest-report/screenshots/` and writes `dist/playtest-report/report.md` plus `report.json`. Treat failures as blockers. Treat warnings as the next polish queue for Codex before asking for manual visual review.
 
 ## Desktop
@@ -26,6 +34,8 @@ The UX audit captures desktop and mobile screenshots in `dist/playtest-report/sc
 - Open Boards, choose Starter, and confirm the drawer closes on selection.
 - Open Designer, type a short board prompt with spaces, generate a board, and keep it.
 - Confirm Saved Designs unlocks after keeping a generated board.
+- Open Share, export board JSON, reject malformed import JSON, and render a local score-card PNG.
+- Open Today's Board and confirm it uses local-only daily language.
 - Open Options, toggle high contrast, reduced motion, and particles, then adjust SFX and music volume.
 - Confirm autosave restores after reload, then clear the save from Options and confirm cancellation preserves it.
 - Inspect Log and confirm raw generation trace is behind that panel, not in the default play view.
@@ -36,7 +46,7 @@ The UX audit captures desktop and mobile screenshots in `dist/playtest-report/sc
 - Confirm no horizontal scroll.
 - Confirm the board, Play Console, and tool drawer stack without overlapping text or controls.
 - Open Designer, Boards, Options, and Log once each.
-- Launch, steer left/right, and pause with the on-screen touch controls.
+- Drag over the arena to aim without page scroll, then launch, steer left/right, and pause with the on-screen touch controls.
 
 ## Visual Checks
 
