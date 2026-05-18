@@ -151,7 +151,7 @@ export function buildPrompt(request: LevelRequest): string {
   return `You are the level designer for Ricochet Rush, a fast 3D brick-breaker with adaptive arcade boards.
 
 Fast contract:
-- You are composer-2 in fast mode.
+- You are composer-2.5 in fast mode.
 - Return one compact JSON object only. No markdown, comments, prose, tool calls, shell commands, file inspection, or helper code.
 - Keep the full response under 1,000 characters.
 - Do not calculate exact brick counts. Do not verify with code. Pick a strong playable approximation and return immediately.

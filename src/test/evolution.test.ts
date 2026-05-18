@@ -189,12 +189,12 @@ async function withApiServer<T>(run: (baseUrl: string) => Promise<T>): Promise<T
 }
 
 describe("Cursor SDK level generation contract", () => {
-  it("pins composer-2 fast mode for level requests", () => {
+  it("pins composer-2.5 fast mode for level requests", () => {
     expect(CURSOR_MODEL).toEqual({
-      id: "composer-2",
+      id: "composer-2.5",
       params: [{ id: "mode", value: "fast" }]
     });
-    expect(buildPrompt(request)).toContain("composer-2 in fast mode");
+    expect(buildPrompt(request)).toContain("composer-2.5 in fast mode");
     expect(buildPrompt(request)).toContain("Ricochet Rush");
     expect(buildPrompt(request)).toContain(`${MIN_BRICKS} bricks and at most ${MAX_BRICKS} bricks`);
     expect(buildPrompt(request)).toContain("Do not calculate exact brick counts");
@@ -677,7 +677,7 @@ describe("Cursor SDK level generation contract", () => {
       expect(response.trace).toBeTruthy();
       expect(response.trace?.request.level).toBe(11);
       expect(response.trace?.requestJson).toContain("\"level\":11");
-      expect(response.trace?.prompt).toContain("composer-2");
+      expect(response.trace?.prompt).toContain("composer-2.5");
       expect(response.trace?.parseStatus).toBe("worker-failed");
       expect(response.trace?.parseError).toBe("Cursor SDK authentication is unavailable.");
       expect(response.trace?.rawOutput).toBeTypeOf("string");

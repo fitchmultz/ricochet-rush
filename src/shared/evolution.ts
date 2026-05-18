@@ -1,5 +1,5 @@
 export const CURSOR_MODEL = {
-  id: "composer-2",
+  id: "composer-2.5",
   params: [{ id: "mode", value: "fast" }]
 };
 
