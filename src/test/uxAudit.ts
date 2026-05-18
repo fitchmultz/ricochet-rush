@@ -162,9 +162,10 @@ async function runDesktopAudit(page: Page) {
   });
   const generated = await snapshot(page);
   recordCheck(generated.designerIntent.brief === "radial gold maze with side lanes", "designer prompt applies", generated.designerIntent.brief);
-  recordCheck(generated.generationSummary?.title === "Local backup board", "fallback generation is explained", generated.generationSummary?.title ?? "missing summary");
+  recordCheck(generated.generationSummary?.title === "Local backup board", "fallback generation is explained in tools", generated.generationSummary?.title ?? "missing summary");
   recordCheck(await page.locator("[data-generation-summary]").isVisible(), "full generation summary is visible", "Board Designer exposes the result summary.");
-  recordCheck(await page.locator("[data-compact-generation-summary]").isVisible(), "compact generation summary is visible", "Play Console exposes generated-board status.");
+  recordCheck(await page.locator("[data-compact-generation-summary]").isHidden(), "generation diagnostics stay out of play rail", "Play Console remains player-facing after generation.");
+  recordCheck(!(await page.locator(".console-status").innerText()).toLowerCase().includes("local backup"), "play rail hides fallback diagnostics", "Fallback details stay in tools/log surfaces.");
   recordCheck(await page.locator('[data-action="save-board"]').isEnabled(), "generated board can be kept", "Keep board is enabled after generation.");
   await assertCanvasClarity(page, "desktop generated board");
   await capture(page, "desktop-generated");
@@ -365,6 +366,9 @@ async function assertCanvasClarity(page: Page, label: string) {
 
   recordCheck(metrics.canvasPixels > 0, `${label}: canvas has backing pixels`, `${metrics.width}x${metrics.height}`);
   recordCheck(metrics.displayWidth >= 320 && metrics.displayHeight >= 210, `${label}: canvas is large enough to play`, `${Math.round(metrics.displayWidth)}x${Math.round(metrics.displayHeight)} displayed`);
+  if (label.startsWith("mobile")) {
+    recordCheck(metrics.displayWidth >= 384 && metrics.displayHeight >= 255, `${label}: compact HUD gives the canvas more room`, `${Math.round(metrics.displayWidth)}x${Math.round(metrics.displayHeight)} displayed`);
+  }
   recordCheck(metrics.litPixels > 900, `${label}: canvas is not visually blank`, `${metrics.litPixels} lit sample pixels`);
   recordCheck(metrics.colorBuckets >= 16, `${label}: canvas has rich arcade color`, `${metrics.colorBuckets} color buckets`);
   recordCheck(metrics.accentPixels > 140, `${label}: bright arcade accents are visible`, `${metrics.accentPixels} accent sample pixels`);

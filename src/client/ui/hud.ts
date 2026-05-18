@@ -84,19 +84,27 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       <section class="stage">
         <div id="game" class="game"></div>
         <div class="hud">
-          <div class="hud-primary">
+          <div class="hud-primary" aria-label="Run status">
             <div class="meters">
-              <span data-score>0</span>
-              <span data-best>best 0</span>
-              <span data-lives>3 lives</span>
-              <span data-level>level 1</span>
-              <span data-bricks>0 bricks</span>
-              <span data-combo>x1.0</span>
+              <div class="meter-card meter-score">
+                <span>Score</span>
+                <strong data-score>0</strong>
+                <em data-best>Best 0</em>
+              </div>
+              <div class="meter-card meter-lives">
+                <span>Lives</span>
+                <strong data-lives aria-label="3 lives">●●●</strong>
+              </div>
+              <div class="meter-card meter-board">
+                <span data-level>Level 1</span>
+                <strong data-bricks>0 bricks</strong>
+              </div>
             </div>
             <div data-active-powers class="active-powers" hidden></div>
           </div>
           <div data-status class="status"></div>
         </div>
+        <div data-combo class="combo-badge" hidden></div>
         <div class="touch-controls" aria-label="Touch controls">
           <button type="button" data-touch-action="left" aria-label="Move paddle left">←</button>
           <button type="button" data-touch-action="primary" class="touch-primary">Launch</button>
@@ -141,9 +149,9 @@ export function createHud(root: HTMLDivElement | null): HudApi {
           <button type="button" data-tool-panel="options">Options</button>
           <button type="button" data-tool-panel="diagnostics">Log</button>
         </nav>
-        <div class="console-status" aria-label="Latest event">
-          <strong>Latest</strong>
-          <span data-console-event>Break the wall. Catch powerups. Clear the board.</span>
+        <div class="console-status" aria-label="Run action">
+          <strong>Run</strong>
+          <span data-console-event>Aim for the gates. Catch green. Dodge red.</span>
         </div>
       </aside>
       <div class="tool-backdrop" data-tool-backdrop hidden></div>
@@ -403,21 +411,24 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       actions = nextActions;
     },
     update(state) {
-      score.textContent = `${state.score} pts`;
-      best.textContent = `best ${state.bestScore}`;
-      lives.textContent = `${state.lives} lives`;
-      level.textContent = `level ${state.level}`;
+      const playerStatus = playerStatusFor(state);
+      score.textContent = String(state.score);
+      best.textContent = `Best ${state.bestScore}`;
+      lives.textContent = renderLives(state.lives);
+      lives.setAttribute("aria-label", `${state.lives} ${state.lives === 1 ? "life" : "lives"}`);
+      level.textContent = `Level ${state.level}`;
       bricks.textContent = `${state.bricks} bricks`;
-      combo.textContent = `x${state.combo.toFixed(1)}`;
-      status.textContent = state.pending ? "Designing board..." : state.status;
+      combo.textContent = `Streak x${state.combo.toFixed(1)}`;
+      combo.hidden = state.combo < 1.2;
+      status.textContent = playerStatus;
       boardMeta.textContent = renderBoardMeta(state);
       levelName.textContent = state.levelName;
       hint.textContent = state.hint;
-      consoleEvent.textContent = state.pending ? "Designing the next board." : state.events[0] ?? state.status;
-      newBoard.textContent = state.pending ? `Generating Level ${state.level}` : state.boardSource === "generated" ? "Design another board" : "Design board";
+      consoleEvent.textContent = playerStatus;
+      newBoard.textContent = state.pending ? "Shaping wall..." : state.boardSource === "generated" ? "Design another" : "Design board";
       newBoard.disabled = state.pending;
       designerPending.hidden = !state.pending;
-      designerPending.textContent = `Generating Level ${state.level}. The game is paused while Cursor SDK designs and validates the wall.`;
+      designerPending.textContent = `Shaping Level ${state.level}. The game is paused while the Designer builds a playable wall.`;
       gameActions.hidden = state.boardSource !== "generated";
       saveBoard.hidden = state.boardSource !== "generated";
       saveBoard.disabled = state.pending || !state.canSaveBoard;
@@ -513,36 +524,49 @@ function formatVolume(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
+function renderLives(lives: number): string {
+  if (lives <= 0) return "0";
+  const dots = "●".repeat(Math.min(lives, 5));
+  return lives > 5 ? `${dots}+${lives - 5}` : dots;
+}
+
+function playerStatusFor(state: HudState): string {
+  if (state.pending) return "Designer is shaping a playable wall.";
+  const playerEvent = state.events.find((event) => !isTechnicalEvent(event));
+  const status = !isTechnicalEvent(state.status) ? state.status : "";
+  return playerEvent || status || state.hint || "Aim the rebound. Keep the streak alive.";
+}
+
+function isTechnicalEvent(event: string): boolean {
+  const normalized = event.toLowerCase();
+  return (
+    normalized.includes("generated power-up atlas") ||
+    normalized.includes("power-up icons are ready") ||
+    normalized.includes("power-up icons switched") ||
+    normalized.includes("power-up art failed") ||
+    normalized.includes("cursor sdk") ||
+    normalized.includes("api failure") ||
+    normalized.includes("parse") ||
+    normalized.includes("trace") ||
+    normalized.includes("fallback") ||
+    normalized.includes("local backup") ||
+    normalized.includes("checkpoint saved") ||
+    normalized.includes("saved board rebuilt") ||
+    normalized.startsWith("generated ")
+  );
+}
+
 function renderBoardMeta(state: HudState): string {
-  if (state.boardSource === "generated") return "Generated board";
+  if (state.boardSource === "generated") return "Custom board";
   const activePack = state.packs.find((pack) => pack.active);
   if (!activePack) return "Curated board";
   return `${activePack.name} - ${activePack.progressLabel}`;
 }
 
-function renderCompactSummary(element: HTMLElement, state: HudState) {
-  const summary = state.designer.generationSummary;
-  if (state.boardSource !== "generated" || !summary) {
-    element.hidden = true;
-    element.classList.remove("is-cursor-sdk", "is-fallback");
-    element.innerHTML = "";
-    return;
-  }
-
-  element.hidden = false;
-  element.classList.toggle("is-cursor-sdk", summary.source === "cursor-sdk");
-  element.classList.toggle("is-fallback", summary.source === "fallback");
-  const chips = summary.chips
-    .slice(0, 3)
-    .map((chip) => `<span>${escapeHtml(chip)}</span>`)
-    .join("");
-  const statusLabel = summary.source === "cursor-sdk" ? "New board ready" : "Local backup used";
-  element.innerHTML = `
-    <span>${statusLabel}</span>
-    <strong>${escapeHtml(summary.title)}</strong>
-    <div>${chips}</div>
-    ${summary.warning ? `<em>${escapeHtml(summary.warning)}</em>` : ""}
-  `;
+function renderCompactSummary(element: HTMLElement, _state: HudState) {
+  element.hidden = true;
+  element.classList.remove("is-cursor-sdk", "is-fallback");
+  element.innerHTML = "";
 }
 
 function renderPower(power: HudState["activePowers"][number]): string {

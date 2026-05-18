@@ -1,33 +1,24 @@
 # Review
 
 ## Verdict
-Acceptable as-is. I found no blocker, high, medium, or low material issues in the RQ-0001 diff.
+The implementation is acceptable as-is for RQ-0002. I found no blocker, high, medium, or low severity issues in the inspected diff.
 
 ## Findings
-
-### Blocker
-- None.
-
-### High
-- None.
-
-### Medium
-- None.
-
-### Low
-- None.
+- **Blocker:** None.
+- **High:** None.
+- **Medium:** None.
+- **Low:** None.
 
 ## Verified
-- Read CueLoop task RQ-0001 context and matched the diff to the stated plan.
-- Inspected the working tree diff for `src/client/game/RicochetRushGame.ts`, `src/client/styles.css`, `src/test/uxAudit.ts`, and `docs/ROADMAP.html`.
-- Confirmed brick base colors/semantics remain in `COLORS`, while added visual profiles supply rim, shadow, material, impact, and depth differences.
-- Confirmed reduced-motion gates new drift, wobble, punch, ball rotation, paddle sweep, and CSS motion-heavy treatment.
-- Visually inspected `desktop-ready.png`, `mobile-ready.png`, `desktop-playing.png`, and `desktop-options.png`; the screenshots show stronger arcade polish, visible grid/starfield atmosphere, clearer brick depth, paddle shine, and readable ball glow/trail.
-- Reviewed `dist/playtest-report/report.md`: 95 passed, 0 warnings, 0 failures. Also ran `git diff --check` on the reviewed files with no issues.
+- Read CueLoop task RQ-0002 and compared the diff against its plan and acceptance criteria.
+- Checked the requested files: `docs/ROADMAP.html`, `src/client/game/RicochetRushGame.ts`, `src/client/styles.css`, `src/client/ui/hud.ts`, `src/test/playabilitySmoke.ts`, and `src/test/uxAudit.ts`.
+- Verified HUD grouping, combo hidden-until-active behavior, player-facing right rail copy, technical-event filtering from the play rail, generation summary/trace remaining in tools/log surfaces, live region update, and preserved focus handling.
+- Visually inspected `desktop-ready.png`, `mobile-ready.png`, and `desktop-generated.png`; the mobile HUD is a compact single bar with a larger canvas and no visible horizontal overflow.
+- Ran `git diff --check` on the reviewed files; it produced no output.
 
 ## Risks
-- I did not rerun the full `npm run ci`; I relied on the provided CI result and inspected the generated UX report artifacts.
-- Reduced-motion was verified from code paths and the options screenshot, not from a video capture of live motion.
+- I did not rerun `npm run ci`; I relied on the provided passed validation report.
+- The transient loading overlay still uses “Generating Level” copy, but it is not in the default play rail and did not violate the reviewed acceptance criteria.
 
 ## Recommended Next Step
-- Proceed with the RQ-0001 handoff/merge path; no review-driven code changes are needed.
+- Mark RQ-0002 ready/complete and proceed to the next task.

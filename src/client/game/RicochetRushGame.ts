@@ -682,10 +682,10 @@ export class RicochetRushGame {
           map.needsUpdate = true;
           this.powerupMaterials.set(kind, new THREE.SpriteMaterial({ map, color: visual.tint, transparent: true }));
         }
-        this.pushEvent("Generated power-up atlas loaded.");
+        this.pushEvent("Power-up icons are ready.");
       },
       undefined,
-      () => this.pushEvent("Power-up art failed to load; fallback gems are active.")
+      () => this.pushEvent("Power-up icons switched to simple gems.")
     );
   }
 
@@ -1571,19 +1571,15 @@ export class RicochetRushGame {
     this.loadingLevel = true;
     this.pushEvent(event);
     this.showLoadingOverlay(`Generating Level ${this.level}`, "The game is paused while a playable wall is prepared.");
-    this.refreshHud("Generating next level...");
+    this.refreshHud("Designer is shaping a playable wall.");
     try {
       const result = await requestGeneratedLevel(this.levelRequest());
-      const publicWarning = result.summary?.warning ?? result.warning;
-      const sourceEvent =
-        result.source === "cursor-sdk"
-          ? `Generated ${result.level.name}.`
-          : `Local backup generated ${result.level.name}${publicWarning ? ` (${publicWarning})` : ""}.`;
+      const sourceEvent = `${result.level.name} is ready.`;
       this.loadLevel(result.level, sourceEvent, result.trace, result.summary, { source: "generated", packId: null, boardIndex: 0 });
     } catch (error) {
       const reason = error instanceof Error ? error.message : "unknown error";
       const fallback = fallbackLevel(this.levelRequest());
-      this.loadLevel(fallback, "Local backup generated a level after API failure.", undefined, this.localGenerationSummary(fallback, reason), {
+      this.loadLevel(fallback, `${fallback.name} is ready.`, undefined, this.localGenerationSummary(fallback, reason), {
         source: "generated",
         packId: null,
         boardIndex: 0

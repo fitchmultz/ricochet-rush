@@ -173,6 +173,9 @@ try {
   assert(repairedReady.settings.musicVolume === 1, `Expected missing settings to default music volume to 1, got ${repairedReady.settings.musicVolume}.`);
   assert((await page.locator('link[rel="icon"][href="/assets/ricochet-rush-icon.svg"]').count()) === 1, "Expected branded favicon asset.");
   assert(await page.locator(".play-console").count() === 1, "Expected a compact play console.");
+  assert((await page.locator(".meter-card").count()) === 3, "Expected grouped score, lives, and board HUD cards.");
+  assert(await page.locator("[data-combo]").isHidden(), "Expected combo streak badge to stay hidden until a live streak starts.");
+  assert(!(await page.locator(".console-status").innerText()).includes("Generated power-up atlas"), "Expected technical atlas messages to stay out of the play rail.");
   assert((await page.locator(".brand-mark").count()) === 1, "Expected the original brand mark in the Play Console.");
   assert(await page.locator("[data-powerup-primer]").isVisible(), "Expected first-run power-up primer to be visible.");
   const primerText = await page.locator("[data-powerup-primer]").innerText();
@@ -214,12 +217,9 @@ try {
   assert(designed.designerIntent.brief === "heart shape, only bomb bricks", `Expected designer brief to apply, got ${designed.designerIntent.brief}.`);
   assert(designed.boardTheme.wallGlow === "#7ef1ff", `Expected generated board theme, got ${designed.boardTheme.wallGlow}.`);
   assert(designed.generationSummary?.title === "Local backup board", "Expected public generation summary for forced fallback.");
-  assert(await page.locator("[data-generation-summary]").isVisible(), "Expected visible public generation summary.");
-  assert(await page.locator("[data-compact-generation-summary]").isVisible(), "Expected compact generated-board summary in the play console.");
-  const compactSummaryText = await page.locator("[data-compact-generation-summary]").innerText();
-  assert(compactSummaryText.toLowerCase().includes("local backup used"), "Expected compact summary to foreground fallback status.");
-  assert((await page.locator("[data-compact-generation-summary].is-fallback em").innerText()).length > 0, "Expected compact summary to surface fallback warning text.");
-  assert(await page.locator("[data-compact-generation-summary].is-fallback").count() === 1, "Expected compact summary to expose fallback source styling.");
+  assert(await page.locator("[data-generation-summary]").isVisible(), "Expected visible public generation summary in the Designer panel.");
+  assert(await page.locator("[data-compact-generation-summary]").isHidden(), "Expected generation diagnostics to stay out of the default play rail.");
+  assert(!(await page.locator(".console-status").innerText()).toLowerCase().includes("local backup"), "Expected fallback wording to stay out of the default play rail.");
   assert(await page.locator('[data-action="save-board"]').isEnabled(), "Expected generated boards to be keepable.");
   await page.locator('[data-action="save-board"]').click();
   assert(await hasLocalStorageKey(page, "ricochet-rush-saved-boards"), "Expected kept generated board to persist in Saved Designs.");

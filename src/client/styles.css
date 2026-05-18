@@ -166,7 +166,8 @@ body {
 .shell.is-high-contrast .stage,
 .shell.is-high-contrast .panel,
 .shell.is-high-contrast .tool-panel,
-.shell.is-high-contrast .meters span,
+.shell.is-high-contrast .meter-card,
+.shell.is-high-contrast .combo-badge,
 .shell.is-high-contrast .active-powers,
 .shell.is-high-contrast .status,
 .shell.is-high-contrast .hint,
@@ -373,14 +374,16 @@ body {
 }
 
 .meters {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(118px, auto) minmax(78px, auto) minmax(120px, auto);
   gap: 8px;
+  align-items: stretch;
 }
 
-.meters span,
+.meter-card,
 .status,
-.hint {
+.hint,
+.combo-badge {
   min-height: 32px;
   padding: 7px 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -393,10 +396,63 @@ body {
   backdrop-filter: blur(8px);
 }
 
+.meter-card {
+  display: grid;
+  gap: 2px;
+  min-height: 46px;
+}
+
+.meter-card span {
+  color: #7ef1ff;
+  font-size: 0.62rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.meter-card strong {
+  color: #ffffff;
+  font-size: 0.96rem;
+  font-weight: 900;
+}
+
+.meter-score em {
+  color: #aab8b5;
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.meter-lives strong {
+  color: #ffe066;
+  letter-spacing: 0.12em;
+}
+
 .status {
   max-width: min(42vw, 390px);
   color: #ffe066;
   text-align: right;
+}
+
+.combo-badge {
+  position: absolute;
+  top: 66px;
+  left: 50%;
+  z-index: 3;
+  min-height: 0;
+  transform: translateX(-50%);
+  border-color: rgba(255, 224, 102, 0.42);
+  background: linear-gradient(135deg, rgba(255, 224, 102, 0.2), rgba(126, 241, 255, 0.12));
+  color: #ffe066;
+  font-size: 0.9rem;
+  font-weight: 950;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  text-transform: uppercase;
+}
+
+.combo-badge[hidden] {
+  display: none;
 }
 
 .active-powers {
@@ -1475,6 +1531,10 @@ body {
     flex-direction: column;
   }
 
+  .meters {
+    grid-template-columns: minmax(108px, 1.15fr) minmax(72px, 0.65fr) minmax(112px, 1fr);
+  }
+
   .touch-controls {
     display: grid;
     bottom: 68px;
@@ -1539,7 +1599,8 @@ body {
 
 @media (max-width: 520px) {
   .shell {
-    padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+    gap: 8px;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
 
   .stage {
@@ -1559,24 +1620,51 @@ body {
   }
 
   .hud {
-    left: 8px;
-    right: 8px;
+    top: 6px;
+    left: 6px;
+    right: 6px;
   }
 
-  .meters span,
-  .status,
-  .hint {
-    font-size: 0.76rem;
+  .meters {
+    width: 100%;
+    grid-template-columns: minmax(0, 1.1fr) minmax(58px, 0.62fr) minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .meter-card {
+    min-height: 32px;
+    padding: 4px 6px;
+    border-radius: 6px;
+  }
+
+  .meter-card span {
+    font-size: 0.52rem;
+  }
+
+  .meter-card strong {
+    font-size: 0.72rem;
+  }
+
+  .meter-score em {
+    font-size: 0.56rem;
   }
 
   .status {
-    max-width: none;
-    text-align: left;
+    display: none;
+  }
+
+  .combo-badge {
+    top: 48px;
+    padding: 5px 8px;
+    font-size: 0.7rem;
   }
 
   .hint {
+    left: 8px;
+    right: 8px;
     padding: 4px 8px;
-    font-size: 0.72rem;
+    font-size: 0.68rem;
+    text-align: center;
   }
 }
 
