@@ -18,11 +18,16 @@ import {
 } from "../shared/evolution";
 import {
   BUILT_IN_PACKS,
+  DAILY_PACK_ID,
   SAVED_DESIGNS_PACK_ID,
+  localDateKey,
   markPackBoardCleared,
   materializeAuthoredBoard,
+  materializeDailyBoard,
+  normalizeDailyProgress,
   normalizePackProgress,
   normalizeSavedBoards,
+  boardCountForPack,
   previewRowsFromLevel
 } from "../shared/boardPacks";
 import { DEFAULT_SETTINGS, SAVE_VERSION, normalizeSaveState, normalizeSettings } from "../shared/saveState";
@@ -835,8 +840,9 @@ describe("Cursor SDK level generation contract", () => {
       level: 2,
       clearedLevels: 1,
       boardSource: "pack",
-      packId: "classic",
-      packBoardIndex: 1,
+      packId: "daily",
+      packBoardIndex: 0,
+      dailyDateKey: "2026-05-18",
       score: 900,
       bestScore: 900,
       lives: 3,
@@ -852,8 +858,9 @@ describe("Cursor SDK level generation contract", () => {
     });
 
     expect(save?.boardSource).toBe("pack");
-    expect(save?.packId).toBe("classic");
-    expect(save?.packBoardIndex).toBe(1);
+    expect(save?.packId).toBe("daily");
+    expect(save?.packBoardIndex).toBe(0);
+    expect(save?.dailyDateKey).toBe("2026-05-18");
   });
 });
 
@@ -889,6 +896,28 @@ describe("Ricochet Rush curated board packs", () => {
     expect(new Set(level?.rows.flat().filter((brick): brick is NonNullable<typeof brick> => brick !== null).map((brick) => brick.kind))).toEqual(
       new Set(["basic", "wide", "split", "prize", "hard"])
     );
+  });
+
+  it("materializes the same daily board for a local date key", () => {
+    const first = materializeDailyBoard("2026-05-18");
+    const second = materializeDailyBoard("2026-05-18");
+    const other = materializeDailyBoard("2026-05-19");
+
+    expect(localDateKey(new Date(2026, 4, 18))).toBe("2026-05-18");
+    expect(first.name).toBe("Today's Board 2026-05-18");
+    expect(previewRowsFromLevel(first)).toEqual(previewRowsFromLevel(second));
+    expect(previewRowsFromLevel(first)).not.toEqual(previewRowsFromLevel(other));
+    expect(boardCountForPack(DAILY_PACK_ID, 0)).toBe(1);
+  });
+
+  it("normalizes local daily progress by date", () => {
+    const progress = normalizeDailyProgress({
+      "2026-05-18": { bestScore: 1200, completed: true },
+      bad: { bestScore: 999, completed: true }
+    });
+
+    expect(progress["2026-05-18"]).toEqual({ bestScore: 1200, completed: true });
+    expect(progress.bad).toBeUndefined();
   });
 
   it("unlocks the next built-in pack after the previous pack is cleared", () => {

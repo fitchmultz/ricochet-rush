@@ -52,6 +52,7 @@ export interface GameSave {
   boardSource: "pack" | "generated";
   packId: string | null;
   packBoardIndex: number;
+  dailyDateKey: string | null;
   score: number;
   bestScore: number;
   lives: number;
@@ -125,6 +126,7 @@ export function normalizeSaveState(input: unknown): GameSave | null {
     boardSource,
     packId: boardSource === "pack" && typeof input.packId === "string" && input.packId.trim().length > 0 ? input.packId.trim().slice(0, 80) : null,
     packBoardIndex: boardSource === "pack" ? nonNegativeInteger(input.packBoardIndex) ?? 0 : 0,
+    dailyDateKey: typeof input.dailyDateKey === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input.dailyDateKey) ? input.dailyDateKey : null,
     score,
     bestScore,
     lives,

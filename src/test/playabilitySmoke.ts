@@ -23,6 +23,8 @@ interface DebugSnapshot {
   currentPackId: string | null;
   packBoardIndex: number;
   runStats: Array<{ label: string; value: string; tone?: "reward" | "neutral" | "warning" }>;
+  todayKey: string;
+  activeDailyKey: string | null;
   boardTheme: {
     scene: string;
     floor: string;
@@ -205,6 +207,23 @@ try {
   assert(await page.locator("[data-tool-surface]").isVisible(), "Expected Board Select panel to open.");
   assert((await page.locator("[data-tool-title]").innerText()) === "Board Select", "Expected Board Select title.");
   assert(await page.locator('[data-pack-id="starter"].is-active').count() === 1, "Expected Starter pack card to be active.");
+  assert((await page.locator('[data-pack-id="daily"]').innerText()).includes("Local-only daily challenge"), "Expected Today's Board to explain local-only daily play.");
+  await page.locator('[data-pack-id="daily"]').click();
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().currentPackId === "daily");
+  const dailySnapshot = await snapshot(page);
+  assert(dailySnapshot.boardSource === "pack" && dailySnapshot.currentPackId === "daily", "Expected Today's Board to load as a local pack board.");
+  assert(dailySnapshot.activeDailyKey === dailySnapshot.todayKey, `Expected active daily key to bind to loaded board date, got ${dailySnapshot.activeDailyKey}.`);
+  await page.evaluate(() => {
+    const game = window.__ricochetRushGame as unknown as { restartRun: () => Promise<void> };
+    return game.restartRun();
+  });
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().currentPackId === "daily");
+  const retriedDaily = await snapshot(page);
+  assert(retriedDaily.activeDailyKey === dailySnapshot.activeDailyKey, "Expected daily retry to keep the active daily date key.");
+  await page.locator('[data-tool-panel="packs"]').click();
+  await page.locator('[data-pack-id="starter"]').click();
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().currentPackId === "starter");
+  await page.locator('[data-tool-panel="packs"]').click();
   assert(await page.locator('[data-pack-id="saved-designs"]').isDisabled(), "Expected empty Saved Designs pack to be disabled.");
   await page.locator('[data-tool-panel="designer"]').click();
   assert((await page.locator("[data-tool-title]").innerText()) === "Board Designer", "Expected Board Designer title.");

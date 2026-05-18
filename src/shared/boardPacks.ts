@@ -1,5 +1,6 @@
-import { BRICK_COLUMNS, BRICK_ROWS, type BrickCell, type BrickKind, type LevelBlueprint, type LevelRequest, normalizeLevel } from "./evolution";
+import { BRICK_COLUMNS, BRICK_ROWS, fallbackLevel, type BrickCell, type BrickKind, type LevelBlueprint, type LevelRequest, normalizeLevel } from "./evolution";
 
+export const DAILY_PACK_ID = "daily";
 export const SAVED_DESIGNS_PACK_ID = "saved-designs";
 
 export interface AuthoredBoard {
@@ -25,6 +26,13 @@ export interface PackProgress {
 }
 
 export type PackProgressState = Record<string, PackProgress>;
+
+export interface DailyBoardProgress {
+  bestScore: number;
+  completed: boolean;
+}
+
+export type DailyProgressState = Record<string, DailyBoardProgress>;
 
 export interface SavedBoardEntry {
   id: string;
@@ -254,6 +262,47 @@ export function materializeAuthoredBoard(packId: string, boardIndex: number, req
   );
 }
 
+export function localDateKey(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function materializeDailyBoard(dateKey = localDateKey()): LevelBlueprint {
+  const dayNumber = Number(dateKey.replaceAll("-", "")) || 1;
+  const styles = ["balanced", "open-lanes", "bomb-chains", "precision", "boss-core"] as const;
+  const style = styles[dayNumber % styles.length] ?? "balanced";
+  const designer = {
+    style,
+    difficulty: 2 + (dayNumber % 4),
+    density: 0.46 + ((dayNumber % 5) * 0.035),
+    specialBias: 0.36 + ((dayNumber % 6) * 0.055),
+    seed: `daily-${dateKey}`,
+    brief: `daily challenge ${dateKey} with readable local-only routes`
+  };
+  const level = fallbackLevel({ level: 1, score: 0, lives: 3, clearedLevels: 0, recentEvents: [], designer });
+  return {
+    ...level,
+    name: `Today's Board ${dateKey}`,
+    briefing: `Daily challenge for ${dateKey}. Same local date, same board on this app version.`,
+    paddleHint: "Set a local best, then export a score card if the run pops."
+  };
+}
+
+export function normalizeDailyProgress(input: unknown): DailyProgressState {
+  const raw = isRecord(input) ? input : {};
+  const progress: DailyProgressState = {};
+  for (const [date, value] of Object.entries(raw)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !isRecord(value)) continue;
+    progress[date] = {
+      bestScore: nonNegativeInteger(value.bestScore),
+      completed: typeof value.completed === "boolean" ? value.completed : false
+    };
+  }
+  return progress;
+}
+
 function authoredBoardRequest(request: LevelRequest): LevelRequest {
   return {
     level: request.level,
@@ -274,6 +323,7 @@ export function getNextBuiltInPack(packId: string): BoardPack | null {
 }
 
 export function boardCountForPack(packId: string, savedBoardCount: number): number {
+  if (packId === DAILY_PACK_ID) return 1;
   if (packId === SAVED_DESIGNS_PACK_ID) return savedBoardCount;
   return getBuiltInPack(packId)?.boards.length ?? 0;
 }

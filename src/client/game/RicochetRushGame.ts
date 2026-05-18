@@ -16,14 +16,19 @@ import {
 } from "../../shared/evolution";
 import {
   BUILT_IN_PACKS,
+  DAILY_PACK_ID,
   SAVED_DESIGNS_PACK_ID,
+  type DailyProgressState,
   type PackProgressState,
   type SavedBoardEntry,
   boardCountForPack,
   getBuiltInPack,
   getNextBuiltInPack,
+  localDateKey,
   markPackBoardCleared,
   materializeAuthoredBoard,
+  materializeDailyBoard,
+  normalizeDailyProgress,
   normalizePackProgress,
   normalizeSavedBoards,
   previewRowsFromLevel,
@@ -178,7 +183,7 @@ interface LoopCorrectionDebug extends LoopRiskVelocity {
 type GamePhase = "loading" | "ready" | "playing" | "levelComplete" | "gameOver";
 
 type BoardContext =
-  | { source: "pack"; packId: string; boardIndex: number }
+  | { source: "pack"; packId: string; boardIndex: number; dailyDateKey?: string }
   | { source: "generated"; packId: null; boardIndex: 0 };
 
 interface BoardTheme {
@@ -262,6 +267,7 @@ const SETTINGS_KEY = "ricochet-rush-settings";
 const SIDEBAR_COLLAPSED_KEY = "ricochet-rush-sidebar-collapsed";
 const BEST_SCORE_KEY = "ricochet-rush-best-score";
 const PACK_PROGRESS_KEY = "ricochet-rush-pack-progress";
+const DAILY_PROGRESS_KEY = "ricochet-rush-daily-progress";
 const SAVED_BOARDS_KEY = "ricochet-rush-saved-boards";
 const SAVED_BOARDS_MAX = 24;
 const DESIGNER_INTENT_KEY = "ricochet-rush-designer-intent";
@@ -524,6 +530,7 @@ export class RicochetRushGame {
   private previouslyFocusedElement: HTMLElement | null = null;
   private readonly audio = createGameAudio();
   private savedBoards: SavedBoardEntry[] = [];
+  private dailyProgress: DailyProgressState = normalizeDailyProgress(null);
   private packProgress: PackProgressState = normalizePackProgress(null, 0);
   private boardContext: BoardContext = { source: "pack", packId: "starter", boardIndex: 0 };
   private designerIntent: BoardDesignerIntent = DEFAULT_DESIGNER_INTENT;
@@ -535,6 +542,7 @@ export class RicochetRushGame {
     this.hud = hud;
     this.settings = readSettings();
     this.savedBoards = readJson(SAVED_BOARDS_KEY, normalizeSavedBoards) ?? [];
+    this.dailyProgress = readJson(DAILY_PROGRESS_KEY, normalizeDailyProgress) ?? normalizeDailyProgress(null);
     this.packProgress =
       readJson(PACK_PROGRESS_KEY, (input) => normalizePackProgress(input, this.savedBoards.length)) ?? normalizePackProgress(null, this.savedBoards.length);
     const storedDesignerIntent = readJson(DESIGNER_INTENT_KEY, normalizeDesignerIntent);
@@ -601,6 +609,9 @@ export class RicochetRushGame {
       packBoardIndex: this.boardContext.boardIndex,
       boardTheme: boardThemeFor(this.boardContext),
       packProgress: this.packProgress,
+      dailyProgress: this.dailyProgress,
+      todayKey: localDateKey(),
+      activeDailyKey: this.boardContext.source === "pack" && this.boardContext.packId === DAILY_PACK_ID ? this.boardContext.dailyDateKey ?? localDateKey() : null,
       runStats: this.summaryStats("debug"),
       designerIntent: this.designerIntent,
       generationSummary: this.latestGenerationSummary,
@@ -1086,6 +1097,10 @@ export class RicochetRushGame {
   }
 
   private startPack(packId: string, event: string) {
+    if (packId === DAILY_PACK_ID) {
+      this.startDailyBoard(localDateKey(), event);
+      return;
+    }
     if (!this.canPlayPack(packId)) return;
     this.level = 1;
     this.clearedLevels = 0;
@@ -1108,9 +1123,32 @@ export class RicochetRushGame {
       this.startSavedBoard(savedIndex);
       return;
     }
+    if (packId === DAILY_PACK_ID) {
+      this.startDailyBoard();
+      return;
+    }
     if (!this.canPlayPack(packId)) return;
     const packName = this.packNameFor(packId);
     this.startPack(packId, `${packName} loaded.`);
+  }
+
+  private startDailyBoard(dateKey = localDateKey(), event = `Today's local board ${dateKey} loaded.`) {
+    this.level = 1;
+    this.clearedLevels = this.dailyProgress[dateKey]?.completed ? 1 : 0;
+    this.score = 0;
+    this.lives = 3;
+    this.combo = 1;
+    this.runStats = createRunStats(this.score, this.bestScore);
+    this.latestAgentTrace = undefined;
+    this.autosaveSuppressed = false;
+    localStorage.removeItem(SAVE_KEY);
+    this.hasSave = false;
+    this.loadLevel(materializeDailyBoard(dateKey), event, undefined, undefined, {
+      source: "pack",
+      packId: DAILY_PACK_ID,
+      boardIndex: 0,
+      dailyDateKey: dateKey
+    });
   }
 
   private startSavedBoard(index: number) {
@@ -1139,11 +1177,16 @@ export class RicochetRushGame {
     this.level = boardIndex + 1;
     this.clearedLevels = boardIndex;
     this.latestAgentTrace = undefined;
-    this.loadLevel(level, event, undefined, undefined, { source: "pack", packId, boardIndex });
+    const dailyDateKey = packId === DAILY_PACK_ID ? this.boardContext.source === "pack" && this.boardContext.packId === DAILY_PACK_ID ? this.boardContext.dailyDateKey ?? localDateKey() : localDateKey() : undefined;
+    this.loadLevel(level, event, undefined, undefined, { source: "pack", packId, boardIndex, dailyDateKey });
   }
 
   private materializePackBoard(packId: string, boardIndex: number): LevelBlueprint | null {
     const request = { ...this.levelRequest(), level: boardIndex + 1, clearedLevels: boardIndex };
+    if (packId === DAILY_PACK_ID) {
+      const dateKey = this.boardContext.source === "pack" && this.boardContext.packId === DAILY_PACK_ID ? this.boardContext.dailyDateKey ?? localDateKey() : localDateKey();
+      return materializeDailyBoard(dateKey);
+    }
     if (packId === SAVED_DESIGNS_PACK_ID) {
       const saved = this.savedBoards[boardIndex];
       return saved ? normalizeLevel(saved.levelBlueprint, authoredBoardRequestForSaved(request)) : null;
@@ -1152,6 +1195,7 @@ export class RicochetRushGame {
   }
 
   private canPlayPack(packId: string): boolean {
+    if (packId === DAILY_PACK_ID) return true;
     const total = boardCountForPack(packId, this.savedBoards.length);
     return total > 0 && this.packProgress[packId]?.unlocked === true;
   }
@@ -1161,6 +1205,20 @@ export class RicochetRushGame {
     if (total <= 0) return 0;
     const cleared = this.packProgress[packId]?.cleared ?? 0;
     return cleared >= total ? 0 : clamp(Math.floor(cleared), 0, total - 1);
+  }
+
+  private updateDailyProgress(score: number, completed: boolean) {
+    if (this.boardContext.source !== "pack" || this.boardContext.packId !== DAILY_PACK_ID) return;
+    const dateKey = this.boardContext.dailyDateKey ?? localDateKey();
+    const current = this.dailyProgress[dateKey] ?? { bestScore: 0, completed: false };
+    this.dailyProgress = {
+      ...this.dailyProgress,
+      [dateKey]: {
+        bestScore: Math.max(current.bestScore, score),
+        completed: current.completed || completed
+      }
+    };
+    writeJson(DAILY_PROGRESS_KEY, this.dailyProgress);
   }
 
   private updateSavedBoardBestScore(boardIndex: number, score: number) {
@@ -1301,7 +1359,7 @@ export class RicochetRushGame {
     this.latestAgentTrace = undefined;
     const restoredContext: BoardContext =
       save.boardSource === "pack" && save.packId
-        ? { source: "pack", packId: save.packId, boardIndex: save.packBoardIndex }
+        ? { source: "pack", packId: save.packId, boardIndex: save.packBoardIndex, dailyDateKey: save.dailyDateKey ?? undefined }
         : { source: "generated", packId: null, boardIndex: 0 };
     this.boardContext = restoredContext;
     this.applyBoardTheme();
@@ -1836,6 +1894,7 @@ export class RicochetRushGame {
       this.powerups.splice(0);
       this.laserBeams.splice(0);
       if (this.boardContext.source === "pack" && this.boardContext.packId === SAVED_DESIGNS_PACK_ID) this.updateSavedBoardBestScore(this.boardContext.boardIndex, this.score);
+      this.updateDailyProgress(this.score, false);
       localStorage.removeItem(SAVE_KEY);
       this.hasSave = false;
       this.pushEvent("Run ended.");
@@ -1873,9 +1932,13 @@ export class RicochetRushGame {
     this.bestScore = Math.max(this.bestScore, this.score);
     writeBestScore(this.bestScore);
     if (completedContext.source === "pack") {
-      this.packProgress = markPackBoardCleared(this.packProgress, completedContext.packId, completedContext.boardIndex, this.score, this.savedBoards.length);
-      if (completedContext.packId === SAVED_DESIGNS_PACK_ID) this.updateSavedBoardBestScore(completedContext.boardIndex, this.score);
-      writeJson(PACK_PROGRESS_KEY, this.packProgress);
+      if (completedContext.packId === DAILY_PACK_ID) {
+        this.updateDailyProgress(this.score, true);
+      } else {
+        this.packProgress = markPackBoardCleared(this.packProgress, completedContext.packId, completedContext.boardIndex, this.score, this.savedBoards.length);
+        if (completedContext.packId === SAVED_DESIGNS_PACK_ID) this.updateSavedBoardBestScore(completedContext.boardIndex, this.score);
+        writeJson(PACK_PROGRESS_KEY, this.packProgress);
+      }
     }
     this.powerups.splice(0);
     this.laserBeams.splice(0);
@@ -1925,6 +1988,7 @@ export class RicochetRushGame {
 
   private async restartRun() {
     const activePackId = this.boardContext.source === "pack" ? this.boardContext.packId : null;
+    const activeDailyDateKey = this.boardContext.source === "pack" && this.boardContext.packId === DAILY_PACK_ID ? this.boardContext.dailyDateKey ?? localDateKey() : null;
     this.level = 1;
     this.clearedLevels = 0;
     this.score = 0;
@@ -1934,6 +1998,10 @@ export class RicochetRushGame {
     this.autosaveSuppressed = false;
     localStorage.removeItem(SAVE_KEY);
     this.hasSave = false;
+    if (activePackId === DAILY_PACK_ID && activeDailyDateKey) {
+      this.startDailyBoard(activeDailyDateKey, `New run. Replaying Today's Board ${activeDailyDateKey}.`);
+      return;
+    }
     if (activePackId && this.canPlayPack(activePackId)) {
       this.startPack(activePackId, `New run. Replaying ${this.packNameFor(activePackId)}.`);
       return;
@@ -2027,11 +2095,28 @@ export class RicochetRushGame {
   }
 
   private packNameFor(packId: string): string {
+    if (packId === DAILY_PACK_ID) return "Today's Board";
     if (packId === SAVED_DESIGNS_PACK_ID) return "Saved Designs";
     return getBuiltInPack(packId)?.name ?? "Board Pack";
   }
 
   private collectPackItems(): HudPackItem[] {
+    const todayKey = localDateKey();
+    const dailyLevel = materializeDailyBoard(todayKey);
+    const todayProgress = this.dailyProgress[todayKey] ?? { bestScore: 0, completed: false };
+    const dailyItem: HudPackItem = {
+      id: DAILY_PACK_ID,
+      name: "Today's Board",
+      description: `Local-only daily challenge for ${todayKey}. Same date, same app version, same board; no remote service needed.`,
+      progressLabel: todayProgress.completed ? "completed today" : "open today",
+      bestScore: todayProgress.bestScore,
+      unlocked: true,
+      active: this.boardContext.source === "pack" && this.boardContext.packId === DAILY_PACK_ID,
+      empty: false,
+      previewRows: previewRowsFromLevel(dailyLevel),
+      kind: "pack",
+      actionLabel: "Play daily"
+    };
     const builtInItems = BUILT_IN_PACKS.map((pack) => {
       const progress = this.packProgress[pack.id] ?? { cleared: 0, bestScore: 0, unlocked: pack.id === "starter" };
       const previewIndex = progress.cleared >= pack.boards.length ? 0 : clamp(progress.cleared, 0, pack.boards.length - 1);
@@ -2078,7 +2163,7 @@ export class RicochetRushGame {
       createdAt: board.createdAt,
       actionLabel: "Replay saved board"
     }));
-    return [...builtInItems, savedCollection, ...savedItems];
+    return [dailyItem, ...builtInItems, savedCollection, ...savedItems];
   }
 
   private refreshHud(status?: string) {
@@ -2171,6 +2256,7 @@ export class RicochetRushGame {
       boardSource: this.boardContext.source,
       packId: this.boardContext.packId,
       packBoardIndex: this.boardContext.boardIndex,
+      dailyDateKey: this.boardContext.source === "pack" && this.boardContext.packId === DAILY_PACK_ID ? this.boardContext.dailyDateKey ?? localDateKey() : null,
       score: this.score,
       bestScore: this.bestScore,
       lives: this.lives,

@@ -635,7 +635,12 @@ breaking local saves.</li>
 And Local Retention</h3>
 <p>Goal: create a cheap reason to return after shareable board state is
 stable.</p>
-<p>Status: planned after P8.</p>
+<p>Status: complete as of 2026-05-18.</p>
+<p>Delivery notes: Today's Board is now a local-only board-picker entry
+that materializes one deterministic daily board per local date using the
+same app-version seed policy. Daily best score and completion state are
+stored by date in localStorage, daily boards require no remote service
+after load, and the existing P8 score-card path works for daily runs.</p>
 <p>Scope:</p>
 <ul>
 <li>Add one deterministic daily board per local date.</li>
