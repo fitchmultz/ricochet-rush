@@ -437,6 +437,15 @@ try {
   assert(!mobileOverflow, "Expected narrow layout without horizontal overflow.");
   assert(await canvasHasVisiblePixels(page), "Expected mobile viewport to keep rendering the game canvas.");
   assert(await page.locator(".touch-controls").isVisible(), "Expected mobile touch controls to be visible.");
+  assert((await page.locator(".stage").evaluate((element) => getComputedStyle(element).touchAction)) === "none", "Expected stage touch-action to disable browser panning for drag aim.");
+  const beforeDragAim = await snapshot(page);
+  await dragAimStage(page, 70, 520, 330, 520);
+  const afterDragAim = await snapshot(page);
+  assert(afterDragAim.phase === "ready", "Expected drag-anywhere aim not to accidentally launch from ready state.");
+  assert(afterDragAim.balls.every((ball) => ball.stuck), "Expected drag-anywhere aim to keep balls stuck until launch button.");
+  assert(afterDragAim.paddleX > beforeDragAim.paddleX + 60, `Expected drag-anywhere aim to move paddle right, got ${beforeDragAim.paddleX} -> ${afterDragAim.paddleX}.`);
+  const mobileScrollY = await page.evaluate(() => window.scrollY);
+  assert(mobileScrollY === 0, `Expected drag-anywhere aim not to scroll the page, got scrollY ${mobileScrollY}.`);
   await page.locator('[data-touch-action="primary"]').click();
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "playing");
   const touchLaunched = await snapshot(page);
@@ -478,6 +487,12 @@ async function hasLocalStorageKey(page: { evaluate: <T>(callback: (key: string) 
 
 async function hasFocusedOverlayAction(page: { evaluate: <T>(callback: () => T) => Promise<T> }): Promise<boolean> {
   return page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.hasAttribute("data-overlay-action"));
+}
+
+async function dragAimStage(page: Page, startX: number, startY: number, endX: number, endY: number): Promise<void> {
+  await page.locator(".stage").dispatchEvent("pointerdown", { pointerId: 19, pointerType: "touch", clientX: startX, clientY: startY, bubbles: true, cancelable: true });
+  await page.locator(".stage").dispatchEvent("pointermove", { pointerId: 19, pointerType: "touch", clientX: endX, clientY: endY, bubbles: true, cancelable: true });
+  await page.locator(".stage").dispatchEvent("pointerup", { pointerId: 19, pointerType: "touch", clientX: endX, clientY: endY, bubbles: true, cancelable: true });
 }
 
 async function canvasHasVisiblePixels(page: Page): Promise<boolean> {

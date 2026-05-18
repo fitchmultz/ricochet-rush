@@ -209,11 +209,18 @@ async function runMobileAudit(page: Page) {
   await assertStageInViewport(page, "mobile playing");
   const touchBefore = await snapshot(page);
   recordCheck(await page.locator(".touch-controls").isVisible(), "mobile touch controls visible during play", "Touch controls appear after the launch overlay closes.");
+  const stageTouchAction = await page.locator(".stage").evaluate((element) => getComputedStyle(element).touchAction);
+  recordCheck(stageTouchAction === "none", "mobile stage disables browser panning for drag aim", `touch-action: ${stageTouchAction}.`);
+  await dragAimStage(page, 72, 520, 330, 520);
+  const dragRight = await snapshot(page);
+  recordCheck(dragRight.paddleX > touchBefore.paddleX + 50, "mobile drag-anywhere aims paddle", `Paddle x ${touchBefore.paddleX.toFixed(1)} -> ${dragRight.paddleX.toFixed(1)}.`);
+  const scrollAfterDrag = await page.evaluate(() => window.scrollY);
+  recordCheck(scrollAfterDrag === 0, "mobile drag aim does not scroll page", `scrollY ${scrollAfterDrag}.`);
   await page.locator('[data-touch-action="right"]').dispatchEvent("pointerdown");
   await page.waitForTimeout(180);
   await page.locator('[data-touch-action="right"]').dispatchEvent("pointerup");
   const touchRight = await snapshot(page);
-  recordCheck(touchRight.paddleX > touchBefore.paddleX, "mobile right touch moves paddle", `Paddle x ${touchBefore.paddleX.toFixed(1)} -> ${touchRight.paddleX.toFixed(1)}.`);
+  recordCheck(touchRight.paddleX > dragRight.paddleX, "mobile right touch moves paddle", `Paddle x ${dragRight.paddleX.toFixed(1)} -> ${touchRight.paddleX.toFixed(1)}.`);
   await page.locator('[data-touch-action="left"]').dispatchEvent("pointerdown");
   await page.waitForTimeout(180);
   await page.locator('[data-touch-action="left"]').dispatchEvent("pointerup");
@@ -374,6 +381,7 @@ async function assertCanvasClarity(page: Page, label: string) {
   recordCheck(metrics.displayWidth >= 320 && metrics.displayHeight >= 210, `${label}: canvas is large enough to play`, `${Math.round(metrics.displayWidth)}x${Math.round(metrics.displayHeight)} displayed`);
   if (label.startsWith("mobile")) {
     recordCheck(metrics.displayWidth >= 384 && metrics.displayHeight >= 255, `${label}: compact HUD gives the canvas more room`, `${Math.round(metrics.displayWidth)}x${Math.round(metrics.displayHeight)} displayed`);
+    recordCheck(metrics.displayWidth >= 389 && metrics.displayHeight >= 259, `${label}: P7 canvas area exceeds the prior 388x259 baseline`, `${Math.round(metrics.displayWidth)}x${Math.round(metrics.displayHeight)} displayed`);
   }
   recordCheck(metrics.litPixels > 900, `${label}: canvas is not visually blank`, `${metrics.litPixels} lit sample pixels`);
   recordCheck(metrics.colorBuckets >= 16, `${label}: canvas has rich arcade color`, `${metrics.colorBuckets} color buckets`);
@@ -451,6 +459,12 @@ async function assertDesktopStageSeparation(page: Page) {
     return stage.right > consolePanel.left && consolePanel.right > stage.left && stage.bottom > consolePanel.top && consolePanel.bottom > stage.top;
   });
   recordCheck(!overlaps, "desktop: playfield and Play Console do not overlap", overlaps ? "Stage and console rectangles intersect." : "Stage and console are separated.");
+}
+
+async function dragAimStage(page: Page, startX: number, startY: number, endX: number, endY: number): Promise<void> {
+  await page.locator(".stage").dispatchEvent("pointerdown", { pointerId: 27, pointerType: "touch", clientX: startX, clientY: startY, bubbles: true, cancelable: true });
+  await page.locator(".stage").dispatchEvent("pointermove", { pointerId: 27, pointerType: "touch", clientX: endX, clientY: endY, bubbles: true, cancelable: true });
+  await page.locator(".stage").dispatchEvent("pointerup", { pointerId: 27, pointerType: "touch", clientX: endX, clientY: endY, bubbles: true, cancelable: true });
 }
 
 async function assertStageCoverage(page: Page, label: string) {

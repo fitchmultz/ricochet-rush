@@ -818,13 +818,48 @@ export class RicochetRushGame {
       this.lastPointerAt = now;
       this.setPaddleX(nextX, elapsedSeconds);
     };
+    let activeTouchPointerId: number | null = null;
+    const stage = this.mount.closest<HTMLElement>(".stage");
     this.renderer.domElement.addEventListener("pointermove", (event) => {
+      if (event.pointerType === "touch") return;
       applyPointerPaddle(event.clientX);
     });
     this.renderer.domElement.addEventListener("pointerdown", (event) => {
       applyPointerPaddle(event.clientX);
+      if (event.pointerType === "touch") {
+        event.preventDefault();
+        return;
+      }
       this.handlePrimaryAction();
     });
+    stage?.addEventListener("pointerdown", (event) => {
+      if (event.pointerType !== "touch" || !isArenaPointerTarget(event.target)) return;
+      event.preventDefault();
+      activeTouchPointerId = event.pointerId;
+      try {
+        stage.setPointerCapture?.(event.pointerId);
+      } catch {
+        // Synthetic smoke-test events and some embedded browsers may not expose an active capture target.
+      }
+      applyPointerPaddle(event.clientX);
+    });
+    stage?.addEventListener("pointermove", (event) => {
+      if (event.pointerType !== "touch" || activeTouchPointerId !== event.pointerId) return;
+      event.preventDefault();
+      applyPointerPaddle(event.clientX);
+    });
+    const releaseTouchPointer = (event: PointerEvent) => {
+      if (event.pointerType !== "touch" || activeTouchPointerId !== event.pointerId) return;
+      event.preventDefault();
+      activeTouchPointerId = null;
+      try {
+        if (stage?.hasPointerCapture?.(event.pointerId)) stage.releasePointerCapture?.(event.pointerId);
+      } catch {
+        // Capture may already be released by the browser.
+      }
+    };
+    stage?.addEventListener("pointerup", releaseTouchPointer);
+    stage?.addEventListener("pointercancel", releaseTouchPointer);
     this.bindTouchControls();
   }
 
@@ -1738,6 +1773,7 @@ export class RicochetRushGame {
       this.pushEvent("Run ended.");
       this.announce("Game over.");
       this.audio.play("gameOver", this.settings.sfxVolume);
+      this.triggerHaptic([38, 34, 48]);
       this.showRunSummaryOverlay("gameOver", {
         title: "Game Over",
         body: "Run complete. Review the haul, then jump back in or choose a board pack.",
@@ -1780,6 +1816,7 @@ export class RicochetRushGame {
     this.addFloatingText(WIDTH / 2, HEIGHT / 2, `+${bonus} clear`, "status");
     this.levelClearFlashTimer = 0.8;
     this.audio.play("levelClear", this.settings.sfxVolume);
+    this.triggerHaptic([18, 24, 18]);
     this.shakeBoard(0.28, 2.6);
     this.saveCheckpoint("Level checkpoint saved.");
     const nextStep = this.nextLevelCompleteStep(completedContext);
@@ -2994,6 +3031,11 @@ function isEditableTarget(target: EventTarget | null): boolean {
 function actionControlTarget(target: EventTarget | null): HTMLElement | null {
   if (!(target instanceof HTMLElement)) return null;
   return target.closest<HTMLElement>("button:not(:disabled), a[href], [role='button']:not([aria-disabled='true'])");
+}
+
+function isArenaPointerTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return !target.closest("button, input, textarea, select, .panel, .tool-panel, .game-overlay, .touch-controls");
 }
 
 function readBestScore(): number {
