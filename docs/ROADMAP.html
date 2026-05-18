@@ -606,7 +606,13 @@ introduced.</li>
 State And Score Card</h3>
 <p>Goal: make good generated boards and good runs portable without
 accounts or backend storage.</p>
-<p>Status: planned.</p>
+<p>Status: complete as of 2026-05-18.</p>
+<p>Delivery notes: the Share panel now exposes versioned, public-safe board
+JSON export/import, cleanly rejects malformed or unsupported imports, and
+loads valid shared boards through the generated-board path so they can be
+played or kept locally. Score cards render to a local PNG data URL with
+score, board name, run stats, and a board snapshot; no upload, account,
+cloud sync, or leaderboard path was added.</p>
 <p>Scope:</p>
 <ul>
 <li>Add export/import for compact board JSON or deterministic seed data

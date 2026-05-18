@@ -26,6 +26,7 @@ import {
   previewRowsFromLevel
 } from "../shared/boardPacks";
 import { DEFAULT_SETTINGS, SAVE_VERSION, normalizeSaveState, normalizeSettings } from "../shared/saveState";
+import { BOARD_EXPORT_VERSION, createBoardExportPayload, encodeBoardExport, parseBoardExport } from "../shared/shareState";
 import { createApiServer } from "../server/api";
 import { buildGenerationSummary, buildPrompt, parseWorkerOutput, requestEvolution, runCursorWorker, summarizeLevelError } from "../server/cursorAgent";
 import { parseLevelJsonFromCandidates } from "../server/levelJson";
@@ -915,8 +916,40 @@ describe("Ricochet Rush curated board packs", () => {
     const progress = normalizePackProgress({ [SAVED_DESIGNS_PACK_ID]: { cleared: 0, bestScore: 0, unlocked: false } }, saved.length);
 
     expect(saved).toHaveLength(1);
+    expect(saved[0]?.sourcePrompt).toBe("Saved from generated board");
+    expect(saved[0]?.bestScore).toBe(0);
     expect(progress[SAVED_DESIGNS_PACK_ID]?.unlocked).toBe(true);
     expect(previewRowsFromLevel(saved[0]!.levelBlueprint)).toHaveLength(BRICK_ROWS);
+  });
+
+  it("exports and imports public-safe versioned board JSON", () => {
+    const level = fallbackLevel(request);
+    const payload = createBoardExportPayload(level, "share prompt", "2026-05-18T00:00:00.000Z");
+    const encoded = encodeBoardExport(payload);
+    const parsed = parseBoardExport(encoded);
+
+    expect(payload.version).toBe(BOARD_EXPORT_VERSION);
+    expect(encoded).toContain('"app": "ricochet-rush"');
+    expect(parsed.ok).toBe(true);
+    expect(parsed.level?.name).toBe(level.name);
+    expect(parsed.sourcePrompt).toBe("share prompt");
+    expect(parsed.level?.rows).toHaveLength(BRICK_ROWS);
+  });
+
+  it("rejects malformed or unsupported board exports without normalizing them", () => {
+    const valid = JSON.parse(encodeBoardExport(createBoardExportPayload(fallbackLevel(request), "share prompt"))) as { board: { rows: Array<Array<null | { kind: string; hp: number }>> } };
+    const fractionalHp = structuredClone(valid);
+    fractionalHp.board.rows[0]![0] = { kind: "basic", hp: 1.5 };
+    const badKind = structuredClone(valid);
+    badKind.board.rows[0]![0] = { kind: "unknown", hp: 1 };
+
+    expect(parseBoardExport("not json")).toMatchObject({ ok: false });
+    expect(parseBoardExport(JSON.stringify({ app: "ricochet-rush", version: BOARD_EXPORT_VERSION, board: {} }))).toMatchObject({ ok: false, message: expect.stringContaining("invalid") });
+    expect(parseBoardExport(JSON.stringify({ app: "ricochet-rush", version: BOARD_EXPORT_VERSION, board: { name: "Bad", briefing: "Bad", paddleHint: "Bad", speed: 1, rows: [] } }))).toMatchObject({ ok: false });
+    expect(parseBoardExport(JSON.stringify(fractionalHp))).toMatchObject({ ok: false });
+    expect(parseBoardExport(JSON.stringify(badKind))).toMatchObject({ ok: false });
+    expect(parseBoardExport(JSON.stringify({ app: "ricochet-rush", version: 999, board: {} }))).toMatchObject({ ok: false, message: expect.stringContaining("unsupported") });
+    expect(parseBoardExport(JSON.stringify({ app: "other", version: BOARD_EXPORT_VERSION, board: {} }))).toMatchObject({ ok: false, message: expect.stringContaining("not a Ricochet") });
   });
 });
 

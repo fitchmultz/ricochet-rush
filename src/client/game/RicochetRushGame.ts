@@ -29,6 +29,7 @@ import {
   previewRowsFromLevel,
   trimSavedBoards
 } from "../../shared/boardPacks";
+import { createBoardExportPayload, encodeBoardExport, parseBoardExport } from "../../shared/shareState";
 import {
   DEFAULT_SETTINGS,
   SAVE_VERSION,
@@ -927,7 +928,10 @@ export class RicochetRushGame {
       },
       toggleSidebar: () => {
         this.setSidebarCollapsed(!this.sidebarCollapsed);
-      }
+      },
+      exportBoard: () => this.exportCurrentBoard(),
+      importBoard: (text) => this.importSharedBoard(text),
+      renderScoreCard: () => this.renderScoreCard()
     });
   }
 
@@ -1191,6 +1195,70 @@ export class RicochetRushGame {
     this.designerIntent = { ...DEFAULT_DESIGNER_INTENT, brief: normalized.brief };
     writeJson(DESIGNER_INTENT_KEY, this.designerIntent);
     this.refreshHud("Designer intent updated.");
+  }
+
+  private exportCurrentBoard(): string {
+    return encodeBoardExport(createBoardExportPayload(this.levelBlueprint, this.levelSourcePrompt || this.designerIntent.brief || "Shared Ricochet board"));
+  }
+
+  private importSharedBoard(text: string): { ok: boolean; message: string } {
+    const result = parseBoardExport(text);
+    if (!result.ok || !result.level) return { ok: false, message: result.message };
+    this.level = 1;
+    this.clearedLevels = 0;
+    this.score = 0;
+    this.lives = 3;
+    this.combo = 1;
+    this.runStats = createRunStats(this.score, this.bestScore);
+    this.autosaveSuppressed = false;
+    localStorage.removeItem(SAVE_KEY);
+    this.hasSave = false;
+    this.loadLevel(result.level, result.message, undefined, undefined, { source: "generated", packId: null, boardIndex: 0 }, result.sourcePrompt);
+    return { ok: true, message: result.message };
+  }
+
+  private async renderScoreCard(): Promise<{ ok: boolean; message: string; dataUrl?: string }> {
+    const canvas = document.createElement("canvas");
+    canvas.width = 960;
+    canvas.height = 540;
+    const context = canvas.getContext("2d");
+    if (!context) return { ok: false, message: "Score card unavailable in this browser." };
+    const stats = this.summaryStats(this.phase === "levelComplete" ? "clear" : "gameOver");
+    const previewRows = previewRowsFromLevel(this.levelBlueprint);
+    const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
+    gradient.addColorStop(0, "#09121e");
+    gradient.addColorStop(1, "#05070c");
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "rgba(126, 241, 255, 0.18)";
+    context.fillRect(38, 38, 884, 464);
+    context.fillStyle = "#06101a";
+    context.fillRect(48, 48, 864, 444);
+    context.fillStyle = "#7ef1ff";
+    context.font = "700 28px sans-serif";
+    context.fillText("Ricochet Rush", 80, 98);
+    context.fillStyle = "#ffffff";
+    context.font = "900 54px sans-serif";
+    context.fillText(this.levelBlueprint.name.slice(0, 28), 80, 160);
+    context.fillStyle = "#ffe066";
+    context.font = "900 72px sans-serif";
+    context.fillText(this.score.toLocaleString(), 80, 246);
+    context.fillStyle = "#c8d4d1";
+    context.font = "700 24px sans-serif";
+    context.fillText(`Best ${this.bestScore.toLocaleString()} · Level ${this.level}`, 80, 286);
+    context.font = "700 20px sans-serif";
+    for (const [index, stat] of stats.slice(2, 7).entries()) {
+      const y = 336 + index * 32;
+      context.fillStyle = "#7ef1ff";
+      context.fillText(stat.label, 80, y);
+      context.fillStyle = "#ffffff";
+      context.fillText(stat.value, 300, y);
+    }
+    drawScoreCardPreview(context, previewRows, 604, 132, 20);
+    context.fillStyle = "#9fb5b5";
+    context.font = "700 18px sans-serif";
+    context.fillText("Public-safe local PNG · no account or upload", 604, 424);
+    return { ok: true, message: "Score card rendered locally.", dataUrl: canvas.toDataURL("image/png") };
   }
 
   private loadLevel(
@@ -2814,6 +2882,31 @@ function savedBoardIndexFromPackId(packId: string): number | null {
   if (!packId.startsWith(`${SAVED_DESIGNS_PACK_ID}:`)) return null;
   const index = Number(packId.slice(SAVED_DESIGNS_PACK_ID.length + 1));
   return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
+function drawScoreCardPreview(context: CanvasRenderingContext2D, rows: string[], x: number, y: number, cell: number) {
+  const colors: Record<string, string> = {
+    ".": "rgba(255,255,255,0.05)",
+    b: "#4ecdc4",
+    h: "#7d8ca3",
+    o: "#ff5c5c",
+    p: "#7bf1a8",
+    x: "#b23a48",
+    l: "#ff4d8d",
+    f: "#ff7a2f",
+    g: "#b6fffa",
+    s: "#ffe066",
+    w: "#7bf1a8",
+    c: "#8e7dff",
+    t: "#d6ff4d",
+    B: "#ff9f43"
+  };
+  for (const [rowIndex, row] of rows.slice(0, 9).entries()) {
+    for (const [columnIndex, glyph] of row.slice(0, 14).padEnd(14, ".").split("").entries()) {
+      context.fillStyle = colors[glyph] ?? colors.b;
+      context.fillRect(x + columnIndex * (cell + 2), y + rowIndex * (cell + 2), cell, cell * 0.72);
+    }
+  }
 }
 
 function soundForBrickDestroy(kind: BrickKind): GameSoundKind {

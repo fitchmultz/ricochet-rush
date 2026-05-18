@@ -64,6 +64,9 @@ export interface HudActions {
   updateDesigner(intent: BoardDesignerIntent): void;
   dismissPowerupPrimer(): void;
   toggleSidebar(): void;
+  exportBoard(): string;
+  importBoard(text: string): { ok: boolean; message: string };
+  renderScoreCard(): Promise<{ ok: boolean; message: string; dataUrl?: string }>;
   updateSettings(settings: HudState["settings"]): void;
 }
 
@@ -72,11 +75,12 @@ export interface HudApi {
   setActions(actions: HudActions): void;
 }
 
-type HudToolPanel = "designer" | "packs" | "options" | "diagnostics";
+type HudToolPanel = "designer" | "packs" | "share" | "options" | "diagnostics";
 
 const TOOL_PANEL_LABELS: Record<HudToolPanel, string> = {
   designer: "Board Designer",
   packs: "Board Select",
+  share: "Share",
   options: "Options",
   diagnostics: "Run Log"
 };
@@ -151,6 +155,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
         <nav class="tool-dock" aria-label="Game tools">
           <button type="button" data-tool-panel="designer">Designer</button>
           <button type="button" data-tool-panel="packs">Boards</button>
+          <button type="button" data-tool-panel="share">Share</button>
           <button type="button" data-tool-panel="options">Options</button>
           <button type="button" data-tool-panel="diagnostics">Log</button>
         </nav>
@@ -186,6 +191,28 @@ export function createHud(root: HTMLDivElement | null): HudApi {
           <section class="pack-browser tool-view" data-tool-view="packs" aria-label="Board packs" hidden>
             <div class="panel-heading">Board Select</div>
             <div data-pack-list class="pack-list"></div>
+          </section>
+          <section class="share-panel tool-view" data-tool-view="share" aria-label="Share" hidden>
+            <div class="panel-heading">Share Board</div>
+            <p class="share-help">Export public-safe board JSON, import a shared board, or render a local PNG score card. Nothing uploads to a server.</p>
+            <label class="share-field">
+              <span>Board export JSON</span>
+              <textarea data-share-export readonly rows="5"></textarea>
+            </label>
+            <div class="share-actions">
+              <button type="button" data-action="refresh-export">Refresh export</button>
+              <button type="button" data-action="copy-export">Copy JSON</button>
+            </div>
+            <label class="share-field">
+              <span>Import board JSON</span>
+              <textarea data-share-import rows="4" placeholder="Paste a Ricochet Rush board export"></textarea>
+            </label>
+            <div class="share-actions">
+              <button type="button" data-action="import-board">Import board</button>
+              <button type="button" data-action="render-score-card">Render PNG score card</button>
+            </div>
+            <a data-score-card-download class="score-card-download" download="ricochet-rush-score-card.png" hidden>Download score card</a>
+            <p data-share-status class="share-status" role="status"></p>
           </section>
           <section class="settings-panel tool-view" data-tool-view="options" aria-label="Options" hidden>
             <div class="panel-heading">Options</div>
@@ -280,6 +307,14 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   const designerPending = query(root, "[data-designer-pending]");
   const generationSummary = query(root, "[data-generation-summary]");
   const compactGenerationSummary = query(root, "[data-compact-generation-summary]");
+  const shareExport = queryTextArea(root, "[data-share-export]");
+  const shareImport = queryTextArea(root, "[data-share-import]");
+  const shareStatus = query(root, "[data-share-status]");
+  const scoreCardDownload = query(root, "[data-score-card-download]") as HTMLAnchorElement;
+  const refreshExport = queryButton(root, '[data-action="refresh-export"]');
+  const copyExport = queryButton(root, '[data-action="copy-export"]');
+  const importBoard = queryButton(root, '[data-action="import-board"]');
+  const renderScoreCard = queryButton(root, '[data-action="render-score-card"]');
   const sfxVolume = queryInput(root, '[data-setting="sfx-volume"]');
   const musicVolume = queryInput(root, '[data-setting="music-volume"]');
   const sfxVolumeOutput = queryOutput(root, '[data-setting-output="sfx-volume"]');
@@ -374,9 +409,49 @@ export function createHud(root: HTMLDivElement | null): HudApi {
     traceErrors.textContent = trace.parseError || trace.rawError || "(no trace errors)";
   };
 
+  const refreshShareExport = () => {
+    const text = actions?.exportBoard() ?? "";
+    shareExport.value = text;
+    return text;
+  };
+
   newBoard.addEventListener("click", () => actions?.requestBoard());
   saveBoard.addEventListener("click", () => actions?.saveBoardToPack());
   reset.addEventListener("click", () => actions?.resetProgress());
+  refreshExport.addEventListener("click", () => {
+    refreshShareExport();
+    shareStatus.textContent = "Board export refreshed.";
+  });
+  copyExport.addEventListener("click", async () => {
+    const text = refreshShareExport();
+    const writeText = navigator.clipboard?.writeText?.bind(navigator.clipboard);
+    if (!writeText) {
+      shareStatus.textContent = "Copy unavailable. Select and copy the JSON manually.";
+      return;
+    }
+    try {
+      await writeText(text);
+      shareStatus.textContent = "Board export copied.";
+    } catch {
+      shareStatus.textContent = "Copy unavailable. Select and copy the JSON manually.";
+    }
+  });
+  importBoard.addEventListener("click", () => {
+    const result = actions?.importBoard(shareImport.value) ?? { ok: false, message: "Import unavailable." };
+    shareStatus.textContent = result.message;
+    if (result.ok) {
+      shareImport.value = "";
+      refreshShareExport();
+    }
+  });
+  renderScoreCard.addEventListener("click", async () => {
+    const result = (await actions?.renderScoreCard()) ?? { ok: false, message: "Score-card renderer unavailable." };
+    shareStatus.textContent = result.message;
+    if (result.ok && result.dataUrl) {
+      scoreCardDownload.href = result.dataUrl;
+      scoreCardDownload.hidden = false;
+    }
+  });
   dismissPowerupPrimer.addEventListener("click", () => actions?.dismissPowerupPrimer());
   sidebarToggle.addEventListener("click", () => actions?.toggleSidebar());
   toolClose.addEventListener("click", () => setToolPanel(null));
@@ -445,6 +520,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       }
       renderSummary(generationSummary, state.designer.generationSummary, state.designer.previewRows);
       renderCompactSummary(compactGenerationSummary, state);
+      if (document.activeElement !== shareExport && document.activeElement !== shareImport) shareExport.value = actions?.exportBoard() ?? "";
       powerupPrimer.hidden = state.powerupPrimerDismissed;
       sfxVolume.value = String(state.settings.sfxVolume);
       musicVolume.value = String(state.settings.musicVolume);
@@ -521,7 +597,7 @@ function escapeAttribute(value: string): string {
 }
 
 function normalizeToolPanel(value: string | undefined): HudToolPanel | null {
-  if (value === "designer" || value === "packs" || value === "options" || value === "diagnostics") return value;
+  if (value === "designer" || value === "packs" || value === "share" || value === "options" || value === "diagnostics") return value;
   return null;
 }
 

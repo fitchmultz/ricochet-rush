@@ -1395,9 +1395,68 @@ body {
 }
 
 .settings-panel,
-.diagnostics-panel {
+.diagnostics-panel,
+.share-panel {
   display: grid;
   gap: 12px;
+}
+
+.share-help,
+.share-status {
+  margin: 0;
+  color: #c8d4d1;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.share-field {
+  display: grid;
+  gap: 5px;
+  color: #c8d4d1;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.share-field textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  border: 1px solid rgba(126, 241, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(6, 10, 17, 0.72);
+  color: #edf4ef;
+  font: 0.72rem/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.share-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.share-actions button,
+.score-card-download {
+  min-height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(126, 241, 255, 0.28);
+  border-radius: 8px;
+  background: rgba(126, 241, 255, 0.1);
+  color: #edf4ef;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 850;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.share-actions button:hover,
+.share-actions button:focus-visible,
+.score-card-download:focus-visible {
+  border-color: rgba(255, 224, 102, 0.62);
+  color: #ffe066;
+  outline: none;
 }
 
 .settings {

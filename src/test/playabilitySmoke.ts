@@ -263,6 +263,23 @@ try {
   assert(await page.locator("[data-tool-surface]").isHidden(), "Expected Board Select to close after choosing a pack.");
   assert((await page.locator("[data-level-name]").innerText()) === "Starter Gates", "Expected Starter Gates after selecting Starter.");
   assert(await page.locator("[data-compact-generation-summary]").isHidden(), "Expected generated-board summary to clear after selecting Starter.");
+  await page.locator('[data-tool-panel="share"]').click();
+  assert((await page.locator("[data-tool-title]").innerText()) === "Share", "Expected Share panel title.");
+  const exportText = await page.locator("[data-share-export]").inputValue();
+  const parsedExport = JSON.parse(exportText) as { app: string; version: number; board: { rows: unknown[] } };
+  assert(parsedExport.app === "ricochet-rush" && parsedExport.version === 1, "Expected versioned public board export JSON.");
+  assert(Array.isArray(parsedExport.board.rows), "Expected board export to include board rows.");
+  await page.locator("[data-share-import]").fill("not json");
+  await page.locator('[data-action="import-board"]').click();
+  assert((await page.locator("[data-share-status]").innerText()).toLowerCase().includes("rejected"), "Expected malformed imports to be rejected cleanly.");
+  await page.locator('[data-action="render-score-card"]').click();
+  await page.waitForFunction(() => document.querySelector<HTMLAnchorElement>("[data-score-card-download]")?.href.startsWith("data:image/png") === true);
+  await page.locator("[data-share-import]").fill(exportText);
+  await page.locator('[data-action="import-board"]').click();
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().boardSource === "generated");
+  await page.locator('[data-tool-panel="packs"]').click();
+  await page.locator('[data-pack-id="starter"]').click();
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().currentPackId === "starter");
   assert(await page.locator('[data-action="save-board"]').isDisabled(), "Expected authored boards not to be keepable.");
 
   await page.locator("[data-overlay-action]").click();

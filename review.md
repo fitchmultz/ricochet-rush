@@ -1,21 +1,24 @@
 # Review
 
 ## Verdict
-Acceptable as-is. The prior scroll-prevention and measurable canvas-baseline findings are addressed in the inspected diff, and I found no blocker/high/medium/low issues.
+The implementation is acceptable as-is for RQ-0008. The prior fractional-HP import bug and missing Clipboard API success-reporting bug are fixed in the inspected working tree.
 
 ## Findings
-No material findings.
+No blocker, high, medium, or low findings.
 
 ## Verified
-- Read CueLoop task RQ-0007 and confirmed the P7 plan/acceptance scope.
-- Inspected diffs for `docs/ROADMAP.html`, `src/client/game/RicochetRushGame.ts`, `src/client/styles.css`, `src/test/playabilitySmoke.ts`, and `src/test/uxAudit.ts`.
-- Confirmed `.stage` and canvas now disable browser panning with `touch-action: none`, while stage drag handling avoids accidental touch launch and excludes controls/overlays.
-- Confirmed mobile smoke/UX checks now cover stage touch-action, drag aim without launch/scroll, fallback left/right controls, overlay-hidden controls, and explicit canvas baseline exceedance.
-- Ran `git diff --check` on the reviewed files; it passed.
+- Inspected CueLoop task RQ-0008 plan and the P8 roadmap acceptance criteria in `docs/ROADMAP.html`.
+- Inspected the working-tree diffs for `RicochetRushGame.ts`, `hud.ts`, `styles.css`, `evolution.test.ts`, `playabilitySmoke.ts`, and the new `src/shared/shareState.ts`.
+- Confirmed `parseBoardExport` validates app/version, exact row/column shape, supported brick kinds, finite integer `hp`, HP bounds, and non-empty brick sets before importing.
+- Confirmed the new regression tests cover fractional HP and unsupported brick kind rejection.
+- Confirmed the copy action now checks `navigator.clipboard.writeText` exists and only reports “copied” after the awaited write succeeds; missing or failed clipboard writes show the manual-copy message.
+- Confirmed valid imports are wired through the generated-board context, and malformed imports return before game state or local save state is changed.
+- Confirmed score-card rendering stays local via canvas PNG data URLs and the smoke flow covers share export/import plus score-card rendering.
+- Ran `git diff --check` for the tracked diff and a no-index whitespace check for the new `src/shared/shareState.ts`; both were clean.
 
 ## Risks
-- I did not rerun `npm run ci`; I relied on the provided pass summary and source/diff inspection.
-- The drag-scroll checks still use synthetic pointer events, but the added CSS `touch-action: none` on `.stage` addresses the browser-level panning requirement.
+- I did not rerun `npm run ci` in this read-only review; the task context reports it passed.
+- The inspected automated tests do not appear to simulate a missing/rejecting Clipboard API, so that fallback is verified by code inspection rather than a browser regression test.
 
 ## Recommended Next Step
-Proceed with RQ-0007 completion/merge using the existing `npm run ci` and `git diff --check` evidence.
+- Accept the RQ-0008 changes. Optionally add a future browser test that stubs missing or rejecting clipboard writes to lock in the fallback behavior.
