@@ -1166,8 +1166,8 @@ body {
 
 .generation-summary {
   display: grid;
-  gap: 5px;
-  max-height: 138px;
+  gap: 6px;
+  max-height: 210px;
   overflow: auto;
   scrollbar-gutter: stable;
   padding: 8px;
@@ -1197,11 +1197,28 @@ body {
   gap: 4px;
 }
 
-.generation-summary span {
+.generation-summary div span {
   padding: 2px 5px;
   border-radius: 999px;
   background: rgba(126, 241, 255, 0.12);
   color: #7ef1ff;
+}
+
+.generation-summary .summary-preview {
+  display: grid;
+  grid-template-columns: repeat(14, 1fr);
+  grid-auto-rows: 4px;
+  gap: 1px;
+  width: min(100%, 172px);
+  padding: 5px;
+  border-radius: 7px;
+  background: rgba(4, 8, 14, 0.78);
+}
+
+.generation-summary small {
+  color: #9fb5b5;
+  font-size: 0.7rem;
+  line-height: 1.25;
 }
 
 .generation-summary em {
@@ -1243,6 +1260,10 @@ body {
 .pack-card.is-active {
   border-color: rgba(255, 224, 102, 0.68);
   background: rgba(255, 224, 102, 0.12);
+}
+
+.pack-card.is-saved-board {
+  border-color: rgba(126, 241, 255, 0.24);
 }
 
 .pack-card:disabled {
@@ -1346,6 +1367,11 @@ body {
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.pack-copy .pack-prompt {
+  color: #9fb5b5;
+  -webkit-line-clamp: 1;
 }
 
 .pack-copy em {

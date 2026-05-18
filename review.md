@@ -1,23 +1,21 @@
 # Review
 
 ## Verdict
-Acceptable as-is. The prior keyboard activation issue is fixed, and the implementation matches the RQ-0005 plan and acceptance criteria from the inspected diff.
+Acceptable as-is. I found no blocker/high/medium/low issues in the current working tree diff for RQ-0006 after the prompt-length fix.
 
 ## Findings
-No material blocker/high/medium/low findings.
+No material findings.
 
 ## Verified
-- Read CueLoop task RQ-0005 and its plan with `cueloop machine task show RQ-0005`.
-- Inspected the working tree diff for `docs/ROADMAP.html`, `src/shared/saveState.ts`, `src/client/game/RicochetRushGame.ts`, `src/client/styles.css`, and `src/test/playabilitySmoke.ts`.
-- Confirmed Space/Enter on focused action controls now dispatches the control click before falling back to the game primary action.
-- Confirmed level-clear and game-over summaries expose the required stats and next actions, including retry/choose board, generated-board keep eligibility, and a disabled future share hook.
-- Confirmed run stats are normalized/restored in save state and written in checkpoints.
-- Confirmed smoke coverage now keyboard-activates `Choose Board` from the clear summary and checks game-over summary behavior.
-- Confirmed `git diff --check` is clean.
+- Read CueLoop task RQ-0006 and inspected the requested diff/files.
+- Confirmed `GameSave.levelSourcePrompt` now normalizes to 180 chars in `src/shared/saveState.ts`, matching the Designer prompt limit and saved-board prompt normalization.
+- Confirmed generated prompt capture flows through generation, checkpoint write/restore, and Saved Designs persistence without being rewritten by later Designer edits.
+- Confirmed Saved Designs entries carry source prompt and per-board best score metadata, render individual gallery cards with escaped prompt/date/thumbnail fields, and can replay saved cards.
+- Confirmed the smoke test now uses a 176-char prompt, edits the Designer after generation, reloads the generated checkpoint, keeps the board, and expects the full original prompt in the gallery.
+- Ran `git diff --check` on the reviewed files; no whitespace errors were reported.
 
 ## Risks
-- I did not rerun `npm run ci`; the handoff reports it passed, including build, 44 Vitest tests, smoke, and UX audit 100/0/0.
-- Smoke asserts Enter activation for `Choose Board`; Space uses the same code path but is not separately asserted.
+- I did not rerun the full `npm run ci`; I relied on the provided passing CI/smoke/UX result and performed targeted diff inspection plus `git diff --check`.
 
 ## Recommended Next Step
-- Proceed with task completion; no review-driven fix is required.
+- Proceed with parent review/merge flow for RQ-0006.

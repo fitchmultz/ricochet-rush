@@ -482,6 +482,7 @@ export class RicochetRushGame {
   private sparksPoints: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial> | null = null;
   private bricks: Brick[] = [];
   private levelBlueprint: LevelBlueprint = fallbackLevel({ level: 1, score: 0, lives: 3, clearedLevels: 0, recentEvents: [] });
+  private levelSourcePrompt = "Default Ricochet board prompt";
   private settings: GameSettings = DEFAULT_SETTINGS;
   private phase: GamePhase = "loading";
   private lastTime = 0;
@@ -1062,9 +1063,35 @@ export class RicochetRushGame {
   }
 
   private selectPack(packId: string) {
-    if (this.loadingLevel || !this.canPlayPack(packId)) return;
+    if (this.loadingLevel) return;
+    const savedIndex = savedBoardIndexFromPackId(packId);
+    if (savedIndex !== null) {
+      this.startSavedBoard(savedIndex);
+      return;
+    }
+    if (!this.canPlayPack(packId)) return;
     const packName = this.packNameFor(packId);
     this.startPack(packId, `${packName} loaded.`);
+  }
+
+  private startSavedBoard(index: number) {
+    const saved = this.savedBoards[index];
+    if (!saved) return;
+    this.level = index + 1;
+    this.clearedLevels = Math.min(index, this.packProgress[SAVED_DESIGNS_PACK_ID]?.cleared ?? 0);
+    this.score = 0;
+    this.lives = 3;
+    this.combo = 1;
+    this.runStats = createRunStats(this.score, this.bestScore);
+    this.latestAgentTrace = undefined;
+    this.autosaveSuppressed = false;
+    localStorage.removeItem(SAVE_KEY);
+    this.hasSave = false;
+    this.loadLevel(saved.levelBlueprint, `${saved.levelName} replay loaded from Saved Designs.`, undefined, undefined, {
+      source: "pack",
+      packId: SAVED_DESIGNS_PACK_ID,
+      boardIndex: index
+    });
   }
 
   private loadPackBoard(packId: string, boardIndex: number, event: string) {
@@ -1080,7 +1107,7 @@ export class RicochetRushGame {
     const request = { ...this.levelRequest(), level: boardIndex + 1, clearedLevels: boardIndex };
     if (packId === SAVED_DESIGNS_PACK_ID) {
       const saved = this.savedBoards[boardIndex];
-      return saved ? normalizeLevel(saved.levelBlueprint, request) : null;
+      return saved ? normalizeLevel(saved.levelBlueprint, authoredBoardRequestForSaved(request)) : null;
     }
     return materializeAuthoredBoard(packId, boardIndex, request);
   }
@@ -1097,15 +1124,24 @@ export class RicochetRushGame {
     return cleared >= total ? 0 : clamp(Math.floor(cleared), 0, total - 1);
   }
 
+  private updateSavedBoardBestScore(boardIndex: number, score: number) {
+    const saved = this.savedBoards[boardIndex];
+    if (!saved || score <= saved.bestScore) return;
+    this.savedBoards = this.savedBoards.map((entry, index) => (index === boardIndex ? { ...entry, bestScore: Math.max(entry.bestScore, score) } : entry));
+    writeJson(SAVED_BOARDS_KEY, this.savedBoards);
+  }
+
   private saveCurrentBoardToPack() {
     if (this.boardContext.source !== "generated" || this.loadingLevel) return;
-    const levelBlueprint = normalizeLevel(this.levelBlueprint, this.levelRequest());
+    const levelBlueprint = cloneLevelBlueprint(this.levelBlueprint);
     const now = new Date();
     const entry: SavedBoardEntry = {
       id: `saved-${now.getTime()}`,
       createdAt: now.toISOString(),
       levelName: levelBlueprint.name,
-      levelBlueprint
+      levelBlueprint,
+      sourcePrompt: this.levelSourcePrompt || "Default Ricochet board prompt",
+      bestScore: 0
     };
     this.savedBoards = trimSavedBoards([entry, ...this.savedBoards], SAVED_BOARDS_MAX);
     writeJson(SAVED_BOARDS_KEY, this.savedBoards);
@@ -1127,12 +1163,14 @@ export class RicochetRushGame {
     event: string,
     trace?: LevelResponse["trace"],
     summary?: GenerationSummary,
-    context: BoardContext = this.boardContext
+    context: BoardContext = this.boardContext,
+    sourcePrompt = context.source === "generated" ? this.designerIntent.brief || "Default Ricochet board prompt" : ""
   ) {
     this.autosaveSuppressed = false;
     this.boardContext = context;
     this.applyBoardTheme();
     this.latestGenerationSummary = context.source === "generated" ? summary : undefined;
+    this.levelSourcePrompt = context.source === "generated" ? sourcePrompt : "";
     this.levelBlueprint = level;
     this.bricks = materializeLevelBricks(level);
     this.runStats.levelStartedAt = Date.now();
@@ -1176,6 +1214,7 @@ export class RicochetRushGame {
     const restoredLevel = restoredPackLevel ?? save.levelBlueprint;
     const savedBricksFitLevel = save.bricks.length > 0 && bricksFitLevel(save.bricks, restoredLevel);
     this.levelBlueprint = restoredLevel;
+    this.levelSourcePrompt = save.levelSourcePrompt;
     this.bricks = savedBricksFitLevel ? save.bricks.map((brick) => ({ ...brick })) : materializeLevelBricks(restoredLevel);
     this.recentEvents = save.recentEvents.length > 0 ? [...save.recentEvents] : this.recentEvents;
     this.phase = "ready";
@@ -1693,6 +1732,7 @@ export class RicochetRushGame {
       this.phase = "gameOver";
       this.powerups.splice(0);
       this.laserBeams.splice(0);
+      if (this.boardContext.source === "pack" && this.boardContext.packId === SAVED_DESIGNS_PACK_ID) this.updateSavedBoardBestScore(this.boardContext.boardIndex, this.score);
       localStorage.removeItem(SAVE_KEY);
       this.hasSave = false;
       this.pushEvent("Run ended.");
@@ -1730,6 +1770,7 @@ export class RicochetRushGame {
     writeBestScore(this.bestScore);
     if (completedContext.source === "pack") {
       this.packProgress = markPackBoardCleared(this.packProgress, completedContext.packId, completedContext.boardIndex, this.score, this.savedBoards.length);
+      if (completedContext.packId === SAVED_DESIGNS_PACK_ID) this.updateSavedBoardBestScore(completedContext.boardIndex, this.score);
       writeJson(PACK_PROGRESS_KEY, this.packProgress);
     }
     this.powerups.splice(0);
@@ -1801,18 +1842,20 @@ export class RicochetRushGame {
     this.pushEvent(event);
     this.showLoadingOverlay(`Generating Level ${this.level}`, "The game is paused while a playable wall is prepared.");
     this.refreshHud("Designer is shaping a playable wall.");
+    const request = this.levelRequest();
+    const sourcePrompt = request.designer?.brief || "Default Ricochet board prompt";
     try {
-      const result = await requestGeneratedLevel(this.levelRequest());
+      const result = await requestGeneratedLevel(request);
       const sourceEvent = `${result.level.name} is ready.`;
-      this.loadLevel(result.level, sourceEvent, result.trace, result.summary, { source: "generated", packId: null, boardIndex: 0 });
+      this.loadLevel(result.level, sourceEvent, result.trace, result.summary, { source: "generated", packId: null, boardIndex: 0 }, sourcePrompt);
     } catch (error) {
       const reason = error instanceof Error ? error.message : "unknown error";
-      const fallback = fallbackLevel(this.levelRequest());
-      this.loadLevel(fallback, `${fallback.name} is ready.`, undefined, this.localGenerationSummary(fallback, reason), {
+      const fallback = fallbackLevel(request);
+      this.loadLevel(fallback, `${fallback.name} is ready.`, undefined, this.localGenerationSummary(fallback, reason, request.designer), {
         source: "generated",
         packId: null,
         boardIndex: 0
-      });
+      }, sourcePrompt);
     } finally {
       this.loadingLevel = false;
       this.refreshHud();
@@ -1830,18 +1873,18 @@ export class RicochetRushGame {
     };
   }
 
-  private localGenerationSummary(level: LevelBlueprint, reason: string): GenerationSummary {
+  private localGenerationSummary(level: LevelBlueprint, reason: string, designer: BoardDesignerIntent = this.designerIntent): GenerationSummary {
     const brickCount = level.rows.flat().filter(Boolean).length;
-    const targets = designerTargets(this.designerIntent, this.level);
+    const targets = designerTargets(designer, this.level);
     return {
       source: "fallback",
       title: "Local backup board",
       detail: `Local backup built ${level.name} from the current board prompt. Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; final wall has ${brickCount} playable bricks.`,
       chips: [
-        this.designerIntent.brief ? "prompt" : "default prompt",
-        `difficulty ${this.designerIntent.difficulty}/5`,
-        `${Math.round(this.designerIntent.density * 100)}% density`,
-        `${Math.round(this.designerIntent.specialBias * 100)}% specials`
+        designer.brief ? "prompt" : "default prompt",
+        `difficulty ${designer.difficulty}/5`,
+        `${Math.round(designer.density * 100)}% density`,
+        `${Math.round(designer.specialBias * 100)}% specials`
       ],
       warning: reason
     };
@@ -1896,25 +1939,41 @@ export class RicochetRushGame {
         unlocked: progress.unlocked,
         active: this.boardContext.source === "pack" && this.boardContext.packId === pack.id,
         empty: false,
-        previewRows: [...pack.boards[previewIndex].pattern]
+        previewRows: [...pack.boards[previewIndex].pattern],
+        kind: "pack" as const
       };
     });
     const savedProgress = this.packProgress[SAVED_DESIGNS_PACK_ID] ?? { cleared: 0, bestScore: 0, unlocked: this.savedBoards.length > 0 };
     const savedPreview = this.savedBoards[0] ? previewRowsFromLevel(this.savedBoards[0].levelBlueprint) : [];
-    return [
-      ...builtInItems,
-      {
-        id: SAVED_DESIGNS_PACK_ID,
-        name: "Saved Designs",
-        description: "Generated boards you kept for replay.",
-        progressLabel: this.savedBoards.length > 0 ? `${savedProgress.cleared}/${this.savedBoards.length} cleared` : "empty",
-        bestScore: savedProgress.bestScore,
-        unlocked: this.savedBoards.length > 0,
-        active: this.boardContext.source === "pack" && this.boardContext.packId === SAVED_DESIGNS_PACK_ID,
-        empty: this.savedBoards.length === 0,
-        previewRows: savedPreview
-      }
-    ];
+    const savedCollection: HudPackItem = {
+      id: SAVED_DESIGNS_PACK_ID,
+      name: "Saved Designs Gallery",
+      description: "Generated boards you kept. Individual cards below can be replayed; remix by copying their prompt into the Designer or discard by replacing them with better saves.",
+      progressLabel: this.savedBoards.length > 0 ? `${savedProgress.cleared}/${this.savedBoards.length} cleared` : "empty",
+      bestScore: savedProgress.bestScore,
+      unlocked: this.savedBoards.length > 0,
+      active: this.boardContext.source === "pack" && this.boardContext.packId === SAVED_DESIGNS_PACK_ID,
+      empty: this.savedBoards.length === 0,
+      previewRows: savedPreview,
+      kind: "pack",
+      actionLabel: "Browse"
+    };
+    const savedItems: HudPackItem[] = this.savedBoards.map((board, index) => ({
+      id: savedBoardPackId(index),
+      name: board.levelName,
+      description: "Saved generated board. Replay this layout, remix from its prompt, or discard later by keeping stronger designs.",
+      progressLabel: "saved design",
+      bestScore: board.bestScore,
+      unlocked: true,
+      active: this.boardContext.source === "pack" && this.boardContext.packId === SAVED_DESIGNS_PACK_ID && this.boardContext.boardIndex === index,
+      empty: false,
+      previewRows: previewRowsFromLevel(board.levelBlueprint),
+      kind: "saved-board",
+      sourcePrompt: board.sourcePrompt,
+      createdAt: board.createdAt,
+      actionLabel: "Replay saved board"
+    }));
+    return [...builtInItems, savedCollection, ...savedItems];
   }
 
   private refreshHud(status?: string) {
@@ -1942,7 +2001,8 @@ export class RicochetRushGame {
       boardSource: this.boardContext.source,
       designer: {
         intent: this.designerIntent,
-        generationSummary: this.latestGenerationSummary
+        generationSummary: this.latestGenerationSummary,
+        previewRows: this.boardContext.source === "generated" ? previewRowsFromLevel(this.levelBlueprint) : []
       },
       events: this.recentEvents
     });
@@ -2012,6 +2072,7 @@ export class RicochetRushGame {
       combo: this.combo,
       paddleWidth: this.paddleWidth,
       levelBlueprint: this.levelBlueprint,
+      levelSourcePrompt: this.levelSourcePrompt,
       bricks: this.bricks.map(toSavedBrick),
       recentEvents: event ? [event, ...this.recentEvents].slice(0, 6) : this.recentEvents,
       laserTimer: this.laserTimer,
@@ -2681,11 +2742,41 @@ function fromSavedRunStats(stats: SavedRunStats, score: number, bestScore: numbe
   };
 }
 
+function cloneLevelBlueprint(level: LevelBlueprint): LevelBlueprint {
+  return {
+    name: level.name,
+    briefing: level.briefing,
+    paddleHint: level.paddleHint,
+    speed: level.speed,
+    rows: level.rows.map((row) => row.map((cell) => (cell ? { ...cell } : null)))
+  };
+}
+
+function authoredBoardRequestForSaved(request: LevelRequest): LevelRequest {
+  return {
+    level: request.level,
+    score: request.score,
+    lives: request.lives,
+    clearedLevels: request.clearedLevels,
+    recentEvents: request.recentEvents
+  };
+}
+
 function formatRunDuration(ms: number): string {
   const seconds = Math.max(0, Math.round(ms / 1000));
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return minutes > 0 ? `${minutes}:${String(remainder).padStart(2, "0")}` : `${remainder}s`;
+}
+
+function savedBoardPackId(index: number): string {
+  return `${SAVED_DESIGNS_PACK_ID}:${index}`;
+}
+
+function savedBoardIndexFromPackId(packId: string): number | null {
+  if (!packId.startsWith(`${SAVED_DESIGNS_PACK_ID}:`)) return null;
+  const index = Number(packId.slice(SAVED_DESIGNS_PACK_ID.length + 1));
+  return Number.isInteger(index) && index >= 0 ? index : null;
 }
 
 function soundForBrickDestroy(kind: BrickKind): GameSoundKind {

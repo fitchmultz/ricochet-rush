@@ -31,6 +31,8 @@ export interface SavedBoardEntry {
   createdAt: string;
   levelName: string;
   levelBlueprint: LevelBlueprint;
+  sourcePrompt: string;
+  bestScore: number;
 }
 
 export const BUILT_IN_PACKS = [
@@ -401,9 +403,10 @@ function normalizeSavedBoard(input: unknown): SavedBoardEntry | null {
   if (!id) return null;
   const createdAt = typeof input.createdAt === "string" ? input.createdAt : new Date(0).toISOString();
   const levelName = typeof input.levelName === "string" && input.levelName.trim().length > 0 ? input.levelName.trim().slice(0, 80) : "Saved Board";
+  const sourcePrompt = typeof input.sourcePrompt === "string" && input.sourcePrompt.trim().length > 0 ? input.sourcePrompt.trim().slice(0, 180) : "Saved from generated board";
   if (!Array.isArray(input.levelBlueprint.rows)) return null;
   const levelBlueprint = normalizeLevel(input.levelBlueprint, { level: 1, score: 0, lives: 3, clearedLevels: 0, recentEvents: [] });
-  return { id, createdAt, levelName, levelBlueprint };
+  return { id, createdAt, levelName, levelBlueprint, sourcePrompt, bestScore: nonNegativeInteger(input.bestScore) };
 }
 
 function nonNegativeInteger(value: unknown): number {

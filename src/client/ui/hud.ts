@@ -15,6 +15,10 @@ export interface HudPackItem {
   active: boolean;
   empty: boolean;
   previewRows: string[];
+  kind?: "pack" | "saved-board";
+  sourcePrompt?: string;
+  createdAt?: string;
+  actionLabel?: string;
 }
 
 export interface HudState {
@@ -44,6 +48,7 @@ export interface HudState {
   designer: {
     intent: BoardDesignerIntent;
     generationSummary?: GenerationSummary;
+    previewRows?: string[];
   };
   events: string[];
   announcement: string;
@@ -438,7 +443,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       if (document.activeElement !== designerBrief) {
         designerBrief.value = state.designer.intent.brief;
       }
-      renderSummary(generationSummary, state.designer.generationSummary);
+      renderSummary(generationSummary, state.designer.generationSummary, state.designer.previewRows);
       renderCompactSummary(compactGenerationSummary, state);
       powerupPrimer.hidden = state.powerupPrimerDismissed;
       sfxVolume.value = String(state.settings.sfxVolume);
@@ -574,7 +579,7 @@ function renderPower(power: HudState["activePowers"][number]): string {
   return `<span class="power-timer is-${power.tone}"><span>${escapeHtml(power.label)}</span><strong>${power.seconds}s</strong><i style="width: ${width}%"></i></span>`;
 }
 
-function renderSummary(element: HTMLElement, summary?: GenerationSummary) {
+function renderSummary(element: HTMLElement, summary?: GenerationSummary, previewRows: string[] = []) {
   if (!summary) {
     element.hidden = true;
     element.innerHTML = "";
@@ -582,10 +587,13 @@ function renderSummary(element: HTMLElement, summary?: GenerationSummary) {
   }
   element.hidden = false;
   const chips = summary.chips.map((chip) => `<span>${escapeHtml(chip)}</span>`).join("");
+  const preview = previewRows.length > 0 ? `<span class="summary-preview" aria-label="Generated board thumbnail">${renderMiniPreview(previewRows)}</span>` : "";
   element.innerHTML = `
+    ${preview}
     <strong>${escapeHtml(summary.title)}</strong>
     <p>${escapeHtml(summary.detail)}</p>
     <div>${chips}</div>
+    <small>Keep to Saved Designs, replay from the gallery, remix the prompt above, or discard by designing another board.</small>
     ${summary.warning ? `<em>${escapeHtml(summary.warning)}</em>` : ""}
   `;
 }
@@ -601,9 +609,27 @@ function renderPack(pack: HudPackItem, pending: boolean): string {
   const classes = ["pack-card"];
   if (pack.active) classes.push("is-active");
   if (pack.empty) classes.push("is-empty");
+  if (pack.kind === "saved-board") classes.push("is-saved-board");
   const disabled = pending || !pack.unlocked || pack.empty;
   const previewRows = pack.previewRows.length > 0 ? pack.previewRows : ["..............", "..............", ".............."];
-  const preview = previewRows
+  const prompt = pack.sourcePrompt ? `<span class="pack-prompt">Prompt: ${escapeHtml(pack.sourcePrompt)}</span>` : "";
+  const date = pack.createdAt ? ` · saved ${formatShortDate(pack.createdAt)}` : "";
+  const actionLabel = pack.actionLabel ?? (pack.kind === "saved-board" ? "Replay" : "Play");
+  return `
+    <button type="button" class="${classes.join(" ")}" data-pack-id="${escapeAttribute(pack.id)}" ${disabled ? "disabled" : ""}>
+      <span class="pack-preview" aria-hidden="true">${renderMiniPreview(previewRows)}</span>
+      <span class="pack-copy">
+        <strong>${escapeHtml(pack.name)}</strong>
+        <span>${escapeHtml(pack.description)}</span>
+        ${prompt}
+        <em>${escapeHtml(pack.progressLabel)} · best ${pack.bestScore}${escapeHtml(date)} · ${escapeHtml(actionLabel)}</em>
+      </span>
+    </button>
+  `;
+}
+
+function renderMiniPreview(previewRows: string[]): string {
+  return previewRows
     .slice(0, 9)
     .map((row) =>
       row
@@ -614,16 +640,12 @@ function renderPack(pack: HudPackItem, pending: boolean): string {
         .join("")
     )
     .join("");
-  return `
-    <button type="button" class="${classes.join(" ")}" data-pack-id="${escapeAttribute(pack.id)}" ${disabled ? "disabled" : ""}>
-      <span class="pack-preview" aria-hidden="true">${preview}</span>
-      <span class="pack-copy">
-        <strong>${escapeHtml(pack.name)}</strong>
-        <span>${escapeHtml(pack.description)}</span>
-        <em>${escapeHtml(pack.progressLabel)} · best ${pack.bestScore}</em>
-      </span>
-    </button>
-  `;
+}
+
+function formatShortDate(value: string): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "unknown date";
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function glyphClass(glyph: string): string {

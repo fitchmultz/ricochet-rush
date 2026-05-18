@@ -58,6 +58,7 @@ export interface GameSave {
   combo: number;
   paddleWidth: number;
   levelBlueprint: LevelBlueprint;
+  levelSourcePrompt: string;
   bricks: SavedBrick[];
   recentEvents: string[];
   laserTimer: number;
@@ -130,6 +131,7 @@ export function normalizeSaveState(input: unknown): GameSave | null {
     combo: clamp(numberValue(input.combo, 1), 1, 8),
     paddleWidth: clamp(numberValue(input.paddleWidth, 116), 58, 210),
     levelBlueprint,
+    levelSourcePrompt: stringValue(input.levelSourcePrompt, "Default Ricochet board prompt", 180),
     bricks: input.bricks.map(normalizeBrick).filter((brick): brick is SavedBrick => brick !== null),
     recentEvents: Array.isArray(input.recentEvents) ? input.recentEvents.filter((event): event is string => typeof event === "string").slice(0, 6) : [],
     laserTimer,
@@ -206,8 +208,8 @@ function nonNegativeInteger(value: unknown): number | null {
   return Math.max(0, Math.round(value));
 }
 
-function stringValue(value: unknown, fallback: string): string {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim().slice(0, 140) : fallback;
+function stringValue(value: unknown, fallback: string, maxLength = 140): string {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim().slice(0, maxLength) : fallback;
 }
 
 function numberValue(value: unknown, fallback: number): number {

@@ -216,25 +216,43 @@ try {
   assert(canvasLabel?.includes("Level 1") === true, "Expected canvas to expose current game state.");
 
   const promptInput = page.locator('[data-designer="brief"]');
+  const generatedPrompt = "heart shape, only bomb bricks with a bright center lane, mirrored bomb pockets, soft corner safety, and a tiny boss-free finish that still feels like a readable gallery preview";
+  assert(generatedPrompt.length > 140 && generatedPrompt.length <= 180, "Expected smoke prompt to exercise checkpoint prompt length limits.");
   await promptInput.fill("");
-  await promptInput.pressSequentially("heart shape, only bomb bricks");
-  assert((await promptInput.inputValue()) === "heart shape, only bomb bricks", "Expected the board prompt to preserve typed spaces while focused.");
+  await promptInput.pressSequentially(generatedPrompt);
+  assert((await promptInput.inputValue()) === generatedPrompt, "Expected the board prompt to preserve typed spaces while focused.");
   assert(await hasLocalStorageKey(page, "ricochet-rush-designer-intent"), "Expected designer intent to persist.");
   await page.locator('[data-action="new-board"]').click();
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().boardSource === "generated");
   const designed = await snapshot(page);
-  assert(designed.designerIntent.brief === "heart shape, only bomb bricks", `Expected designer brief to apply, got ${designed.designerIntent.brief}.`);
+  assert(designed.designerIntent.brief === generatedPrompt, `Expected designer brief to apply, got ${designed.designerIntent.brief}.`);
   assert(designed.boardTheme.wallGlow === "#7ef1ff", `Expected generated board theme, got ${designed.boardTheme.wallGlow}.`);
   assert(designed.generationSummary?.title === "Local backup board", "Expected public generation summary for forced fallback.");
   assert(await page.locator("[data-generation-summary]").isVisible(), "Expected visible public generation summary in the Designer panel.");
   assert(await page.locator("[data-compact-generation-summary]").isHidden(), "Expected generation diagnostics to stay out of the default play rail.");
   assert(!(await page.locator(".console-status").innerText()).toLowerCase().includes("local backup"), "Expected fallback wording to stay out of the default play rail.");
   assert(await page.locator('[data-action="save-board"]').isEnabled(), "Expected generated boards to be keepable.");
+  await promptInput.fill("different prompt after generation should not rewrite the saved board");
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().boardSource === "generated");
+  assert(await page.locator('[data-action="save-board"]').isEnabled(), "Expected restored generated board to stay keepable.");
   await page.locator('[data-action="save-board"]').click();
   assert(await hasLocalStorageKey(page, "ricochet-rush-saved-boards"), "Expected kept generated board to persist in Saved Designs.");
   assert(!(await page.locator('[data-pack-id="saved-designs"]').isDisabled()), "Expected Saved Designs to unlock after keeping a board.");
   await page.locator('[data-tool-panel="packs"]').click();
   assert((await page.locator("[data-tool-title]").innerText()) === "Board Select", "Expected Board Select title after switching tools.");
+  assert((await page.locator('[data-pack-id^="saved-designs:"]').count()) >= 1, "Expected Saved Designs gallery to show individual saved board cards.");
+  assert((await page.locator('[data-pack-id^="saved-designs:"]').first().innerText()).includes(generatedPrompt), "Expected saved board card to keep full source prompt language after checkpoint reload.");
+  assert((await page.locator('[data-pack-id^="saved-designs:"] .pack-preview .mini-brick').count()) >= 20, "Expected saved board card to include a thumbnail preview.");
+  await page.locator('[data-pack-id^="saved-designs:"]').first().click();
+  await page.waitForFunction(() => {
+    const snapshot = window.__ricochetRushGame?.debugSnapshot();
+    return snapshot?.phase === "ready" && snapshot.boardSource === "pack" && snapshot.currentPackId === "saved-designs";
+  });
+  const selectedSavedDesign = await snapshot(page);
+  assert(selectedSavedDesign.packBoardIndex === 0, `Expected first saved design replay, got index ${selectedSavedDesign.packBoardIndex}.`);
+  await page.locator('[data-tool-panel="packs"]').click();
   await page.locator('[data-pack-id="starter"]').click();
   await page.waitForFunction(() => {
     const snapshot = window.__ricochetRushGame?.debugSnapshot();
