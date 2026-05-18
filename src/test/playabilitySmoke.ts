@@ -57,6 +57,11 @@ interface DebugSnapshot {
     musicMasterGain: number;
     musicMelodyOutputPeak: number;
   };
+  effects: {
+    sparks: number;
+    impactRings: number;
+    screenFlashes: number;
+  };
   powerupPrimerDismissed: boolean;
   recentEvents: string[];
   announcement: string;
@@ -265,6 +270,9 @@ try {
   assert((await page.locator(".floating-text.is-powerupReward").count()) === 1, "Expected reward pickup label.");
   assert((await page.locator(".floating-text.is-powerupHazard").count()) === 1, "Expected hazard pickup label.");
   assert((await page.locator(".floating-text.is-powerupVolatile").count()) === 1, "Expected volatile pickup label.");
+  assert((await page.locator(".floating-text.is-combo").count()) >= 1, "Expected boosted combo floating text for streak feedback.");
+  assert(await page.locator("[data-combo]").isVisible(), "Expected combo streak badge to appear only when a streak is active.");
+  assert((await page.locator(".impact-ring").count()) >= 1, "Expected impact rings for amplified hit and pickup feedback.");
   assert((await page.locator(".power-timer.is-reward").count()) >= 2, "Expected active power timers to use reward tone styling.");
 
   const saved = await snapshot(page);
@@ -294,8 +302,14 @@ try {
   assert((await page.locator('[data-setting="music"]').count()) === 0, "Expected music checkbox to be removed.");
   assert((await page.locator('[data-setting="sfx-volume"]').inputValue()) === "1", "Expected SFX volume to default to full.");
   assert((await page.locator('[data-setting="music-volume"]').inputValue()) === "1", "Expected music volume to default to full.");
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().effects.sparks === 0);
   await page.locator('[data-setting="high-contrast"]').check();
   await page.locator('[data-setting="reduced-motion"]').check();
+  await injectPowerupClarityState(page);
+  const reducedEffects = await snapshot(page);
+  assert(reducedEffects.effects.sparks === 0, `Expected reduced motion to suppress amplified spark bursts, got ${reducedEffects.effects.sparks}.`);
+  assert(reducedEffects.effects.impactRings === 0, `Expected reduced motion to suppress impact rings, got ${reducedEffects.effects.impactRings}.`);
+  assert(reducedEffects.effects.screenFlashes === 0, `Expected reduced motion to suppress screen flashes, got ${reducedEffects.effects.screenFlashes}.`);
   await page.locator('[data-setting="sfx-volume"]').fill("0.45");
   await page.locator('[data-setting="music-volume"]').fill("0.65");
   await page.locator('[data-setting="particles"]').uncheck();

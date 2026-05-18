@@ -146,6 +146,12 @@ async function runDesktopAudit(page: Page) {
   await assertStageCoverage(page, "desktop playing");
   await capture(page, "desktop-playing");
 
+  await page.evaluate(() => window.__ricochetRushGame?.debugStageVisualSmokeState());
+  recordCheck(await page.locator("[data-combo]").isVisible(), "combo streak badge appears only when active", "Debug state exposes the live streak reward badge.");
+  recordCheck((await page.locator(".impact-ring").count()) >= 1, "impact rings render for amplified feedback", "Debug state emits impact rings for combo and pickup bursts.");
+  recordCheck((await page.locator(".floating-text.is-combo").count()) >= 1, "combo pop text renders", "Debug state emits boosted combo text.");
+  await capture(page, "desktop-effects");
+
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
   await assertFocusedOverlayAction(page, "desktop pause");

@@ -226,13 +226,102 @@ body {
   will-change: transform, opacity;
 }
 
+.floating-text.is-score {
+  color: #ffe066;
+  font-size: 0.96rem;
+}
+
 .floating-text.is-combo {
+  border: 1px solid rgba(126, 241, 255, 0.38);
+  background: rgba(6, 24, 34, 0.86);
   color: #7ef1ff;
+  font-size: 1.08rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  animation: combo-glow 0.42s ease-out;
 }
 
 .floating-text.is-status {
   color: #ffffff;
   font-size: 1rem;
+}
+
+.impact-ring {
+  --impact-color: #7ef1ff;
+  position: absolute;
+  z-index: 2;
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--impact-color);
+  border-radius: 50%;
+  box-shadow: 0 0 18px var(--impact-color);
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.35);
+  animation: impact-ring 0.62s ease-out forwards;
+}
+
+.impact-ring.is-blast,
+.impact-ring.is-boss {
+  width: 54px;
+  height: 54px;
+  border-width: 3px;
+  animation-duration: 0.72s;
+}
+
+.impact-ring.is-combo,
+.impact-ring.is-powerup {
+  width: 42px;
+  height: 42px;
+}
+
+.screen-flash {
+  --flash-color: #7ef1ff;
+  --flash-opacity: 0.16;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--flash-color);
+  opacity: 0;
+  animation: screen-flash 0.3s ease-out forwards;
+}
+
+@keyframes combo-glow {
+  0% {
+    box-shadow: 0 0 0 rgba(126, 241, 255, 0);
+    filter: saturate(1);
+  }
+
+  58% {
+    box-shadow: 0 0 24px rgba(126, 241, 255, 0.46);
+    filter: saturate(1.35);
+  }
+
+  100% {
+    box-shadow: 0 0 12px rgba(126, 241, 255, 0.24);
+    filter: saturate(1.1);
+  }
+}
+
+@keyframes impact-ring {
+  0% {
+    opacity: 0.86;
+    transform: translate(-50%, -50%) scale(0.35);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(2.65);
+  }
+}
+
+@keyframes screen-flash {
+  0% {
+    opacity: var(--flash-opacity);
+  }
+
+  100% {
+    opacity: 0;
+  }
 }
 
 .floating-text.is-powerupReward {
@@ -1676,7 +1765,10 @@ body {
 }
 
 .shell.is-reduced-motion .loader-bar span,
-.shell.is-reduced-motion .is-pulsing {
+.shell.is-reduced-motion .is-pulsing,
+.shell.is-reduced-motion .floating-text.is-combo,
+.shell.is-reduced-motion .impact-ring,
+.shell.is-reduced-motion .screen-flash {
   animation: none;
 }
 

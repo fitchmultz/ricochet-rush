@@ -102,6 +102,19 @@ interface Spark {
   vy: number;
   life: number;
   color: string;
+  gravity: number;
+  size: number;
+}
+
+interface SparkBurstOptions {
+  minSpeed: number;
+  maxSpeed: number;
+  minLife: number;
+  maxLife: number;
+  minSize: number;
+  maxSize: number;
+  gravity: number;
+  ring: boolean;
 }
 
 interface FloatingText {
@@ -277,6 +290,31 @@ const BRICK_VISUALS: Record<BrickKind, BrickVisualProfile> = {
 };
 
 const BALL_TRAIL_MIN_SPEED = 80;
+const DEFAULT_SPARK_BURST: SparkBurstOptions = {
+  minSpeed: 60,
+  maxSpeed: 220,
+  minLife: 0.34,
+  maxLife: 0.72,
+  minSize: 3.4,
+  maxSize: 5.8,
+  gravity: 220,
+  ring: false
+};
+const BRICK_BURST_SCALE: Record<BrickKind, { chip: number; crumble: number; speed: number; size: number; ring: boolean }> = {
+  basic: { chip: 12, crumble: 28, speed: 1, size: 1, ring: false },
+  hard: { chip: 18, crumble: 36, speed: 0.85, size: 1.2, ring: false },
+  bomb: { chip: 18, crumble: 54, speed: 1.35, size: 1.25, ring: true },
+  prize: { chip: 16, crumble: 36, speed: 1.08, size: 1.1, ring: false },
+  penalty: { chip: 18, crumble: 40, speed: 1.16, size: 1.12, ring: false },
+  laser: { chip: 16, crumble: 38, speed: 1.14, size: 1.08, ring: false },
+  grab: { chip: 16, crumble: 34, speed: 1.04, size: 1.08, ring: false },
+  fire: { chip: 18, crumble: 42, speed: 1.2, size: 1.12, ring: false },
+  thru: { chip: 16, crumble: 34, speed: 1.04, size: 1.06, ring: false },
+  split: { chip: 16, crumble: 36, speed: 1.08, size: 1.08, ring: false },
+  wide: { chip: 16, crumble: 34, speed: 1.04, size: 1.08, ring: false },
+  slow: { chip: 16, crumble: 34, speed: 0.95, size: 1.08, ring: false },
+  boss: { chip: 30, crumble: 72, speed: 1.18, size: 1.45, ring: true }
+};
 
 const POWERUP_ORDER: PowerupKind[] = [
   "expandPaddle",
@@ -538,6 +576,11 @@ export class RicochetRushGame {
       generationSummary: this.latestGenerationSummary,
       settings: this.settings,
       audio: this.audio.debugSnapshot(),
+      effects: {
+        sparks: this.sparks.length,
+        impactRings: this.effectsLayer.querySelectorAll(".impact-ring").length,
+        screenFlashes: this.effectsLayer.querySelectorAll(".screen-flash").length
+      },
       powerupPrimerDismissed: this.powerupPrimerDismissed,
       recentEvents: this.recentEvents,
       announcement: this.announcement
@@ -554,10 +597,14 @@ export class RicochetRushGame {
     );
     this.laserTimer = 7;
     this.grabTimer = 10;
+    this.combo = 2.6;
     if (this.balls[0]) this.balls[0].fireTimer = 8;
     this.addFloatingText(320, 430, "+Expand paddle", "powerupReward");
     this.addFloatingText(480, 430, "-Shrink paddle", "powerupHazard");
     this.addFloatingText(640, 430, "! Eight ball", "powerupVolatile");
+    this.addFloatingText(WIDTH / 2, 380, "Streak x2.6", "combo");
+    this.emitComboFeedback(WIDTH / 2, 380, this.combo);
+    this.emitPowerupCatchBurst({ x: 320, y: PADDLE_Y - 18, vy: 0, kind: "expandPaddle" }, "#7bf1a8");
     this.refreshHud();
   }
 
@@ -1246,10 +1293,17 @@ export class RicochetRushGame {
 
   private hitBrick(brick: Brick) {
     brick.hp -= 1;
-    if (brick.hp > 0) this.audio.play(brick.kind === "hard" || brick.kind === "boss" ? "hardBrick" : "brickChip", this.settings.sfxVolume);
-    this.brickImpactTimers.set(brick, 0.16);
-    this.emitSparks(brick.x + brick.width / 2, brick.y + brick.height / 2, COLORS[brick.kind], 12);
-    if (brick.hp > 0) return;
+    const destroyed = brick.hp <= 0;
+    this.brickImpactTimers.set(brick, destroyed ? 0.24 : 0.18);
+    this.emitBrickBurst(brick, destroyed);
+    if (brick.kind === "boss") {
+      this.shakeBoard(destroyed ? 0.26 : 0.16, destroyed ? 4.4 : 2.4);
+      this.emitImpactRing(brick.x + brick.width / 2, brick.y + brick.height / 2, COLORS.boss, "boss");
+    }
+    if (brick.hp > 0) {
+      this.audio.play(brick.kind === "hard" || brick.kind === "boss" ? "hardBrick" : "brickChip", this.settings.sfxVolume);
+      return;
+    }
     this.audio.play(soundForBrickDestroy(brick.kind), this.settings.sfxVolume);
     this.bricks = this.bricks.filter((candidate) => candidate !== brick);
     const points = Math.round(40 * this.combo * (brick.kind === "boss" ? 5 : brick.maxHp));
@@ -1257,9 +1311,14 @@ export class RicochetRushGame {
     this.bestScore = Math.max(this.bestScore, this.score);
     writeBestScore(this.bestScore);
     this.combo = Math.min(8, this.combo + 0.22);
-    this.addFloatingText(brick.x + brick.width / 2, brick.y + brick.height / 2, `+${points}`, "score");
-    if (this.combo >= 2) this.addFloatingText(brick.x + brick.width / 2, brick.y + brick.height / 2 - 24, `x${this.combo.toFixed(1)}`, "combo");
-    this.shakeBoard(brick.kind === "boss" ? 0.14 : 0.08, brick.kind === "boss" ? 2.4 : 1.1);
+    const centerX = brick.x + brick.width / 2;
+    const centerY = brick.y + brick.height / 2;
+    this.addFloatingText(centerX, centerY, `+${points}`, "score");
+    if (this.combo >= 2) {
+      this.addFloatingText(centerX, centerY - 28, `Streak x${this.combo.toFixed(1)}`, "combo");
+      this.emitComboFeedback(centerX, centerY - 12, this.combo);
+    }
+    this.shakeBoard(brick.kind === "boss" ? 0.2 : 0.1, brick.kind === "boss" ? 3.6 : 1.35);
     this.resolveBrickPrize(brick);
     this.saveCheckpoint();
   }
@@ -1282,9 +1341,13 @@ export class RicochetRushGame {
   }
 
   private explode(source: Brick) {
-    this.emitSparks(source.x + source.width / 2, source.y + source.height / 2, "#ff5c5c", 32);
+    const centerX = source.x + source.width / 2;
+    const centerY = source.y + source.height / 2;
+    this.emitSparks(centerX, centerY, "#ff5c5c", 58, { minSpeed: 120, maxSpeed: 360, minSize: 4.8, maxSize: 8.6, ring: true, gravity: 150 });
+    this.emitImpactRing(centerX, centerY, "#ff5c5c", "blast");
+    this.emitScreenFlash("#ff5c5c", 0.2);
     this.audio.play("explosion", this.settings.sfxVolume);
-    this.shakeBoard(0.2, 4.2);
+    this.shakeBoard(0.24, 5.2);
     const blast = this.bricks.filter(
       (brick) => Math.abs(brick.x - source.x) < BRICK_WIDTH * 1.8 * this.explosionScale && Math.abs(brick.y - source.y) < BRICK_HEIGHT * 2 * this.explosionScale
     );
@@ -1309,10 +1372,10 @@ export class RicochetRushGame {
       const caught = powerup.y > PADDLE_Y - 16 && powerup.y < PADDLE_Y + 24 && Math.abs(powerup.x - this.paddleX) < this.paddleWidth / 2 + 18;
       if (caught) {
         const visual = powerupVisualFor(powerup.kind);
-        this.emitSparks(this.paddleX, PADDLE_Y - 6, visual.spark, 12);
+        this.emitPowerupCatchBurst(powerup, visual.spark);
         this.audio.play(soundForPowerup(powerup.kind), this.settings.sfxVolume);
-        this.paddleFlashTimer = 0.2;
-        this.addFloatingText(powerup.x, PADDLE_Y - 34, pickupLabelFor(powerup.kind), visual.floatingKind);
+        this.paddleFlashTimer = 0.24;
+        this.addFloatingText(powerup.x, PADDLE_Y - 38, pickupLabelFor(powerup.kind), visual.floatingKind);
         this.applyPowerup(powerup.kind);
         powerup.y = HEIGHT + 100;
       }
@@ -1326,6 +1389,88 @@ export class RicochetRushGame {
       clearedLevels: this.clearedLevels,
       combo: this.combo
     };
+  }
+
+  private emitBrickBurst(brick: Brick, destroyed: boolean) {
+    const burst = BRICK_BURST_SCALE[brick.kind];
+    const hpRatio = brick.maxHp > 0 ? clamp(brick.hp / brick.maxHp, 0, 1) : 0;
+    const damageBoost = destroyed ? 1 : 1 + (1 - hpRatio) * 0.45;
+    const count = Math.round((destroyed ? burst.crumble : burst.chip) * damageBoost);
+    const centerX = brick.x + brick.width / 2;
+    const centerY = brick.y + brick.height / 2;
+    this.emitSparks(centerX, centerY, COLORS[brick.kind], count, {
+      minSpeed: 64 * burst.speed,
+      maxSpeed: (destroyed ? 330 : 210) * burst.speed,
+      minLife: destroyed ? 0.42 : 0.28,
+      maxLife: destroyed ? 0.88 : 0.62,
+      minSize: 3.4 * burst.size,
+      maxSize: (destroyed ? 8.2 : 5.6) * burst.size,
+      gravity: brick.kind === "slow" || brick.kind === "hard" ? 260 : 190,
+      ring: destroyed && burst.ring
+    });
+    if (destroyed && burst.ring) {
+      this.emitImpactRing(centerX, centerY, COLORS[brick.kind], brick.kind === "boss" ? "boss" : "blast");
+      this.emitScreenFlash(COLORS[brick.kind], brick.kind === "boss" ? 0.18 : 0.14);
+    }
+  }
+
+  private emitComboFeedback(x: number, y: number, combo: number) {
+    const intensity = clamp((combo - 2) / 6, 0, 1);
+    this.emitSparks(x, y, "#7ef1ff", Math.round(12 + intensity * 18), {
+      minSpeed: 90,
+      maxSpeed: 250 + intensity * 120,
+      minLife: 0.36,
+      maxLife: 0.74,
+      minSize: 4.4,
+      maxSize: 7.4 + intensity * 2,
+      gravity: 80,
+      ring: true
+    });
+    this.emitImpactRing(x, y, "#7ef1ff", "combo");
+    if (combo >= 3) this.emitScreenFlash("#7ef1ff", 0.12 + intensity * 0.08);
+  }
+
+  private emitPowerupCatchBurst(powerup: Powerup, color: string) {
+    const tone = powerupToneFor(powerup.kind);
+    this.emitSparks(powerup.x, PADDLE_Y - 8, color, tone === "volatile" ? 34 : 26, {
+      minSpeed: 86,
+      maxSpeed: tone === "volatile" ? 310 : 240,
+      minLife: 0.34,
+      maxLife: 0.78,
+      minSize: 4.2,
+      maxSize: tone === "hazard" ? 7.2 : 6.4,
+      gravity: 120,
+      ring: true
+    });
+    this.emitImpactRing(powerup.x, PADDLE_Y - 8, color, "powerup");
+    this.triggerHaptic(tone === "volatile" ? [16, 28, 22] : tone === "hazard" ? [28, 22, 28] : 18);
+  }
+
+  private emitImpactRing(x: number, y: number, color: string, kind: "brick" | "blast" | "boss" | "combo" | "powerup") {
+    if (!this.settings.particles || this.settings.reducedMotion) return;
+    const node = document.createElement("div");
+    node.className = `impact-ring is-${kind}`;
+    node.style.setProperty("--impact-color", color);
+    node.style.left = `${(x / WIDTH) * 100}%`;
+    node.style.top = `${(y / HEIGHT) * 100}%`;
+    this.effectsLayer.append(node);
+    window.setTimeout(() => node.remove(), 720);
+  }
+
+  private emitScreenFlash(color: string, opacity: number) {
+    if (!this.settings.particles || this.settings.reducedMotion) return;
+    const node = document.createElement("div");
+    node.className = "screen-flash";
+    node.style.setProperty("--flash-color", color);
+    node.style.setProperty("--flash-opacity", String(opacity));
+    this.effectsLayer.append(node);
+    window.setTimeout(() => node.remove(), 360);
+  }
+
+  private triggerHaptic(pattern: number | number[]) {
+    if (this.settings.reducedMotion) return;
+    const hapticNavigator = navigator as unknown as { vibrate?: (pattern: number | number[]) => boolean };
+    if (typeof hapticNavigator.vibrate === "function") hapticNavigator.vibrate(pattern);
   }
 
   private applyPowerup(kind: PowerupKind) {
@@ -1423,7 +1568,8 @@ export class RicochetRushGame {
     for (const spark of this.sparks) {
       spark.x += spark.vx * delta;
       spark.y += spark.vy * delta;
-      spark.vy += 220 * delta;
+      spark.vx *= Math.max(0.72, 1 - delta * 0.7);
+      spark.vy += spark.gravity * delta;
       spark.life -= delta;
     }
     this.sparks.splice(0, this.sparks.length, ...this.sparks.filter((spark) => spark.life > 0));
@@ -1450,13 +1596,14 @@ export class RicochetRushGame {
   }
 
   private addFloatingText(x: number, y: number, text: string, kind: FloatingText["kind"]) {
+    const duration = kind === "combo" ? 0.95 : kind.startsWith("powerup") ? 0.9 : 0.75;
     this.floatingTexts.push({
       id: this.nextFloatingTextId,
       x,
       y,
       text,
-      life: 0.75,
-      duration: 0.75,
+      life: duration,
+      duration,
       kind
     });
     this.nextFloatingTextId += 1;
@@ -1937,9 +2084,9 @@ export class RicochetRushGame {
   private syncPaddle() {
     const flash = clamp(this.paddleFlashTimer / 0.2, 0, 1);
     const now = performance.now();
-    const width = this.paddleWidth + flash * 10;
-    const height = 15 + flash * 5;
-    const depth = this.laserTimer > 0 ? 30 : 21 + flash * 10;
+    const width = this.paddleWidth + flash * 24;
+    const height = Math.max(11, 15 - flash * 3);
+    const depth = this.laserTimer > 0 ? 32 : 21 + flash * 16;
     this.paddleMesh.scale.set(width, height, depth);
     this.paddleMesh.position.copy(toWorld(this.paddleX, PADDLE_Y + 7 + flash * 0.8, 37));
     this.paddleMesh.material.emissiveIntensity = 0.48 + flash * 1.05 + (this.lifeFlashTimer > 0 ? 0.35 : 0);
@@ -2135,7 +2282,8 @@ export class RicochetRushGame {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    this.sparksPoints = new THREE.Points(geometry, new THREE.PointsMaterial({ size: 4, vertexColors: true, transparent: true, opacity: 0.9 }));
+    const size = this.sparks.reduce((largest, spark) => Math.max(largest, spark.size), 4);
+    this.sparksPoints = new THREE.Points(geometry, new THREE.PointsMaterial({ size, vertexColors: true, transparent: true, opacity: 0.92 }));
     this.sparksGroup.add(this.sparksPoints);
   }
 
@@ -2160,22 +2308,26 @@ export class RicochetRushGame {
       node.style.left = `${(text.x / WIDTH) * 100}%`;
       node.style.top = `${((text.y - lift) / HEIGHT) * 100}%`;
       node.style.opacity = String(clamp(text.life / text.duration, 0, 1));
-      node.style.transform = `translate(-50%, -50%) scale(${this.settings.reducedMotion ? 1 : 1 + (1 - progress) * 0.08})`;
+      const baseScale = text.kind === "combo" ? 1.16 : text.kind.startsWith("powerup") ? 1.08 : 1;
+      node.style.transform = `translate(-50%, -50%) scale(${this.settings.reducedMotion ? baseScale : baseScale + (1 - progress) * 0.12})`;
     }
   }
 
-  private emitSparks(x: number, y: number, color: string, count: number) {
-    if (!this.settings.particles) return;
+  private emitSparks(x: number, y: number, color: string, count: number, options: Partial<SparkBurstOptions> = {}) {
+    if (!this.settings.particles || this.settings.reducedMotion) return;
+    const burst = { ...DEFAULT_SPARK_BURST, ...options };
     for (let index = 0; index < count; index += 1) {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = 50 + Math.random() * 180;
+      const angle = burst.ring ? (index / Math.max(1, count)) * Math.PI * 2 + (Math.random() - 0.5) * 0.32 : Math.random() * Math.PI * 2;
+      const speed = burst.minSpeed + Math.random() * (burst.maxSpeed - burst.minSpeed);
       this.sparks.push({
         x,
         y,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
-        life: 0.3 + Math.random() * 0.45,
-        color
+        life: burst.minLife + Math.random() * (burst.maxLife - burst.minLife),
+        color,
+        gravity: burst.gravity,
+        size: burst.minSize + Math.random() * (burst.maxSize - burst.minSize)
       });
     }
   }
