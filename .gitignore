@@ -7,3 +7,17 @@ dist/
 docs/media/.capture-tmp/
 dogfood-output/
 node_modules/
+
+# CueLoop local queue state
+.cueloop/queue.jsonc
+.cueloop/done.jsonc
+
+# CueLoop local/runtime artifacts (do not commit)
+.cueloop/cache/
+.cueloop/logs/
+.cueloop/workspaces/
+.cueloop/lock/
+.cueloop/undo/
+.cueloop/webhooks/
+.cueloop/trust.json
+.cueloop/trust.jsonc

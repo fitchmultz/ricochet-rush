@@ -208,29 +208,41 @@ id="toc-done---identity-cutover">Done - Identity Cutover</a></li>
 <li><a href="#done---dependency-and-cursor-sdk-runtime-refresh"
 id="toc-done---dependency-and-cursor-sdk-runtime-refresh">Done -
 Dependency And Cursor SDK Runtime Refresh</a></li>
-<li><a href="#p1---game-feel-and-physics"
-id="toc-p1---game-feel-and-physics">P1 - Game Feel And Physics</a></li>
-<li><a href="#p2---curated-board-packs"
-id="toc-p2---curated-board-packs">P2 - Curated Board Packs</a></li>
-<li><a href="#p3---cursor-sdk-board-designer-mode"
-id="toc-p3---cursor-sdk-board-designer-mode">P3 - Cursor SDK Board
-Designer Mode</a></li>
-<li><a href="#p3.5---sidebar-and-game-ui-simplification"
-id="toc-p3.5---sidebar-and-game-ui-simplification">P3.5 - Sidebar And
-Game UI Simplification</a></li>
-<li><a href="#p4---audio-and-music-upgrade"
-id="toc-p4---audio-and-music-upgrade">P4 - Audio And Music
-Upgrade</a></li>
-<li><a href="#p5---power-up-clarity-and-balance"
-id="toc-p5---power-up-clarity-and-balance">P5 - Power-Up Clarity And
-Balance</a></li>
-<li><a href="#p6---visual-polish-and-original-asset-pass"
-id="toc-p6---visual-polish-and-original-asset-pass">P6 - Visual Polish
-And Original Asset Pass</a></li>
-<li><a href="#p7---playtest-qa-and-demo-readiness"
-id="toc-p7---playtest-qa-and-demo-readiness">P7 - Playtest, QA, And Demo
-Readiness</a></li>
-</ul></li>
+<li><a href="#done---product-foundation"
+id="toc-done---product-foundation">Done - Product Foundation</a></li>
+<li><a href="#p1---screenshot-polish-and-3d-read"
+id="toc-p1---screenshot-polish-and-3d-read">P1 - Screenshot Polish And
+3D Read</a></li>
+<li><a href="#p2---hud-and-player-language-cleanup"
+id="toc-p2---hud-and-player-language-cleanup">P2 - HUD And Player
+Language Cleanup</a></li>
+<li><a href="#p3---hit-juice-and-game-feel-amplification"
+id="toc-p3---hit-juice-and-game-feel-amplification">P3 - Hit Juice And
+Game Feel Amplification</a></li>
+<li><a href="#p4---procedural-audio-identity-pass"
+id="toc-p4---procedural-audio-identity-pass">P4 - Procedural Audio
+Identity Pass</a></li>
+<li><a href="#p5---run-summary-and-score-loop"
+id="toc-p5---run-summary-and-score-loop">P5 - Run Summary And Score
+Loop</a></li>
+<li><a href="#p6---designer-preview-and-saved-designs-gallery"
+id="toc-p6---designer-preview-and-saved-designs-gallery">P6 - Designer
+Preview And Saved Designs Gallery</a></li>
+<li><a href="#p7---mobile-control-and-layout-upgrade"
+id="toc-p7---mobile-control-and-layout-upgrade">P7 - Mobile Control And
+Layout Upgrade</a></li>
+<li><a href="#p8---shareable-board-state-and-score-card"
+id="toc-p8---shareable-board-state-and-score-card">P8 - Shareable Board
+State And Score Card</a></li>
+<li><a href="#p9---daily-challenge-and-local-retention"
+id="toc-p9---daily-challenge-and-local-retention">P9 - Daily Challenge
+And Local Retention</a></li>
+<li><a href="#p10---cosmetics-and-pack-progression-rewards"
+id="toc-p10---cosmetics-and-pack-progression-rewards">P10 - Cosmetics
+And Pack Progression Rewards</a></li>
+<li><a href="#p11---reliability-gates-and-live-sdk-probe"
+id="toc-p11---reliability-gates-and-live-sdk-probe">P11 - Reliability
+Gates And Live SDK Probe</a></li></ul></li>
 <li><a href="#begin-here" id="toc-begin-here">Begin Here</a></li>
 </ul></li>
 </ul>
@@ -337,450 +349,327 @@ available fix.</li>
 <li><code>npm run build</code>, <code>npm run test</code>, and
 <code>npm run smoke</code> pass with the updated package set.</li>
 </ul>
-<h3 id="p1---game-feel-and-physics">P1 - Game Feel And Physics</h3>
-<p>Goal: make the core loop feel sharp before adding more surface
-area.</p>
-<p>Status: complete. User playtest accepted on May 8, 2026.</p>
-<p>Deliverables:</p>
+<h3 id="done---product-foundation">Done - Product Foundation</h3>
+<p>Status: complete through May 15, 2026.</p>
+<p>The first production foundation is in place. Treat these as baseline
+capabilities to preserve, not as the next product bets.</p>
+<p>Completed:</p>
 <ul>
-<li>Add paddle spin or “English” based on paddle movement at
-impact.</li>
-<li>Strengthen edge shots and make controlled angle changes easier to
-feel.</li>
-<li>Add anti-flat-loop protection so the ball does not get trapped in
-boring horizontal or vertical paths.</li>
-<li>Tune speed ramping so difficulty rises without turning into
-unreadable chaos.</li>
-<li>Add a small debug overlay or test hook for ball speed, angle, paddle
-hit zone, and collision events.</li>
+<li>Original product identity, README, logo/icon assets, public docs, and
+clean repository positioning.</li>
+<li>Three.js brick-breaker runtime with paddle rebound control, angled
+launches, anti-loop velocity correction, lives, score, combo multiplier,
+multiball, lasers, bombs, boss bricks, power-ups, particles, shake, and
+procedural audio.</li>
+<li>Curated board packs with unlock progress, previews, best scores, and
+local Saved Designs for kept generated boards.</li>
+<li>Prompt-first Board Designer powered by the Cursor SDK through the
+local Node route, with deterministic fallback generation when credentials
+are unavailable.</li>
+<li>Compact Play Console, focused Designer/Boards/Options/Log panels,
+local save/restore, accessibility-oriented overlays, and responsive
+layout.</li>
+<li>Automated verification through <code>npm run ci</code>, including
+build, unit tests, smoke, and desktop/mobile UX audit screenshots and
+reports.</li>
 </ul>
-<p>Slice 1 - Paddle Rebound Control: complete</p>
+<p>Current product diagnosis:</p>
 <ul>
-<li>Track paddle velocity each frame.</li>
-<li>Feed paddle velocity into paddle collision so moving into the ball
-adds controlled spin.</li>
-<li>Clamp launch and rebound angles to avoid boring vertical/horizontal
-loops.</li>
-<li>Add a focused unit test or smoke assertion for minimum horizontal
-velocity after paddle hits.</li>
-<li>Playtest the first board and tune constants until edge hits feel
-intentional.</li>
+<li>The game functions well and the automated UX audit is green.</li>
+<li>The next gap is not more mechanics. The gap is feel, personality,
+clarity, and the post-run loop.</li>
+<li>Existing shake, particles, 3D lighting, combo, power-up art, and
+audio are useful starting points but are too subtle in screenshots and
+early play.</li>
 </ul>
-<p>Slice 2 - Collision Consistency: complete</p>
+<h3 id="p1---screenshot-polish-and-3d-read">P1 - Screenshot Polish And
+3D Read</h3>
+<p>Goal: make the first desktop and mobile screenshots read as a finished
+arcade game rather than a clean prototype.</p>
+<p>Status: planned.</p>
+<p>Scope:</p>
 <ul>
-<li>Review wall and brick collision for repeated shallow loops.</li>
-<li>Add rebound normalization only where the loop can actually get
-stuck.</li>
-<li>Keep piercing, fireball, mega ball, and laser behavior
-unchanged.</li>
-</ul>
-<p>Slice 3 - Tuning And Debug: complete</p>
-<ul>
-<li>Expose debug snapshot fields for paddle velocity and last paddle
-hit.</li>
-<li>Tune min/max rebound angles, paddle spin transfer, and speed ramp
-constants.</li>
-<li>Capture a short manual playtest note in the roadmap before moving to
-P2.</li>
-</ul>
-<p>Implementation notes:</p>
-<ul>
-<li>Paddle rebound uses hit zone plus paddle velocity to create
-controlled spin.</li>
-<li>Launch, paddle, wall, and normal brick bounces now keep enough
-cross-axis velocity to avoid straight-line loops.</li>
-<li>Wall and normal brick loop correction preserves ball speed and is
-skipped for piercing modes.</li>
-<li>Debug snapshot exposes <code>paddleVelocityX</code>,
-<code>lastPaddleHit</code>, and <code>lastLoopCorrection</code> for
-playtest inspection.</li>
-<li>Automated coverage includes paddle rebound, collision normalization,
-launch loop checks, and the full Playwright smoke path.</li>
-</ul>
-<p>Playtest note:</p>
-<ul>
-<li>User reported P1 feels good enough to move on. Treat future physics
-changes as tuning, not a blocker for P2.</li>
+<li>Strengthen brick depth with clearer bevel/rim edges, soft shadowing,
+and material differences for hard, bomb, boss, prize, and penalty
+bricks.</li>
+<li>Make the background treatment visible: subtle parallax starfield or
+grid, pack theme color drift, and depth fog/back-wall atmosphere.</li>
+<li>Add a faint specular sweep and stronger contact shape change to the
+paddle.</li>
+<li>Add a readable speed trail or glow state to the ball without hiding
+its exact position.</li>
+<li>Keep brick color semantics stable so power-up and hazard readings do
+not regress.</li>
 </ul>
 <p>Acceptance criteria:</p>
 <ul>
-<li>A playtest can intentionally aim left, right, shallow, and steep
-shots.</li>
-<li>No common play loop traps the ball for long stretches.</li>
-<li>Existing smoke tests pass, with added regression coverage for angle
-constraints if practical.</li>
+<li>The default desktop screenshot reads as a distinctive arcade game,
+not a flat canvas.</li>
+<li>The mobile screenshot still clearly shows ball, paddle, bricks, and
+current action.</li>
+<li>Reduced-motion mode disables or tones down intense movement effects.</li>
+<li><code>npm run ci</code> and manual screenshot review stay green.</li>
 </ul>
-<h3 id="p2---curated-board-packs">P2 - Curated Board Packs</h3>
-<p>Goal: add the replayable structure that makes brick-breakers
-sticky.</p>
-<p>Status: complete as of May 8, 2026.</p>
-<p>Deliverables:</p>
+<h3 id="p2---hud-and-player-language-cleanup">P2 - HUD And Player
+Language Cleanup</h3>
+<p>Goal: remove dashboard feel and make all always-visible text
+player-facing.</p>
+<p>Status: planned.</p>
+<p>Scope:</p>
 <ul>
-<li>Create authored packs such as Starter, Classic, Chaos, Precision,
-and Boss Rush: complete.</li>
-<li>Add board thumbnails or preview cards: complete.</li>
-<li>Add pack progression, unlock state, and best score by pack:
-complete.</li>
-<li>Let generated boards be promoted into a curated local pack:
-complete.</li>
-</ul>
-<p>Implementation notes:</p>
-<ul>
-<li>Added five built-in packs with three named boards each: Starter,
-Classic, Chaos, Precision, and Boss Rush.</li>
-<li>Boot now starts on the Starter pack instead of immediately
-generating the first board.</li>
-<li>Board pack cards show compact previews, active/locked/empty state,
-cleared count, and best score.</li>
-<li>Pack progress persists locally, unlocks the next built-in pack when
-the previous pack is cleared, and resumes from the next uncleared
-board.</li>
-<li>Generated boards can be kept in the local Saved Designs pack.</li>
-<li>Authored boards and saved generated boards both pass through the
-shared level validation path before play.</li>
-</ul>
-<p>Verified:</p>
-<ul>
-<li><code>npm run ci</code> passes.</li>
-<li>Unit coverage validates authored boards, unlock progression,
-saved-board shape, and current/v1/v2 save-state migration.</li>
-<li>Playwright smoke coverage verifies Starter boot, pack cards, Saved
-Designs unlock after keeping a generated board, settings persistence,
-autosave/clear flow, keyboard launch, pause, and responsive overflow
-checks.</li>
-<li>Screenshot review passed for desktop <code>1280x820</code> and
-mobile <code>390x760</code>.</li>
+<li>Replace the six separate HUD pills with grouped information:
+<code>Score / Best</code>, <code>Lives ●●●</code>,
+<code>Level · Bricks</code>, and a combo readout near the playfield only
+when active.</li>
+<li>Replace default <code>Latest</code> dev-log messages with short
+player-facing events and hints.</li>
+<li>Move technical generation, atlas, trace, and loading diagnostics out
+of the default play rail and into the Log panel.</li>
+<li>Compress the mobile HUD to a single compact bar so the canvas gains
+vertical room.</li>
+<li>Keep the current accessibility live region and clear focus behavior.</li>
 </ul>
 <p>Acceptance criteria:</p>
 <ul>
-<li>A player can pick a pack, clear multiple named boards, and return
-later.</li>
-<li>Generated boards and authored boards share one validation path.</li>
+<li>No default visible text says things like
+<code>Generated power-up atlas loaded.</code></li>
+<li>The combo readout feels like a live streak reward rather than a
+static stat.</li>
+<li>The mobile canvas is materially larger than the current audited
+<code>372x248</code> display without creating overflow.</li>
+<li>The right rail reads as player help and recent action, not an
+engineering console.</li>
 </ul>
-<h3 id="p3---cursor-sdk-board-designer-mode">P3 - Cursor SDK Board
-Designer Mode</h3>
-<p>Goal: make Cursor SDK the core differentiator, not a hidden
-implementation detail.</p>
-<p>Status: complete as of May 8, 2026.</p>
-<p>Deliverables:</p>
+<h3 id="p3---hit-juice-and-game-feel-amplification">P3 - Hit Juice And
+Game Feel Amplification</h3>
+<p>Goal: make ordinary hits feel rewarding every few seconds by amplifying
+existing systems before inventing new mechanics.</p>
+<p>Status: planned.</p>
+<p>Scope:</p>
 <ul>
-<li>Add a prompt-first “Board Designer” panel where the player types a
-short board request: complete.</li>
-<li>Add reroll, keep, and save-to-pack actions: complete.</li>
-<li>Show a concise public-friendly generation summary instead of raw
-trace by default: complete.</li>
-<li>Keep raw trace available behind a dev/details panel: complete.</li>
-</ul>
-<p>Implementation notes:</p>
-<ul>
-<li>Added a shared board designer intent contract used by the HUD, local
-fallback generator, Cursor prompt, tests, and smoke path.</li>
-<li>Reworked the visible designer surface to a single board prompt,
-removing preset style controls and the earlier feedback buttons.</li>
-<li>Kept difficulty, density, special-brick mix, and seed defaults as
-hidden tuning inputs so broad prompts still produce bounded playable
-boards.</li>
-<li>Updated local fallback generation so designer intent changes the
-generated wall even without <code>CURSOR_API_KEY</code>, including
-explicit shape and material briefs such as heart-shaped all-bomb
-boards.</li>
-<li>Updated the Cursor prompt to treat the player's board prompt as the
-primary design source of truth while still sending exact brick,
-special-brick, hard-brick, speed, and compact-grid bounds.</li>
-<li>Added public generation summaries with intent chips, final brick
-count, and warning text. Raw request, prompt, parsed response, output,
-and errors remain behind generation trace details.</li>
-<li>Existing Keep board behavior now acts as the save-to-pack path for
-generated designs.</li>
-</ul>
-<p>Verified:</p>
-<ul>
-<li><code>npm run ci</code> passes.</li>
-<li>Unit coverage validates designer prompt content, designer intent
-normalization, fallback intent behavior, public generation summaries,
-and forced fallback summary behavior.</li>
-<li>Playwright smoke coverage verifies prompt typing with spaces,
-designer prompt persistence, fallback generation summary visibility,
-Saved Designs unlock, settings persistence, autosave/clear flow, keyboard
-launch, pause, and responsive overflow checks.</li>
-<li>Screenshot review passed for generated-board desktop
-<code>1280x820</code> and mobile <code>390x760</code>.</li>
+<li>Increase brick chip/crumble particles by brick material and
+remaining HP.</li>
+<li>Make bomb chains and boss hits heavier through stronger but brief
+screen shake, flash, and particle rings.</li>
+<li>Make paddle contact squash/stretch more visible while preserving
+precise collision feel.</li>
+<li>Escalate combo feedback with bigger pops, color flash, and score
+multiplier surge as the streak grows.</li>
+<li>Add power-up catch bursts and optional touch haptics for meaningful
+brick breaks or catches when the browser supports vibration.</li>
 </ul>
 <p>Acceptance criteria:</p>
 <ul>
-<li>The player can request a board with a visible design intent and save
-the result.</li>
-<li>The generated board remains playable after validation.</li>
-<li>The app still falls back cleanly without
+<li>A brick break has obvious cause, impact, and reward without reading
+the HUD.</li>
+<li>Boss, bomb, normal, and chipped hard-brick hits feel different.</li>
+<li>Effects obey particles and reduced-motion settings.</li>
+<li>No effect blocks ball/paddle readability during multiball.</li>
+</ul>
+<h3 id="p4---procedural-audio-identity-pass">P4 - Procedural Audio
+Identity Pass</h3>
+<p>Goal: make the existing procedural audio feel like an intentional
+arcade identity, not lightweight placeholder bleeps.</p>
+<p>Status: planned.</p>
+<p>Scope:</p>
+<ul>
+<li>Add more harmonic body and low-end weight to paddle hits.</li>
+<li>Vary brick hit and break pitch by brick type and combo state.</li>
+<li>Add ascending streak tones for combo chains without creating spam in
+multiball.</li>
+<li>Add controlled rumble/noise layers for explosions, boss damage, and
+volatile power-up chains.</li>
+<li>Keep audio generated or clearly licensed; avoid large audio-asset
+dependencies unless they materially improve identity.</li>
+</ul>
+<p>Acceptance criteria:</p>
+<ul>
+<li>SFX and music volume controls remain independent and persistent.</li>
+<li>Rapid brick chains stay readable and do not clip harshly.</li>
+<li>Audio communicates paddle hit, brick class, danger, reward, and run
+state without needing the HUD.</li>
+</ul>
+<h3 id="p5---run-summary-and-score-loop">P5 - Run Summary And Score
+Loop</h3>
+<p>Goal: close the loop after level clear or game over so a run ends with
+meaningful feedback and a clear next action.</p>
+<p>Status: planned.</p>
+<p>Scope:</p>
+<ul>
+<li>Add a level-clear summary and a game-over summary.</li>
+<li>Track and show score, best score delta, bricks broken, longest combo
+or streak, power-ups caught, boards cleared, and clear/survival time.</li>
+<li>Show direct actions: continue, retry, choose board, keep generated
+board when eligible, and later share/export when that system exists.</li>
+<li>Keep the overlay keyboard and touch accessible.</li>
+</ul>
+<p>Acceptance criteria:</p>
+<ul>
+<li>Clearing a board and losing a run both produce a satisfying summary
+instead of only a short text modal.</li>
+<li>Summary stats are derived from local run state and survive normal
+level transition timing.</li>
+<li>The next action is clear on desktop and mobile.</li>
+</ul>
+<h3 id="p6---designer-preview-and-saved-designs-gallery">P6 - Designer
+Preview And Saved Designs Gallery</h3>
+<p>Goal: make generated boards feel collectible and less blind.</p>
+<p>Status: planned.</p>
+<p>Scope:</p>
+<ul>
+<li>Show a generated-board preview thumbnail and summary before the
+player commits to play when practical.</li>
+<li>Upgrade Saved Designs from a single pack entry into a browseable
+local gallery of individual generated boards.</li>
+<li>Store and display each saved board's name, thumbnail/preview,
+saved date, source prompt, and best score.</li>
+<li>Add keep, replay, remix, and discard language for generated boards.</li>
+<li>Migrate existing saved-board data without losing boards.</li>
+</ul>
+<p>Acceptance criteria:</p>
+<ul>
+<li>A player can judge a generated board before or immediately after
+committing to it.</li>
+<li>Saved Designs can be browsed per board, not just as one anonymous
+pack.</li>
+<li>Existing saved generated boards continue to load through the shared
+validation path.</li>
+</ul>
+<h3 id="p7---mobile-control-and-layout-upgrade">P7 - Mobile Control And
+Layout Upgrade</h3>
+<p>Goal: make mobile play feel intentional rather than merely compatible.</p>
+<p>Status: planned.</p>
+<p>Scope:</p>
+<ul>
+<li>Add drag-anywhere paddle aiming over the arena while retaining
+left/right buttons as fallback controls.</li>
+<li>Combine the P2 compact HUD with mobile-specific spacing so the board
+gets more vertical room.</li>
+<li>Improve touch-control positioning around overlays, safe areas, and
+small screens.</li>
+<li>Add optional haptic taps for high-value events when supported.</li>
+</ul>
+<p>Acceptance criteria:</p>
+<ul>
+<li>Drag aiming is the primary-feeling mobile input and does not trigger
+accidental page scroll.</li>
+<li>Button steering remains usable and tested.</li>
+<li>The audited mobile canvas display area is meaningfully larger than
+the current baseline.</li>
+<li>No horizontal overflow, clipped controls, or focus traps are
+introduced.</li>
+</ul>
+<h3 id="p8---shareable-board-state-and-score-card">P8 - Shareable Board
+State And Score Card</h3>
+<p>Goal: make good generated boards and good runs portable without
+accounts or backend storage.</p>
+<p>Status: planned.</p>
+<p>Scope:</p>
+<ul>
+<li>Add export/import for compact board JSON or deterministic seed data
+where stable enough.</li>
+<li>Add a locally rendered PNG score card with score, board name, run
+stats, and a small board snapshot.</li>
+<li>Keep exported data public-safe and versioned so old exports can be
+validated or rejected cleanly.</li>
+<li>Do not add remote leaderboards, accounts, or cloud sync in this
+phase.</li>
+</ul>
+<p>Acceptance criteria:</p>
+<ul>
+<li>A strong generated board can travel to another browser profile.</li>
+<li>A final score can be saved as an image from the browser.</li>
+<li>Import validation rejects malformed or unsupported board data without
+breaking local saves.</li>
+</ul>
+<h3 id="p9---daily-challenge-and-local-retention">P9 - Daily Challenge
+And Local Retention</h3>
+<p>Goal: create a cheap reason to return after shareable board state is
+stable.</p>
+<p>Status: planned after P8.</p>
+<p>Scope:</p>
+<ul>
+<li>Add one deterministic daily board per local date.</li>
+<li>Store local daily best score and completion state by date.</li>
+<li>Surface Today's Board in the board picker with clear local-only
+language.</li>
+<li>Allow daily score cards to reuse the P8 score-card path.</li>
+</ul>
+<p>Acceptance criteria:</p>
+<ul>
+<li>The same date produces the same daily board for a given app version
+and seed policy.</li>
+<li>Daily progress persists locally without accounts.</li>
+<li>The system does not depend on remote services after the app loads.</li>
+</ul>
+<h3 id="p10---cosmetics-and-pack-progression-rewards">P10 - Cosmetics
+And Pack Progression Rewards</h3>
+<p>Goal: reward repeat play with visual progression that does not change
+balance.</p>
+<p>Status: planned after the core loop and sharing work.</p>
+<p>Scope:</p>
+<ul>
+<li>Add unlockable paddle skins, ball trails, and optional board
+backplates tied to pack completion or medals.</li>
+<li>Add a lightweight cosmetic picker under Options or the Saved Designs
+/ Boards surface.</li>
+<li>Keep all unlocks local and cosmetic-only.</li>
+<li>Make cosmetics respect high contrast and reduced-motion settings.</li>
+</ul>
+<p>Acceptance criteria:</p>
+<ul>
+<li>Cosmetics never change paddle size, ball speed, score, or drop
+rates.</li>
+<li>Pack completion has a visible reward beyond clear count.</li>
+<li>Unlocked choices persist locally and can be reset with local
+progress.</li>
+</ul>
+<h3 id="p11---reliability-gates-and-live-sdk-probe">P11 - Reliability
+Gates And Live SDK Probe</h3>
+<p>Goal: keep confidence high while the game becomes more polished and
+stateful.</p>
+<p>Status: planned and ongoing.</p>
+<p>Constraints:</p>
+<ul>
+<li>The live SDK probe must use the current Cursor SDK path and stay
+server-side.</li>
+<li>The deterministic fallback path remains the default for CI and
+unauthenticated local testing.</li>
+<li>Agents should not own public demo recording. Demo capture and final
+public demo selection are human-owned.</li>
+</ul>
+<p>Scope:</p>
+<ul>
+<li>Add or maintain an optional <code>npm run sdk:probe</code> that runs
+only when <code>CURSOR_API_KEY</code> exists, requests one generated
+board, verifies trace visibility, validates the compact grid, and
+confirms the board is playable.</li>
+<li>Extend automated playability checks for level clear, game over,
+summary display, pack unlock, Saved Designs replay, board import/export,
+and a longer stability pass without console errors.</li>
+<li>Keep <code>npm run ci</code> deterministic and runnable locally.</li>
+<li>Use manual screenshot review for visual judgment after polish passes;
+record public demo videos only when the project owner chooses to do so.</li>
+</ul>
+<p>Acceptance criteria:</p>
+<ul>
+<li><code>npm run ci</code> remains green without
 <code>CURSOR_API_KEY</code>.</li>
-</ul>
-<h3 id="p3.5---sidebar-and-game-ui-simplification">P3.5 - Sidebar And
-Game UI Simplification</h3>
-<p>Goal: reduce sidebar clutter while keeping gameplay, board design,
-pack selection, and settings easy to reach.</p>
-<p>Status: complete as of May 8, 2026.</p>
-<p>Problem:</p>
-<ul>
-<li>The sidebar now has too many always-visible surfaces: run actions,
-Board Designer controls, generation summary, board packs, settings,
-legend, event log, and generation trace.</li>
-<li>The information is useful, but it competes with itself and makes the
-game feel more like a control panel than an arcade game.</li>
-<li>Mobile makes this worse because every secondary surface becomes a
-long vertical stack.</li>
-</ul>
-<p>Likely directions:</p>
-<ul>
-<li>Split the right rail into clear modes or tabs: Play, Designer,
-Packs, and Settings.</li>
-<li>Keep only current board name, primary action, save/keep, and one
-compact designer or pack summary visible by default.</li>
-<li>Move settings, legend, events, and generation trace into collapsible
-details or a separate pause/options surface.</li>
-<li>Show the generated-board summary only when the active board is
-generated, then collapse it to a one-line chip after launch.</li>
-<li>Let pack selection use a dedicated picker or drawer instead of
-showing every pack card all the time.</li>
-<li>Keep raw generation trace as a developer log panel, never part of
-the default play rail.</li>
-</ul>
-<p>Implementation notes:</p>
-<ul>
-<li>Replaced the overloaded sidebar with a compact Play Console that
-keeps the current board, hint, primary run actions, tool launchers, and
-latest event visible.</li>
-<li>Moved Board Designer, Board Select, Options, and Run Log into
-focused drawer panels opened from the Play Console.</li>
-<li>Kept the playfield as the first read on desktop and mobile;
-secondary tools now dim the board only while intentionally open.</li>
-<li>Moved settings, brick legend, event log, and generation trace out of
-the default view.</li>
-<li>Added a compact generated-board summary in the Play Console while
-the full generation summary stays in the Board Designer panel.</li>
-<li>Updated the smoke path to prove players can open each focused tool
-surface and still complete the core run/save/settings flow.</li>
-</ul>
-<p>Verified:</p>
-<ul>
-<li><code>npm run ci</code> passes.</li>
-<li>Playwright smoke coverage verifies compact Play Console defaults,
-focused Board Select and Board Designer panels, compact generated
-summaries, Options settings, autosave/clear flow, launch/pause behavior, and
-responsive overflow checks.</li>
-<li>Screenshot review passed for desktop default, desktop Board
-Designer, desktop Board Select, mobile default, and mobile Options.</li>
-</ul>
-<p>Design constraints:</p>
-<ul>
-<li>The first screen should read as a game, not a dashboard.</li>
-<li>Desktop sidebar should fit the default viewport without
-nested-scroll fatigue.</li>
-<li>Mobile should prioritize the board, current action, and one active
-secondary mode.</li>
-<li>No user-facing functionality from P2 or P3 should disappear; it
-should be reorganized with better disclosure.</li>
-</ul>
-<p>Acceptance criteria:</p>
-<ul>
-<li>A player can start, design/reroll, keep a generated board, pick a
-pack, change settings, and inspect trace without hunting.</li>
-<li>The default desktop view has no obvious clutter or awkward nested
-scroll area.</li>
-<li>The default mobile view feels intentionally stacked rather than like
-the desktop sidebar dumped into one column.</li>
-<li>Screenshot review passes on desktop and mobile.</li>
-</ul>
-<h3 id="p4---audio-and-music-upgrade">P4 - Audio And Music Upgrade</h3>
-<p>Goal: replace placeholder synthesized bleeps with a real arcade sound
-identity.</p>
-<p>Status: complete as of May 8, 2026.</p>
-<p>Deliverables:</p>
-<ul>
-<li>Original SFX for paddle center, paddle edge, normal brick,
-hard/metal brick, glass/prize brick, bad power-up, good power-up, extra
-life, laser, explosion, ball lost, level clear, and game over.</li>
-<li>Optional original music loops for menu, board play, boss board, and
-score screen.</li>
-<li>Audio settings for sound and music separately.</li>
-<li>Respect reduced-motion/accessibility settings where effects become
-too intense.</li>
-</ul>
-<p>Implementation notes:</p>
-<ul>
-<li>Replaced one-note bleeps with a small procedural arcade sound
-palette built from Web Audio oscillators and noise bursts.</li>
-<li>Added distinct cues for paddle center, paddle edge, grab catch, hard
-brick chip, normal brick break, special brick break, boss brick break,
-good power-up, bad power-up, extra life, level warp, laser, explosion,
-ball lost, level clear, game over, pause, and resume.</li>
-<li>Added lightweight sound cooldowns so rapid brick chains stay
-readable instead of turning into a harsh wall of noise.</li>
-<li>Added separate SFX and Music volume sliders in Options, with
-backward migration from the previous single Sound setting and audio
-toggles.</li>
-<li>Added a quiet original procedural music pulse that is enabled by
-default, starts after the first browser audio gesture, and can be mixed
-separately from SFX.</li>
-<li>Kept audio asset-free: no third-party or extracted audio files are
-committed.</li>
-</ul>
-<p>Verified:</p>
-<ul>
-<li><code>npm run ci</code> passes.</li>
-<li>Unit coverage verifies volume settings normalization and legacy
-Sound/SFX/Music boolean migration.</li>
-<li>Playwright smoke coverage verifies SFX and Music volume settings
-apply and persist.</li>
-</ul>
-<p>Acceptance criteria:</p>
-<ul>
-<li>Audio communicates game state without looking at the HUD.</li>
-<li>No third-party or extracted commercial game audio is committed
-without a clear license.</li>
-</ul>
-<h3 id="p5---power-up-clarity-and-balance">P5 - Power-Up Clarity And
-Balance</h3>
-<p>Goal: turn a big power-up list into legible strategy.</p>
-<p>Status: complete as of May 8, 2026.</p>
-<p>Deliverables:</p>
-<ul>
-<li>Strong visual distinction between positive, negative, and high-risk
-power-ups: implemented.</li>
-<li>Floating pickup labels for short-lived clarity: implemented.</li>
-<li>Level-aware drop rates: implemented.</li>
-<li>Combo or streak rewards that bias toward skillful play:
-implemented.</li>
-<li>Clearer timers and stacking rules for active powers:
-implemented.</li>
-</ul>
-<p>Implementation notes:</p>
-<ul>
-<li>Added reward, hazard, and volatile power-up tones. Falling items now
-use distinct tint, pulse, scale, and motion treatment by tone.</li>
-<li>Added short pickup labels such as <code>+Expand paddle</code>,
-<code>-Shrink paddle</code>, and <code>! Eight ball</code> so catches
-explain themselves without opening a panel.</li>
-<li>Prize and penalty pools now change with board progression. Early
-boards avoid volatile rewards and hard hazards; later boards introduce
-more risk.</li>
-<li>High-combo play adds stronger reward options before volatile options
-enter the early-game pool.</li>
-<li>Timed powers refresh to at least their full duration on repeat
-pickup and active timer chips now inherit tone colors.</li>
-</ul>
-<p>Verified:</p>
-<ul>
-<li>Unit coverage validates early/late prize and penalty pools,
-high-combo reward bias, and tone classification.</li>
-<li>Build and smoke coverage remain part of the project
-<code>npm run ci</code> gate.</li>
-<li>Screenshot review passed for reward, hazard, and volatile falling
-items plus pickup labels and active timer chips.</li>
-<li>Playwright smoke coverage verifies reward, hazard, and volatile
-power-up tone state, pickup labels, and active timer tone styling.</li>
-</ul>
-<p>Acceptance criteria:</p>
-<ul>
-<li>A first-time player can tell which falling items are dangerous.</li>
-<li>A returning player can plan around power-up risk and reward.</li>
-</ul>
-<h3 id="p6---visual-polish-and-original-asset-pass">P6 - Visual Polish
-And Original Asset Pass</h3>
-<p>Goal: make the game look like its own thing.</p>
-<p>Status: complete as of May 8, 2026.</p>
-<p>Deliverables:</p>
-<ul>
-<li>Original logo, title treatment, and icon: complete.</li>
-<li>Board themes that are not copies of any source game: complete.</li>
-<li>Improved brick materials and hit states: complete.</li>
-<li>Better ball trails, laser effects, level clear effects, and boss
-feedback: complete.</li>
-<li>Screenshots or short capture clips for README: complete.</li>
-</ul>
-<p>Implementation notes:</p>
-<ul>
-<li>Added original Ricochet Rush SVG logo and icon assets under
-<code>public/assets/</code>.</li>
-<li>Added favicon, theme color, and public meta description.</li>
-<li>Added the icon mark to the Play Console so the first viewport
-carries the product identity.</li>
-<li>Added pack/source theme tinting for the scene background, floor,
-walls, rim light, and stage border.</li>
-<li>Added a README desktop gameplay screenshot generated from the
-production preview.</li>
-</ul>
-<p>Verified:</p>
-<ul>
-<li><code>npm run ci</code> passes.</li>
-<li>Playwright smoke coverage verifies favicon, loaded brand mark, board
-theme changes, nonblank WebGL canvas pixels, and no desktop/mobile
-horizontal overflow.</li>
-<li>Screenshot review passed for the README desktop gameplay image.</li>
-</ul>
-<p>Acceptance criteria:</p>
-<ul>
-<li>The first screen reads as a polished game, not a dev canvas.</li>
-<li>Screenshots are clearly original and polished.</li>
-</ul>
-<h3 id="p7---playtest-qa-and-demo-readiness">P7 - Playtest, QA, And Demo
-Readiness</h3>
-<p>Goal: make it robust enough to share confidently.</p>
-<p>Status: complete as of May 8, 2026.</p>
-<p>Deliverables:</p>
-<ul>
-<li>Browser playtest checklist for desktop and mobile widths:
-complete.</li>
-<li>Visual smoke test for canvas rendering and no layout overlap:
-complete.</li>
-<li>Automated desktop/mobile UX audit with screenshot artifacts and
-agent-readable report: complete.</li>
-<li>Demo script that shows gameplay first, then the Cursor SDK value:
-complete.</li>
-<li>Public issue list with known limitations and next bets:
-complete.</li>
-</ul>
-<p>Implementation notes:</p>
-<ul>
-<li>Added <code>docs/PLAYTEST_CHECKLIST.md</code> with desktop, mobile,
-visual, and Cursor SDK checks.</li>
-<li>Added <code>docs/DEMO_SCRIPT.md</code> with a gameplay-first
-recording flow and Cursor SDK proof points.</li>
-<li>Added <code>docs/KNOWN_LIMITATIONS.md</code> with public-safe limits
-and next bets.</li>
-<li>Linked demo and QA docs from the README.</li>
-<li>Strengthened Playwright smoke coverage to include brand asset
-loading, canvas pixel rendering, desktop panel overlap, mobile
-rendering, pack-to-generated board theme changes, and power-up
-tone/label/timer UI.</li>
-<li>Added <code>npm run ux</code> and <code>npm run ux:preview</code>
-for a production-preview UX audit that drives keyboard and touch play,
-opens the focused tool panels, captures desktop/mobile screenshots, and
-checks console health, WebGL pixel clarity, horizontal overflow,
-text/control fit, playfield overlap, focus movement, and touch
-controls.</li>
-</ul>
-<p>Verified:</p>
-<ul>
-<li><code>npm run ci</code> passes.</li>
-<li><code>npm run ci</code> now includes the UX audit after build, unit
-tests, and the playability smoke.</li>
-<li>README, roadmap, checklist, demo script, known limitations, and
-generated screenshot are aligned.</li>
-</ul>
-<p>Acceptance criteria:</p>
-<ul>
-<li><code>npm run ci</code> is green.</li>
-<li><code>dist/playtest-report/</code> gives agents current screenshots
-and machine-readable UX findings for the next polish pass.</li>
-<li>A fresh checkout can install, run, play, save, generate/fallback,
-and clear progress.</li>
-<li>The first 20 seconds show real gameplay and the AI board-designer
-value.</li>
+<li>The optional live SDK probe gives fresh evidence that the live
+Cursor path works when credentials are present.</li>
+<li>Automation covers the important end states before public sharing:
+level clear, game over, summaries, pack unlock, saved-board replay,
+share/export validation, and longer-run stability.</li>
 </ul>
 <h2 id="begin-here">Begin Here</h2>
-<p>The planned P1-P7 roadmap is implemented. Begin future work with
-playtest feedback, then promote any confirmed issues or next bets into a
-new priority section before changing scope.</p>
+<p>Begin future work with P1, P2, and P3 as one milestone: screenshot
+polish, HUD/player-language cleanup, and hit-juice amplification. These
+are the highest-leverage fixes because the current game already works,
+but its strongest systems are too subtle in the first screenshots and in
+early play. Keep the implementation path plain TypeScript, Vite,
+Three.js, and DOM HUD. Do not add remote accounts, leaderboards,
+player-facing model selectors, or new core mechanics until the feel,
+clarity, and run loop are stronger.</p>
 </main>
 </body>
 </html>
