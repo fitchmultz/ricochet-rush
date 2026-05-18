@@ -30,7 +30,7 @@ import {
   boardCountForPack,
   previewRowsFromLevel
 } from "../shared/boardPacks";
-import { DEFAULT_SETTINGS, SAVE_VERSION, normalizeSaveState, normalizeSettings } from "../shared/saveState";
+import { DEFAULT_COSMETICS, DEFAULT_SETTINGS, SAVE_VERSION, normalizeCosmetics, normalizeSaveState, normalizeSettings } from "../shared/saveState";
 import { BOARD_EXPORT_VERSION, createBoardExportPayload, encodeBoardExport, parseBoardExport } from "../shared/shareState";
 import { createApiServer } from "../server/api";
 import { buildGenerationSummary, buildPrompt, parseWorkerOutput, requestEvolution, runCursorWorker, summarizeLevelError } from "../server/cursorAgent";
@@ -754,6 +754,15 @@ describe("Cursor SDK level generation contract", () => {
       sfxVolume: 0.45,
       musicVolume: 0.65
     });
+  });
+
+  it("normalizes local cosmetic choices", () => {
+    expect(normalizeCosmetics({ paddleSkin: "gold", ballTrail: "aurora", boardBackplate: "sunrise" })).toEqual({
+      paddleSkin: "gold",
+      ballTrail: "aurora",
+      boardBackplate: "sunrise"
+    });
+    expect(normalizeCosmetics({ paddleSkin: "physics-boost", ballTrail: "bad", boardBackplate: "bad" })).toEqual(DEFAULT_COSMETICS);
   });
 
   it("normalizes saved run checkpoints and drops invalid brick records", () => {

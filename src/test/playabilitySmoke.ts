@@ -51,6 +51,16 @@ interface DebugSnapshot {
     sfxVolume: number;
     musicVolume: number;
   };
+  cosmetics: {
+    paddleSkin: "classic" | "neon" | "gold";
+    ballTrail: "classic" | "comet" | "aurora";
+    boardBackplate: "default" | "midnight" | "sunrise";
+  };
+  cosmeticOptions: {
+    paddleSkins: Array<{ id: string; label: string; unlocked: boolean }>;
+    ballTrails: Array<{ id: string; label: string; unlocked: boolean }>;
+    boardBackplates: Array<{ id: string; label: string; unlocked: boolean }>;
+  };
   audio: {
     contextState: string;
     sfxVolume: number;
@@ -400,6 +410,15 @@ try {
   assert((await page.locator('[data-setting="music"]').count()) === 0, "Expected music checkbox to be removed.");
   assert((await page.locator('[data-setting="sfx-volume"]').inputValue()) === "1", "Expected SFX volume to default to full.");
   assert((await page.locator('[data-setting="music-volume"]').inputValue()) === "1", "Expected music volume to default to full.");
+  assert((await page.locator('[data-cosmetic="paddleSkin"] option:enabled').count()) >= 2, "Expected saved/share progress to unlock cosmetic choices.");
+  await page.locator('[data-cosmetic="paddleSkin"]').selectOption("gold");
+  await page.locator('[data-cosmetic="ballTrail"]').selectOption("aurora");
+  await page.locator('[data-cosmetic="boardBackplate"]').selectOption("sunrise");
+  const cosmeticSnapshot = await snapshot(page);
+  assert(cosmeticSnapshot.cosmetics.paddleSkin === "gold", "Expected paddle cosmetic choice to apply.");
+  assert(cosmeticSnapshot.cosmetics.ballTrail === "aurora", "Expected ball-trail cosmetic choice to apply.");
+  assert(cosmeticSnapshot.cosmetics.boardBackplate === "sunrise", "Expected board backplate cosmetic choice to apply.");
+  assert(await hasLocalStorageKey(page, "ricochet-rush-cosmetics"), "Expected cosmetic choices to persist locally.");
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().effects.sparks === 0);
   await page.locator('[data-setting="high-contrast"]').check();
   await page.locator('[data-setting="reduced-motion"]').check();
@@ -451,6 +470,7 @@ try {
   await page.locator("[data-overlay-action]").click();
   await page.waitForTimeout(1200);
   assert(!(await hasLocalStorageKey(page, "ricochet-rush-save")), "Expected confirmed clear-save during active play to remove checkpoint without autosave recreating it.");
+  assert(!(await hasLocalStorageKey(page, "ricochet-rush-cosmetics")), "Expected confirmed local reset to clear cosmetic choices.");
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");

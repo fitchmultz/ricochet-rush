@@ -4,6 +4,7 @@ import {
   type ComposerAgentTrace,
   type GenerationSummary
 } from "../../shared/evolution";
+import type { GameCosmetics } from "../../shared/saveState";
 
 export interface HudPackItem {
   id: string;
@@ -40,6 +41,12 @@ export interface HudState {
     sfxVolume: number;
     musicVolume: number;
   };
+  cosmetics: GameCosmetics;
+  cosmeticOptions: {
+    paddleSkins: Array<{ id: GameCosmetics["paddleSkin"]; label: string; unlocked: boolean }>;
+    ballTrails: Array<{ id: GameCosmetics["ballTrail"]; label: string; unlocked: boolean }>;
+    boardBackplates: Array<{ id: GameCosmetics["boardBackplate"]; label: string; unlocked: boolean }>;
+  };
   activePowers: { label: string; seconds: number; maxSeconds: number; tone: "reward" | "hazard" | "volatile" }[];
   powerupPrimerDismissed: boolean;
   packs: HudPackItem[];
@@ -67,6 +74,7 @@ export interface HudActions {
   exportBoard(): string;
   importBoard(text: string): { ok: boolean; message: string };
   renderScoreCard(): Promise<{ ok: boolean; message: string; dataUrl?: string }>;
+  updateCosmetics(cosmetics: GameCosmetics): void;
   updateSettings(settings: HudState["settings"]): void;
 }
 
@@ -238,6 +246,22 @@ export function createHud(root: HTMLDivElement | null): HudApi {
                 <input data-setting="high-contrast" type="checkbox" />
               </label>
             </form>
+            <div class="cosmetic-panel" aria-label="Cosmetics">
+              <div class="panel-heading">Cosmetics</div>
+              <label>
+                <span>Paddle skin</span>
+                <select data-cosmetic="paddleSkin"></select>
+              </label>
+              <label>
+                <span>Ball trail</span>
+                <select data-cosmetic="ballTrail"></select>
+              </label>
+              <label>
+                <span>Board backplate</span>
+                <select data-cosmetic="boardBackplate"></select>
+              </label>
+              <p data-cosmetic-status>Cosmetics are local-only and never change physics.</p>
+            </div>
             <div class="settings-actions" aria-label="Save management">
               <button type="button" data-action="reset">Clear local save</button>
             </div>
@@ -322,6 +346,10 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   const particles = queryInput(root, '[data-setting="particles"]');
   const reducedMotion = queryInput(root, '[data-setting="reduced-motion"]');
   const highContrast = queryInput(root, '[data-setting="high-contrast"]');
+  const paddleSkin = querySelect(root, '[data-cosmetic="paddleSkin"]');
+  const ballTrail = querySelect(root, '[data-cosmetic="ballTrail"]');
+  const boardBackplate = querySelect(root, '[data-cosmetic="boardBackplate"]');
+  const cosmeticStatus = query(root, "[data-cosmetic-status]");
   const activePowersEl = query(root, "[data-active-powers]");
   const packList = query(root, "[data-pack-list]");
   const liveAnnouncement = query(root, "[data-live-announcement]");
@@ -351,6 +379,14 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       highContrast: highContrast.checked,
       sfxVolume: Number(sfxVolume.value),
       musicVolume: Number(musicVolume.value)
+    });
+  };
+
+  const emitCosmetics = () => {
+    actions?.updateCosmetics({
+      paddleSkin: paddleSkin.value as GameCosmetics["paddleSkin"],
+      ballTrail: ballTrail.value as GameCosmetics["ballTrail"],
+      boardBackplate: boardBackplate.value as GameCosmetics["boardBackplate"]
     });
   };
 
@@ -485,6 +521,9 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   particles.addEventListener("change", emitSettings);
   reducedMotion.addEventListener("change", emitSettings);
   highContrast.addEventListener("change", emitSettings);
+  paddleSkin.addEventListener("change", emitCosmetics);
+  ballTrail.addEventListener("change", emitCosmetics);
+  boardBackplate.addEventListener("change", emitCosmetics);
 
   return {
     setActions(nextActions) {
@@ -526,6 +565,10 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       musicVolume.value = String(state.settings.musicVolume);
       sfxVolumeOutput.textContent = formatVolume(state.settings.sfxVolume);
       musicVolumeOutput.textContent = formatVolume(state.settings.musicVolume);
+      renderCosmeticOptions(paddleSkin, state.cosmeticOptions.paddleSkins, state.cosmetics.paddleSkin);
+      renderCosmeticOptions(ballTrail, state.cosmeticOptions.ballTrails, state.cosmetics.ballTrail);
+      renderCosmeticOptions(boardBackplate, state.cosmeticOptions.boardBackplates, state.cosmetics.boardBackplate);
+      cosmeticStatus.textContent = cosmeticStatusFor(state);
       particles.checked = state.settings.particles;
       reducedMotion.checked = state.settings.reducedMotion;
       highContrast.checked = state.settings.highContrast;
@@ -573,6 +616,12 @@ function queryInput(root: ParentNode, selector: string): HTMLInputElement {
 function queryOutput(root: ParentNode, selector: string): HTMLOutputElement {
   const element = root.querySelector<HTMLOutputElement>(selector);
   if (!element) throw new Error(`Missing HUD output ${selector}`);
+  return element;
+}
+
+function querySelect(root: ParentNode, selector: string): HTMLSelectElement {
+  const element = root.querySelector<HTMLSelectElement>(selector);
+  if (!element) throw new Error(`Missing HUD select ${selector}`);
   return element;
 }
 
@@ -653,6 +702,21 @@ function renderCompactSummary(element: HTMLElement, _state: HudState) {
 function renderPower(power: HudState["activePowers"][number]): string {
   const width = Math.round(Math.max(0, Math.min(1, power.seconds / power.maxSeconds)) * 100);
   return `<span class="power-timer is-${power.tone}"><span>${escapeHtml(power.label)}</span><strong>${power.seconds}s</strong><i style="width: ${width}%"></i></span>`;
+}
+
+function renderCosmeticOptions<T extends string>(select: HTMLSelectElement, options: Array<{ id: T; label: string; unlocked: boolean }>, value: T) {
+  const markup = options.map((option) => `<option value="${escapeAttribute(option.id)}"${option.unlocked ? "" : " disabled"}>${escapeHtml(option.label)}${option.unlocked ? "" : " (locked)"}</option>`).join("");
+  if (select.innerHTML !== markup) select.innerHTML = markup;
+  select.value = options.some((option) => option.id === value && option.unlocked) ? value : options.find((option) => option.unlocked)?.id ?? value;
+}
+
+function cosmeticStatusFor(state: HudState): string {
+  const unlocked = [
+    ...state.cosmeticOptions.paddleSkins,
+    ...state.cosmeticOptions.ballTrails,
+    ...state.cosmeticOptions.boardBackplates
+  ].filter((option) => option.unlocked).length;
+  return `${unlocked} cosmetic choices unlocked. Local-only visuals; physics and scoring do not change.`;
 }
 
 function renderSummary(element: HTMLElement, summary?: GenerationSummary, previewRows: string[] = []) {

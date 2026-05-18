@@ -36,13 +36,16 @@ import {
 } from "../../shared/boardPacks";
 import { createBoardExportPayload, encodeBoardExport, parseBoardExport } from "../../shared/shareState";
 import {
+  DEFAULT_COSMETICS,
   DEFAULT_SETTINGS,
   SAVE_VERSION,
+  type GameCosmetics,
   type GameSave,
   type GameSettings,
   type SavedBallState,
   type SavedBrick,
   type SavedRunStats,
+  normalizeCosmetics,
   normalizeSaveState,
   normalizeSettings
 } from "../../shared/saveState";
@@ -264,6 +267,7 @@ const POWERUP_ATLAS_COLUMNS = 5;
 const POWERUP_ATLAS_ROWS = 4;
 const SAVE_KEY = "ricochet-rush-save";
 const SETTINGS_KEY = "ricochet-rush-settings";
+const COSMETICS_KEY = "ricochet-rush-cosmetics";
 const SIDEBAR_COLLAPSED_KEY = "ricochet-rush-sidebar-collapsed";
 const BEST_SCORE_KEY = "ricochet-rush-best-score";
 const PACK_PROGRESS_KEY = "ricochet-rush-pack-progress";
@@ -491,6 +495,7 @@ export class RicochetRushGame {
   private levelBlueprint: LevelBlueprint = fallbackLevel({ level: 1, score: 0, lives: 3, clearedLevels: 0, recentEvents: [] });
   private levelSourcePrompt = "Default Ricochet board prompt";
   private settings: GameSettings = DEFAULT_SETTINGS;
+  private cosmetics: GameCosmetics = DEFAULT_COSMETICS;
   private phase: GamePhase = "loading";
   private lastTime = 0;
   private paddleX = WIDTH / 2;
@@ -541,15 +546,17 @@ export class RicochetRushGame {
     this.mount = mount;
     this.hud = hud;
     this.settings = readSettings();
+    this.cosmetics = readJson(COSMETICS_KEY, normalizeCosmetics) ?? DEFAULT_COSMETICS;
     this.savedBoards = readJson(SAVED_BOARDS_KEY, normalizeSavedBoards) ?? [];
     this.dailyProgress = readJson(DAILY_PROGRESS_KEY, normalizeDailyProgress) ?? normalizeDailyProgress(null);
     this.packProgress =
       readJson(PACK_PROGRESS_KEY, (input) => normalizePackProgress(input, this.savedBoards.length)) ?? normalizePackProgress(null, this.savedBoards.length);
+    this.bestScore = Math.max(readBestScore(), readSave()?.bestScore ?? 0);
+    this.cosmetics = this.clampCosmetics(this.cosmetics);
     const storedDesignerIntent = readJson(DESIGNER_INTENT_KEY, normalizeDesignerIntent);
     this.designerIntent = { ...DEFAULT_DESIGNER_INTENT, brief: storedDesignerIntent?.brief ?? DEFAULT_DESIGNER_INTENT.brief };
     this.sidebarCollapsed = readJson(SIDEBAR_COLLAPSED_KEY, normalizeBoolean) ?? false;
     this.powerupPrimerDismissed = readJson(POWERUP_PRIMER_DISMISSED_KEY, normalizeBoolean) ?? false;
-    this.bestScore = Math.max(readBestScore(), readSave()?.bestScore ?? 0);
     this.setupRenderer();
     this.setupScene();
     this.loadPowerupAtlas();
@@ -616,6 +623,8 @@ export class RicochetRushGame {
       designerIntent: this.designerIntent,
       generationSummary: this.latestGenerationSummary,
       settings: this.settings,
+      cosmetics: this.cosmetics,
+      cosmeticOptions: this.collectCosmeticOptions(),
       audio: this.audio.debugSnapshot(),
       effects: {
         sparks: this.sparks.length,
@@ -933,9 +942,16 @@ export class RicochetRushGame {
         this.settings = normalizeSettings(settings);
         writeJson(SETTINGS_KEY, this.settings);
         this.applySettingsClass();
+        this.applyBoardTheme();
         this.audio.setSfxVolume(this.settings.sfxVolume);
         this.audio.setMusicVolume(this.settings.musicVolume);
         this.refreshHud("Settings updated.");
+      },
+      updateCosmetics: (cosmetics) => {
+        this.cosmetics = this.clampCosmetics(normalizeCosmetics(cosmetics));
+        writeJson(COSMETICS_KEY, this.cosmetics);
+        this.applyBoardTheme();
+        this.refreshHud("Cosmetics updated.");
       },
       toggleSidebar: () => {
         this.setSidebarCollapsed(!this.sidebarCollapsed);
@@ -1073,11 +1089,14 @@ export class RicochetRushGame {
     if (this.phase === "playing") this.phase = "ready";
     this.showOverlay(
       "Clear Saved Run?",
-      "This removes the local checkpoint for this run. Your current best score stays on this device.",
+      "This removes the local checkpoint for this run and resets cosmetic selections. Your current best score stays on this device.",
       "Clear Save",
       () => {
         this.autosaveSuppressed = true;
         localStorage.removeItem(SAVE_KEY);
+        localStorage.removeItem(COSMETICS_KEY);
+        this.cosmetics = DEFAULT_COSMETICS;
+        this.applyBoardTheme();
         this.hasSave = false;
         this.bestScore = Math.max(this.bestScore, this.score);
         writeBestScore(this.bestScore);
@@ -2184,6 +2203,8 @@ export class RicochetRushGame {
       agentTrace: this.latestAgentTrace,
       sidebarCollapsed: this.sidebarCollapsed,
       settings: this.settings,
+      cosmetics: this.cosmetics,
+      cosmeticOptions: this.collectCosmeticOptions(),
       activePowers: this.collectActivePowers(),
       powerupPrimerDismissed: this.powerupPrimerDismissed,
       packs: this.collectPackItems(),
@@ -2203,6 +2224,38 @@ export class RicochetRushGame {
       "aria-label",
       `Ricochet Rush. ${this.phase}. Level ${this.level}. ${this.lives} lives. ${this.bricks.length} bricks remain.`
     );
+  }
+
+  private collectCosmeticOptions() {
+    const anyPackComplete = BUILT_IN_PACKS.some((pack) => (this.packProgress[pack.id]?.cleared ?? 0) >= pack.boards.length);
+    const dailyComplete = Object.values(this.dailyProgress).some((progress) => progress.completed);
+    const sharedOrSaved = this.savedBoards.length > 0 || this.bestScore >= 5000;
+    return {
+      paddleSkins: [
+        { id: "classic" as const, label: "Classic Chrome", unlocked: true },
+        { id: "neon" as const, label: "Neon Circuit - clear a pack or daily", unlocked: anyPackComplete || dailyComplete },
+        { id: "gold" as const, label: "Gold Medal - keep a board or 5k best", unlocked: sharedOrSaved }
+      ],
+      ballTrails: [
+        { id: "classic" as const, label: "Classic Spark", unlocked: true },
+        { id: "comet" as const, label: "Comet - clear a pack or daily", unlocked: anyPackComplete || dailyComplete },
+        { id: "aurora" as const, label: "Aurora - keep a board or 5k best", unlocked: sharedOrSaved }
+      ],
+      boardBackplates: [
+        { id: "default" as const, label: "Default Arena", unlocked: true },
+        { id: "midnight" as const, label: "Midnight Grid - clear a pack or daily", unlocked: anyPackComplete || dailyComplete },
+        { id: "sunrise" as const, label: "Sunrise Vault - keep a board or 5k best", unlocked: sharedOrSaved }
+      ]
+    };
+  }
+
+  private clampCosmetics(cosmetics: GameCosmetics): GameCosmetics {
+    const options = this.collectCosmeticOptions();
+    return {
+      paddleSkin: options.paddleSkins.some((option) => option.id === cosmetics.paddleSkin && option.unlocked) ? cosmetics.paddleSkin : "classic",
+      ballTrail: options.ballTrails.some((option) => option.id === cosmetics.ballTrail && option.unlocked) ? cosmetics.ballTrail : "classic",
+      boardBackplate: options.boardBackplates.some((option) => option.id === cosmetics.boardBackplate && option.unlocked) ? cosmetics.boardBackplate : "default"
+    };
   }
 
   private collectActivePowers(): { label: string; seconds: number; maxSeconds: number; tone: PowerupTone }[] {
@@ -2285,15 +2338,16 @@ export class RicochetRushGame {
 
   private applyBoardTheme() {
     const theme = boardThemeFor(this.boardContext);
-    this.scene.background = new THREE.Color(theme.scene);
-    this.floorMaterial.color.set(theme.floor);
+    const backplate = boardBackplateCosmetic(this.cosmetics.boardBackplate, theme, this.settings.highContrast);
+    this.scene.background = new THREE.Color(backplate.scene);
+    this.floorMaterial.color.set(backplate.floor);
     this.wallMaterial.color.set(theme.wall);
-    this.wallMaterial.emissive.set(theme.wallGlow);
-    this.backdropMaterial.color.set(theme.floor);
-    this.backdropFogMaterial.color.set(theme.wallGlow);
-    this.backdropGridMaterial.color.set(theme.rim);
-    this.backdropStarMaterial.color.set(theme.rim);
-    this.rimLight.color.set(theme.rim);
+    this.wallMaterial.emissive.set(backplate.wallGlow);
+    this.backdropMaterial.color.set(backplate.floor);
+    this.backdropFogMaterial.color.set(backplate.wallGlow);
+    this.backdropGridMaterial.color.set(backplate.rim);
+    this.backdropStarMaterial.color.set(backplate.rim);
+    this.rimLight.color.set(backplate.rim);
     const stage = this.mount.closest<HTMLElement>(".stage");
     stage?.style.setProperty("--stage-border-color", `${theme.wallGlow}66`);
     stage?.style.setProperty("--stage-glow-color", `${theme.wallGlow}2f`);
@@ -2422,10 +2476,15 @@ export class RicochetRushGame {
     const width = this.paddleWidth + flash * 24;
     const height = Math.max(11, 15 - flash * 3);
     const depth = this.laserTimer > 0 ? 32 : 21 + flash * 16;
+    const cosmetic = paddleCosmetic(this.cosmetics.paddleSkin, this.settings.highContrast);
     this.paddleMesh.scale.set(width, height, depth);
     this.paddleMesh.position.copy(toWorld(this.paddleX, PADDLE_Y + 7 + flash * 0.8, 37));
-    this.paddleMesh.material.emissiveIntensity = 0.48 + flash * 1.05 + (this.lifeFlashTimer > 0 ? 0.35 : 0);
+    this.paddleMesh.material.color.set(cosmetic.color);
+    this.paddleMesh.material.emissive.set(cosmetic.emissive);
+    this.paddleMesh.material.emissiveIntensity = cosmetic.emissiveIntensity + flash * 1.05 + (this.lifeFlashTimer > 0 ? 0.35 : 0);
 
+    this.paddleGlowMaterial.color.set(cosmetic.glow);
+    this.paddleSpecularMaterial.color.set(cosmetic.specular);
     this.paddleGlowMesh.position.copy(toWorld(this.paddleX, PADDLE_Y + 9, 30));
     this.paddleGlowMesh.scale.set(width * 1.16, 27 + flash * 12, 1);
     this.paddleGlowMaterial.opacity = this.settings.reducedMotion ? 0.22 + flash * 0.08 : 0.3 + flash * 0.18;
@@ -2470,7 +2529,8 @@ export class RicochetRushGame {
         mesh.rotation.y += 0.055;
       }
       const material = mesh.material;
-      const ballColor = ball.fireTimer > 0 ? "#ff5c5c" : ball.thruTimer > 0 ? "#d6ff4d" : "#ffe066";
+      const ballColor = ball.fireTimer > 0 ? "#ff5c5c" : ball.thruTimer > 0 ? "#d6ff4d" : ballCosmeticColor(this.cosmetics.ballTrail, this.settings.highContrast);
+      material.color.set(ballColor);
       material.emissive.set(ballColor);
       material.emissiveIntensity = ball.megaTimer > 0 ? 0.92 : 0.62;
       this.syncBallVisual(ball, visual, ballColor, head);
@@ -2931,6 +2991,27 @@ function fromSavedRunStats(stats: SavedRunStats, score: number, bestScore: numbe
     powerupsCaught: stats.powerupsCaught,
     boardsCleared: stats.boardsCleared
   };
+}
+
+function paddleCosmetic(skin: GameCosmetics["paddleSkin"], highContrast: boolean) {
+  if (highContrast) return { color: "#ffffff", emissive: "#ffe066", glow: "#ffe066", specular: "#ffffff", emissiveIntensity: 0.58 };
+  if (skin === "gold") return { color: "#fff0a6", emissive: "#ffb000", glow: "#ffe066", specular: "#ffffff", emissiveIntensity: 0.64 };
+  if (skin === "neon") return { color: "#dffcff", emissive: "#8e7dff", glow: "#b6fffa", specular: "#d6ff4d", emissiveIntensity: 0.56 };
+  return { color: "#e9ffff", emissive: "#35f3ff", glow: "#7ef1ff", specular: "#ffffff", emissiveIntensity: 0.48 };
+}
+
+function ballCosmeticColor(trail: GameCosmetics["ballTrail"], highContrast: boolean): string {
+  if (highContrast) return "#ffffff";
+  if (trail === "aurora") return "#b6fffa";
+  if (trail === "comet") return "#ff9f43";
+  return "#ffe066";
+}
+
+function boardBackplateCosmetic(backplate: GameCosmetics["boardBackplate"], theme: BoardTheme, highContrast: boolean): BoardTheme {
+  if (highContrast) return { scene: "#010307", floor: "#010307", wall: theme.wall, wallGlow: "#ffe066", rim: "#ffe066" };
+  if (backplate === "midnight") return { scene: "#040414", floor: "#070920", wall: theme.wall, wallGlow: "#8e7dff", rim: "#b6fffa" };
+  if (backplate === "sunrise") return { scene: "#160b10", floor: "#1b1013", wall: theme.wall, wallGlow: "#ff9f43", rim: "#ffe066" };
+  return theme;
 }
 
 function cloneLevelBlueprint(level: LevelBlueprint): LevelBlueprint {

@@ -10,6 +10,12 @@ export interface GameSettings {
   musicVolume: number;
 }
 
+export interface GameCosmetics {
+  paddleSkin: "classic" | "neon" | "gold";
+  ballTrail: "classic" | "comet" | "aurora";
+  boardBackplate: "default" | "midnight" | "sunrise";
+}
+
 export interface SavedBrick {
   x: number;
   y: number;
@@ -77,7 +83,22 @@ export const DEFAULT_SETTINGS: GameSettings = {
   musicVolume: 1
 };
 
+export const DEFAULT_COSMETICS: GameCosmetics = {
+  paddleSkin: "classic",
+  ballTrail: "classic",
+  boardBackplate: "default"
+};
+
 const BRICK_KINDS = new Set<BrickKind>(["basic", "hard", "bomb", "prize", "penalty", "laser", "grab", "fire", "thru", "split", "wide", "slow", "boss"]);
+
+export function normalizeCosmetics(input: unknown): GameCosmetics {
+  const raw = isRecord(input) ? input : {};
+  return {
+    paddleSkin: raw.paddleSkin === "neon" || raw.paddleSkin === "gold" ? raw.paddleSkin : DEFAULT_COSMETICS.paddleSkin,
+    ballTrail: raw.ballTrail === "comet" || raw.ballTrail === "aurora" ? raw.ballTrail : DEFAULT_COSMETICS.ballTrail,
+    boardBackplate: raw.boardBackplate === "midnight" || raw.boardBackplate === "sunrise" ? raw.boardBackplate : DEFAULT_COSMETICS.boardBackplate
+  };
+}
 
 export function normalizeSettings(input: unknown): GameSettings {
   const raw = isRecord(input) ? input : {};
