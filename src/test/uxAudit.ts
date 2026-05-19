@@ -184,6 +184,7 @@ async function runDesktopAudit(page: Page) {
 
   await openToolPanel(page, "packs", "Board Select");
   recordCheck((await page.locator("[data-pack-id]").count()) >= 5, "board selector lists packs", "Expected at least the built-in pack set.");
+  await assertBoardSelectDrawer(page, "desktop board select");
   await assertLayoutHealth(page, "desktop board select", { failSmallTouchTargets: false });
   await capture(page, "desktop-boards");
 
@@ -266,6 +267,40 @@ async function assertShellHealth(page: Page, label: string) {
     return Boolean(overlay) || bodyText.includes("Internal server error") || bodyText.includes("Failed to load module script");
   });
   recordCheck(!hasFrameworkOverlay, `${label}: no framework error overlay`, hasFrameworkOverlay ? "Framework error content found." : "No framework overlay detected.");
+}
+
+async function assertBoardSelectDrawer(page: Page, label: string) {
+  const layout = await page.evaluate(() => {
+    const shell = document.querySelector(".shell");
+    const toolBody = document.querySelector<HTMLElement>(".tool-body");
+    const savedCard = document.querySelector<HTMLElement>('[data-pack-id="saved-designs"]');
+    const compactLocked = document.querySelectorAll(".pack-card.is-compact").length;
+    const sections = document.querySelectorAll(".pack-section").length;
+    if (!toolBody || !savedCard) return null;
+    const bodyRect = toolBody.getBoundingClientRect();
+    const cardRect = savedCard.getBoundingClientRect();
+    return {
+      packPanelOpen: shell?.classList.contains("is-pack-panel-open") === true,
+      scrollable: toolBody.scrollHeight > toolBody.clientHeight + 4,
+      savedFullyVisible: cardRect.top >= bodyRect.top - 1 && cardRect.bottom <= bodyRect.bottom + 1,
+      savedTop: cardRect.top,
+      bodyBottom: bodyRect.bottom,
+      compactLocked,
+      sections
+    };
+  });
+  recordCheck(layout?.packPanelOpen === true, `${label}: pack drawer uses scroll layout`, "Shell marks the pack browser as open.");
+  recordCheck((layout?.sections ?? 0) >= 3, `${label}: pack list uses sections`, `${layout?.sections ?? 0} sections rendered.`);
+  recordCheck((layout?.compactLocked ?? 0) >= 3, `${label}: locked packs use compact cards`, `${layout?.compactLocked ?? 0} compact locked cards.`);
+  recordCheck(
+    layout?.scrollable === true || layout?.savedFullyVisible === true,
+    `${label}: saved designs card is not clipped at fold`,
+    layout?.savedFullyVisible
+      ? "Saved Designs card fits in the first viewport."
+      : layout?.scrollable
+        ? "Tool body scrolls so clipped cards can be reached."
+        : "Saved Designs card is clipped without scroll affordance."
+  );
 }
 
 async function assertToolDrawerOwnsFocus(page: Page, label: string) {

@@ -206,7 +206,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
             <div data-generation-summary class="generation-summary" hidden></div>
           </section>
           <section class="pack-browser tool-view" data-tool-view="packs" aria-label="Board packs" hidden>
-            <div class="panel-heading">Board Select</div>
+            <p class="pack-browser-lead">Pick a daily board, curated pack, or a saved design. Locked packs unlock as you clear the previous pack.</p>
             <div data-pack-list class="pack-list"></div>
           </section>
           <section class="share-panel tool-view" data-tool-view="share" aria-label="Share" hidden>
@@ -412,6 +412,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
     activeToolPanel = panel;
     const isOpen = panel !== null;
     shell.classList.toggle("is-tool-panel-open", isOpen);
+    shell.classList.toggle("is-pack-panel-open", panel === "packs");
     toolSurface.hidden = !isOpen;
     toolBackdrop.hidden = !isOpen;
 
@@ -602,7 +603,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
         activePowersEl.innerHTML = "";
       }
       liveAnnouncement.textContent = state.announcement;
-      const packListMarkup = state.packs.map((pack) => renderPack(pack, state.pending)).join("");
+      const packListMarkup = renderPackListMarkup(state.packs, state.pending);
       if (packListMarkup !== previousPackListMarkup) {
         packList.innerHTML = packListMarkup;
         previousPackListMarkup = packListMarkup;
@@ -763,24 +764,73 @@ function formatStreamStats(stats: ComposerAgentTrace["streamStats"]): string {
   return pieces.join(", ");
 }
 
-function renderPack(pack: HudPackItem, pending: boolean): string {
+function renderPackListMarkup(packs: HudPackItem[], pending: boolean): string {
+  const daily = packs.find((pack) => pack.id === "daily");
+  const builtIn = packs.filter((pack) => pack.kind !== "saved-board" && pack.id !== "daily" && pack.id !== "saved-designs");
+  const savedCollection = packs.find((pack) => pack.id === "saved-designs");
+  const savedBoards = packs.filter((pack) => pack.kind === "saved-board");
+  const unlockedBuiltIn = builtIn.filter((pack) => pack.unlocked);
+  const lockedBuiltIn = builtIn.filter((pack) => !pack.unlocked);
+
+  const sections: string[] = [];
+  if (daily) {
+    sections.push(renderPackSection("Today", [daily], pending));
+  }
+  if (unlockedBuiltIn.length > 0) {
+    sections.push(renderPackSection("Curated packs", unlockedBuiltIn, pending));
+  }
+  if (lockedBuiltIn.length > 0) {
+    sections.push(renderPackSection("Locked packs", lockedBuiltIn, pending, { compact: true }));
+  }
+  if (savedCollection) {
+    const savedHeading = savedBoards.length > 0 ? "Saved designs" : "Saved designs (empty)";
+    sections.push(renderPackSection(savedHeading, [savedCollection, ...savedBoards], pending));
+  }
+  return sections.join("");
+}
+
+function renderPackSection(
+  heading: string,
+  packs: HudPackItem[],
+  pending: boolean,
+  options?: { compact?: boolean }
+): string {
+  const cards = packs.map((pack) => renderPack(pack, pending, options?.compact === true && !pack.unlocked && pack.kind === "pack")).join("");
+  return `
+    <section class="pack-section" aria-label="${escapeAttribute(heading)}">
+      <h3 class="pack-section-heading">${escapeHtml(heading)}</h3>
+      <div class="pack-section-list">${cards}</div>
+    </section>
+  `;
+}
+
+function renderPack(pack: HudPackItem, pending: boolean, compact = false): string {
   const classes = ["pack-card"];
   if (pack.active) classes.push("is-active");
   if (pack.empty) classes.push("is-empty");
   if (pack.kind === "saved-board") classes.push("is-saved-board");
+  if (compact) classes.push("is-compact");
   const disabled = pending || !pack.unlocked || pack.empty;
   const previewRows = pack.previewRows.length > 0 ? pack.previewRows : ["..............", "..............", ".............."];
   const prompt = pack.sourcePrompt ? `<span class="pack-prompt">Prompt: ${escapeHtml(pack.sourcePrompt)}</span>` : "";
   const date = pack.createdAt ? ` · saved ${formatShortDate(pack.createdAt)}` : "";
   const actionLabel = pack.actionLabel ?? (pack.kind === "saved-board" ? "Replay" : "Play");
+  const description =
+    pack.empty && pack.id === "saved-designs"
+      ? "Keep a generated board from the Designer to unlock individual replays here."
+      : pack.description;
+  const meta = compact
+    ? `<em>${escapeHtml(pack.progressLabel)} · ${escapeHtml(actionLabel)}</em>`
+    : `<em>${escapeHtml(pack.progressLabel)} · best ${pack.bestScore}${escapeHtml(date)} · ${escapeHtml(actionLabel)}</em>`;
+  const preview = compact ? "" : `<span class="pack-preview" aria-hidden="true">${renderMiniPreview(previewRows)}</span>`;
   return `
     <button type="button" class="${classes.join(" ")}" data-pack-id="${escapeAttribute(pack.id)}" ${disabled ? "disabled" : ""}>
-      <span class="pack-preview" aria-hidden="true">${renderMiniPreview(previewRows)}</span>
+      ${preview}
       <span class="pack-copy">
         <strong>${escapeHtml(pack.name)}</strong>
-        <span>${escapeHtml(pack.description)}</span>
-        ${prompt}
-        <em>${escapeHtml(pack.progressLabel)} · best ${pack.bestScore}${escapeHtml(date)} · ${escapeHtml(actionLabel)}</em>
+        <span>${escapeHtml(description)}</span>
+        ${compact ? "" : prompt}
+        ${meta}
       </span>
     </button>
   `;

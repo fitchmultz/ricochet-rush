@@ -2255,7 +2255,7 @@ export class RicochetRushGame {
     const savedCollection: HudPackItem = {
       id: SAVED_DESIGNS_PACK_ID,
       name: "Saved Designs Gallery",
-      description: "Generated boards you kept. Individual cards below can be replayed; remix by copying their prompt into the Designer or discard by replacing them with better saves.",
+      description: "Replay boards you kept from the Designer. New saves appear as cards below.",
       progressLabel: this.savedBoards.length > 0 ? `${savedProgress.cleared}/${this.savedBoards.length} cleared` : "empty",
       bestScore: savedProgress.bestScore,
       unlocked: this.savedBoards.length > 0,

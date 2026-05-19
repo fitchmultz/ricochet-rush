@@ -1052,6 +1052,18 @@ body {
   z-index: 14;
 }
 
+.shell.is-pack-panel-open .tool-panel {
+  height: min(calc(100% - 48px), 760px);
+  max-height: calc(100% - 48px);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.shell.is-pack-panel-open .tool-body {
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
 .tool-backdrop {
   position: absolute;
   inset: 0 calc(var(--active-panel-width) + 12px) 0 0;
@@ -1254,16 +1266,43 @@ body {
 .pack-browser {
   min-height: 0;
   display: grid;
-  gap: 8px;
+  gap: 10px;
+}
+
+.pack-browser-lead {
+  margin: 0;
+  color: #c8d4d1;
+  font-size: 0.74rem;
+  line-height: 1.35;
 }
 
 .pack-list {
-  max-height: min(64vh, 620px);
+  display: grid;
+  gap: 12px;
+}
+
+.shell.is-pack-panel-open .pack-list {
+  max-height: none;
+  overflow: visible;
+}
+
+.pack-section {
+  display: grid;
+  gap: 6px;
+}
+
+.pack-section-heading {
+  margin: 0;
+  color: #7ef1ff;
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.pack-section-list {
   display: grid;
   gap: 8px;
-  overflow: auto;
-  scrollbar-gutter: stable;
-  padding-right: 2px;
 }
 
 .pack-card {
@@ -1291,9 +1330,29 @@ body {
   border-color: rgba(126, 241, 255, 0.24);
 }
 
+.pack-card.is-compact {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+  padding: 10px 12px;
+  gap: 0;
+}
+
+.pack-card.is-compact .pack-copy span {
+  -webkit-line-clamp: 1;
+}
+
+.pack-card.is-empty {
+  border-style: dashed;
+  opacity: 0.82;
+}
+
 .pack-card:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+.pack-card.is-compact:disabled {
+  opacity: 0.72;
 }
 
 .pack-card:focus-visible {
