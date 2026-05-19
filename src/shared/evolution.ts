@@ -531,10 +531,20 @@ export function validateCreativeFidelity(
     }
   }
 
-  if (analysis.exclusiveKind) {
+  if (analysis.exclusiveKind && analysis.exclusiveKind !== "bomb") {
     const mismatched = rows.flat().filter((brick) => brick && brick.kind !== analysis.exclusiveKind).length;
     if (mismatched > 0) {
       return { ok: false, reason: `Prompt requires every occupied brick to be ${analysis.exclusiveKind}.` };
+    }
+  }
+  if (analysis.exclusiveKind === "bomb") {
+    const bricks = rows.flat().filter((brick): brick is NonNullable<typeof brick> => brick !== null);
+    const bombCount = countKind(rows, "bomb");
+    if (bombCount < 2) {
+      return { ok: false, reason: "Bomb-heavy prompts need at least two bomb bricks." };
+    }
+    if (bombCount / bricks.length < 0.5) {
+      return { ok: false, reason: "Bomb-heavy prompts should keep at least half the wall as bombs." };
     }
   }
 
@@ -827,7 +837,15 @@ function applyDesignerBriefConstraints(rows: BrickCell[][], designer: BoardDesig
     );
   }
 
-  if (exclusiveKind) {
+  if (exclusiveKind === "bomb") {
+    constrained = constrained.map((row, y) =>
+      row.map((brick, x) => {
+        if (!brick) return null;
+        const preferBomb = (x + y) % 10 < 7;
+        return brickForKind(preferBomb ? "bomb" : "basic", designer, 1);
+      })
+    );
+  } else if (exclusiveKind) {
     constrained = constrained.map((row) => row.map((brick) => (brick ? brickForKind(exclusiveKind, designer, 1) : null)));
   }
 

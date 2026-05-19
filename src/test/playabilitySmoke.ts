@@ -351,6 +351,7 @@ try {
   assert(pauseText.includes("Paused"), "Expected Escape to pause into an overlay.");
   assert(await hasFocusedOverlayAction(page), "Expected pause overlay to focus its primary action.");
   await injectPowerupClarityState(page);
+  await page.waitForFunction(() => document.querySelectorAll(".floating-text.is-powerupReward").length === 1);
   const powerupClarity = await snapshot(page);
   assert(powerupClarity.powerups.map((powerup) => powerup.tone).join(",") === "reward,hazard,volatile", "Expected reward, hazard, and volatile power-up tones.");
   assert((await page.locator(".floating-text.is-powerupReward").count()) === 1, "Expected reward pickup label.");

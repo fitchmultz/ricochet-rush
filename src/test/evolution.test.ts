@@ -666,7 +666,9 @@ describe("Cursor SDK level generation contract", () => {
 
     expect(rowCounts).toEqual(HEART_EMBEDDED_ROW_COUNTS);
     expect(bricks).toHaveLength(82);
-    expect(bricks.every((brick) => brick.kind === "bomb" && brick.hp === 1)).toBe(true);
+    const bombBricks = bricks.filter((brick) => brick.kind === "bomb");
+    expect(bombBricks.length / bricks.length).toBeGreaterThan(0.55);
+    expect(bombBricks.length).toBeLessThan(bricks.length);
     expect(level.name).toContain("Heart");
   });
 
@@ -707,7 +709,9 @@ describe("Cursor SDK level generation contract", () => {
     const bricks = level.rows.flat().filter((brick): brick is NonNullable<typeof brick> => brick !== null);
     expect(rowCounts).toEqual(HEART_EMBEDDED_ROW_COUNTS);
     expect(bricks).toHaveLength(82);
-    expect(bricks.every((brick) => brick.kind === "bomb")).toBe(true);
+    const bombBricks = bricks.filter((brick) => brick.kind === "bomb");
+    expect(bombBricks.length / bricks.length).toBeGreaterThan(0.55);
+    expect(bombBricks.length).toBeLessThan(bricks.length);
   });
 
   it("materializes compact Cursor grid drafts into canonical brick rows", () => {
@@ -733,7 +737,9 @@ describe("Cursor SDK level generation contract", () => {
     expect(level.name).toBe("Compact Heart");
     expect(rowCounts).toEqual(HEART_EMBEDDED_ROW_COUNTS);
     expect(bricks).toHaveLength(82);
-    expect(bricks.every((brick) => brick.kind === "bomb")).toBe(true);
+    const bombBricks = bricks.filter((brick) => brick.kind === "bomb");
+    expect(bombBricks.length / bricks.length).toBeGreaterThan(0.55);
+    expect(bombBricks.length).toBeLessThan(bricks.length);
   });
 
   it("lets compact grid codes override a leftover default brick value", () => {

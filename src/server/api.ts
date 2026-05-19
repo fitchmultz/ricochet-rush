@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { extname, join, normalize } from "node:path";
+import { extname, join, normalize, resolve, sep } from "node:path";
 import { requestEvolution } from "./cursorAgent.js";
 import { normalizeLevelRequest } from "../shared/evolution.js";
 
@@ -82,7 +82,11 @@ async function handleEvolution(request: IncomingMessage, response: ServerRespons
 async function serveStatic(staticDir: string, pathname: string, response: ServerResponse) {
   const requestedPath = pathname === "/" ? "/index.html" : pathname;
   const safePath = normalize(requestedPath).replace(/^(\.\.(\/|\\|$))+/, "");
-  const filePath = join(staticDir, safePath);
+  const staticRoot = resolve(staticDir);
+  const filePath = resolve(join(staticRoot, safePath));
+  if (filePath !== staticRoot && !filePath.startsWith(`${staticRoot}${sep}`)) {
+    throw new HttpError(404, "Not found");
+  }
   let body: Buffer;
   try {
     body = await readFile(filePath);

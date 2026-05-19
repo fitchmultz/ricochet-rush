@@ -39,6 +39,8 @@ import {
   trimSavedBoards
 } from "../../shared/boardPacks";
 import { createBoardExportPayload, encodeBoardExport, parseBoardExport } from "../../shared/shareState";
+import { escapeAttribute, escapeHtml } from "../../shared/util";
+import { trapFocus } from "../ui/focusTrap";
 import {
   DEFAULT_COSMETICS,
   DEFAULT_SETTINGS,
@@ -536,6 +538,13 @@ export class RicochetRushGame {
   private explosionScale = 1;
   private noBallTimer = 0;
   private launchLossGraceTimer = 0;
+  private hudUpdateSignature = "";
+  private readonly fireExplodedThisTick = new Set<string>();
+  private readonly impactRingTimeouts: number[] = [];
+  private readonly screenFlashTimeouts: number[] = [];
+  private releaseOverlayFocusTrap: (() => void) | null = null;
+  private static readonly MAX_IMPACT_RINGS = 14;
+  private static readonly MAX_SCREEN_FLASHES = 4;
   private loadingLevel = false;
   private hasSave = false;
   private autosaveSuppressed = false;
@@ -999,6 +1008,7 @@ export class RicochetRushGame {
   };
 
   private update(delta: number) {
+    this.fireExplodedThisTick.clear();
     this.updatePaddle(delta);
     this.updateFeedback(delta);
     if (this.phase !== "playing") {
@@ -1397,6 +1407,8 @@ export class RicochetRushGame {
     this.grabTimer = 0;
     this.noBallTimer = 0;
     this.launchLossGraceTimer = 0;
+    this.hudUpdateSignature = "";
+    this.clearTransientEffects();
     this.explosionScale = 1;
     this.lastPaddleHit = null;
     this.lastLoopCorrection = null;
@@ -1578,8 +1590,19 @@ export class RicochetRushGame {
         }
       }
       this.hitBrick(brick);
-      if (ball.fireTimer > 0) this.explode(brick);
+      if (ball.fireTimer > 0) {
+        const brickKey = `${brick.x}:${brick.y}`;
+        if (!this.fireExplodedThisTick.has(brickKey)) {
+          this.fireExplodedThisTick.add(brickKey);
+          this.explode(brick);
+        }
+      }
       if (!piercing) return;
+      if (overlapX < overlapY) {
+        ball.x = ball.vx >= 0 ? brick.x + brick.width + ball.radius + 0.5 : brick.x - ball.radius - 0.5;
+      } else {
+        ball.y = ball.vy >= 0 ? brick.y + brick.height + ball.radius + 0.5 : brick.y - ball.radius - 0.5;
+      }
     }
   }
 
@@ -1774,23 +1797,38 @@ export class RicochetRushGame {
 
   private emitImpactRing(x: number, y: number, color: string, kind: "brick" | "blast" | "boss" | "combo" | "powerup") {
     if (!this.settings.particles || this.settings.reducedMotion) return;
+    const rings = this.effectsLayer.querySelectorAll(".impact-ring");
+    if (rings.length >= RicochetRushGame.MAX_IMPACT_RINGS) rings[0]?.remove();
     const node = document.createElement("div");
     node.className = `impact-ring is-${kind}`;
     node.style.setProperty("--impact-color", color);
     node.style.left = `${(x / WIDTH) * 100}%`;
     node.style.top = `${(y / HEIGHT) * 100}%`;
     this.effectsLayer.append(node);
-    window.setTimeout(() => node.remove(), 720);
+    const timeout = window.setTimeout(() => node.remove(), 720);
+    this.impactRingTimeouts.push(timeout);
   }
 
   private emitScreenFlash(color: string, opacity: number) {
     if (!this.settings.particles || this.settings.reducedMotion) return;
+    const flashes = this.effectsLayer.querySelectorAll(".screen-flash");
+    if (flashes.length >= RicochetRushGame.MAX_SCREEN_FLASHES) flashes[0]?.remove();
     const node = document.createElement("div");
     node.className = "screen-flash";
     node.style.setProperty("--flash-color", color);
     node.style.setProperty("--flash-opacity", String(opacity));
     this.effectsLayer.append(node);
-    window.setTimeout(() => node.remove(), 360);
+    const timeout = window.setTimeout(() => node.remove(), 360);
+    this.screenFlashTimeouts.push(timeout);
+  }
+
+  private clearTransientEffects() {
+    for (const timeout of this.impactRingTimeouts) window.clearTimeout(timeout);
+    for (const timeout of this.screenFlashTimeouts) window.clearTimeout(timeout);
+    this.impactRingTimeouts.splice(0);
+    this.screenFlashTimeouts.splice(0);
+    this.effectsLayer.replaceChildren();
+    this.fireExplodedThisTick.clear();
   }
 
   private triggerHaptic(pattern: number | number[]) {
@@ -2287,6 +2325,9 @@ export class RicochetRushGame {
   }
 
   private refreshHud(status?: string) {
+    const signature = this.buildHudUpdateSignature(status);
+    if (!status && signature === this.hudUpdateSignature) return;
+    this.hudUpdateSignature = signature;
     this.updateCanvasLabel();
     this.hud.update({
       score: this.score,
@@ -2318,6 +2359,43 @@ export class RicochetRushGame {
       },
       events: this.recentEvents
     });
+  }
+
+  private buildHudUpdateSignature(status?: string): string {
+    const ballFire = Math.max(0, ...this.balls.map((ball) => ball.fireTimer));
+    const ballThru = Math.max(0, ...this.balls.map((ball) => ball.thruTimer));
+    const ballMega = Math.max(0, ...this.balls.map((ball) => ball.megaTimer));
+    return [
+      status ?? "",
+      this.phase,
+      this.score,
+      this.bestScore,
+      this.lives,
+      this.level,
+      this.bricks.length,
+      this.combo.toFixed(2),
+      this.recentEvents.join("|"),
+      this.announcement,
+      this.loadingLevel,
+      this.hasSave,
+      this.sidebarCollapsed,
+      Math.ceil(this.laserTimer),
+      Math.ceil(this.grabTimer),
+      Math.ceil(ballFire),
+      Math.ceil(ballThru),
+      Math.ceil(ballMega),
+      this.paddleWidth,
+      this.boardContext.source,
+      this.boardContext.packId ?? "",
+      this.designerIntent.brief,
+      this.latestGenerationSummary?.title ?? "",
+      this.powerupPrimerDismissed,
+      this.settings.sfxVolume,
+      this.settings.musicVolume,
+      this.settings.particles,
+      this.settings.reducedMotion,
+      this.settings.highContrast
+    ].join("§");
   }
 
   private updateCanvasLabel() {
@@ -2998,9 +3076,19 @@ export class RicochetRushGame {
     if (button && action) button.addEventListener("click", action, { once: true });
     if (secondaryButton && secondaryAction) secondaryButton.addEventListener("click", secondaryAction, { once: true });
     button?.focus({ preventScroll: true });
+    const card = this.overlay.querySelector<HTMLElement>(".overlay-card");
+    if (card) {
+      this.releaseOverlayFocusTrap?.();
+      this.releaseOverlayFocusTrap = trapFocus(card, () => {
+        if (secondaryAction) secondaryAction();
+        else this.hideOverlay();
+      });
+    }
   }
 
   private hideOverlay() {
+    this.releaseOverlayFocusTrap?.();
+    this.releaseOverlayFocusTrap = null;
     this.overlay.classList.remove("is-visible");
     this.mount.closest<HTMLElement>(".stage")?.classList.remove("has-visible-overlay", "has-priority-overlay");
     this.overlay.innerHTML = "";
@@ -3346,14 +3434,6 @@ export function normalizeLoopRiskVelocity(input: LoopRiskVelocityInput): LoopRis
   }
 
   return { vx, vy, speed, changed };
-}
-
-function escapeHtml(value: string): string {
-  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
-
-function escapeAttribute(value: string): string {
-  return escapeHtml(value).replaceAll('"', "&quot;");
 }
 
 function toSavedBall(ball: Ball): SavedBallState {

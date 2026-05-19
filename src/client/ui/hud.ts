@@ -5,6 +5,8 @@ import {
   type GenerationSummary
 } from "../../shared/evolution";
 import type { GameCosmetics } from "../../shared/saveState";
+import { escapeAttribute, escapeHtml } from "../../shared/util";
+import { trapFocus } from "./focusTrap";
 
 export interface HudPackItem {
   id: string;
@@ -381,6 +383,10 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   let activeToolPanel: HudToolPanel | null = null;
   let previousToolFocus: HTMLElement | null = null;
   let previousPackListMarkup = "";
+  let previousEventsMarkup = "";
+  let previousShareExport = "";
+  let previousActivePowersKey = "";
+  let releaseToolFocusTrap: (() => void) | null = null;
 
   const emitSettings = () => {
     actions?.updateSettings({
@@ -427,6 +433,8 @@ export function createHud(root: HTMLDivElement | null): HudApi {
     }
 
     if (!panel) {
+      releaseToolFocusTrap?.();
+      releaseToolFocusTrap = null;
       if (previousToolFocus?.isConnected) previousToolFocus.focus({ preventScroll: true });
       previousToolFocus = null;
       return;
@@ -436,6 +444,13 @@ export function createHud(root: HTMLDivElement | null): HudApi {
     toolTitle.textContent = TOOL_PANEL_LABELS[panel];
     toolSurface.setAttribute("aria-label", `${TOOL_PANEL_LABELS[panel]} panel`);
     toolClose.focus({ preventScroll: true });
+    releaseToolFocusTrap?.();
+    releaseToolFocusTrap = trapFocus(toolSurface, () => setToolPanel(null));
+    if (panel === "share") {
+      const nextExport = actions?.exportBoard() ?? "";
+      shareExport.value = nextExport;
+      previousShareExport = nextExport;
+    }
   };
 
   const renderTrace = (trace?: ComposerAgentTrace) => {
@@ -578,7 +593,13 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       }
       renderSummary(generationSummary, state.designer.generationSummary, state.designer.previewRows);
       renderCompactSummary(compactGenerationSummary, state);
-      if (document.activeElement !== shareExport && document.activeElement !== shareImport) shareExport.value = actions?.exportBoard() ?? "";
+      if (activeToolPanel === "share" && document.activeElement !== shareExport && document.activeElement !== shareImport) {
+        const nextExport = actions?.exportBoard() ?? "";
+        if (nextExport !== previousShareExport) {
+          shareExport.value = nextExport;
+          previousShareExport = nextExport;
+        }
+      }
       powerupPrimer.hidden = state.powerupPrimerDismissed;
       sfxVolume.value = String(state.settings.sfxVolume);
       musicVolume.value = String(state.settings.musicVolume);
@@ -595,12 +616,16 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       combo.classList.toggle("is-pulsing", state.combo > previousCombo + 0.05);
       previousScore = state.score;
       previousCombo = state.combo;
-      if (state.activePowers.length > 0) {
-        activePowersEl.hidden = false;
-        activePowersEl.innerHTML = state.activePowers.map(renderPower).join("");
-      } else {
-        activePowersEl.hidden = true;
-        activePowersEl.innerHTML = "";
+      const activePowersKey = state.activePowers.map((power) => `${power.label}:${power.seconds}`).join("|");
+      if (activePowersKey !== previousActivePowersKey) {
+        previousActivePowersKey = activePowersKey;
+        if (state.activePowers.length > 0) {
+          activePowersEl.hidden = false;
+          activePowersEl.innerHTML = state.activePowers.map(renderPower).join("");
+        } else {
+          activePowersEl.hidden = true;
+          activePowersEl.innerHTML = "";
+        }
       }
       liveAnnouncement.textContent = state.announcement;
       const packListMarkup = renderPackListMarkup(state.packs, state.pending);
@@ -608,7 +633,11 @@ export function createHud(root: HTMLDivElement | null): HudApi {
         packList.innerHTML = packListMarkup;
         previousPackListMarkup = packListMarkup;
       }
-      events.innerHTML = state.events.map((event) => `<li>${escapeHtml(event)}</li>`).join("");
+      const eventsMarkup = state.events.map((event) => `<li>${escapeHtml(event)}</li>`).join("");
+      if (eventsMarkup !== previousEventsMarkup) {
+        events.innerHTML = eventsMarkup;
+        previousEventsMarkup = eventsMarkup;
+      }
       renderTrace(state.agentTrace);
     }
   };
@@ -654,14 +683,6 @@ function queryCode(root: ParentNode, selector: string): HTMLPreElement {
   const element = root.querySelector<HTMLPreElement>(selector);
   if (!element) throw new Error(`Missing HUD code block ${selector}`);
   return element;
-}
-
-function escapeHtml(value: string): string {
-  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
-
-function escapeAttribute(value: string): string {
-  return escapeHtml(value).replaceAll('"', "&quot;");
 }
 
 function normalizeToolPanel(value: string | undefined): HudToolPanel | null {
