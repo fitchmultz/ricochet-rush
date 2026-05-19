@@ -97,4 +97,3 @@ function cloneLevel(level: LevelBlueprint): LevelBlueprint {
     rows: level.rows.map((row) => row.map((cell) => (cell ? { ...cell } : null)))
   };
 }
-

@@ -421,4 +421,3 @@ function playNoise(context: AudioContext, start: number, duration: number, peak:
   source.start(start);
   source.stop(start + duration);
 }
-

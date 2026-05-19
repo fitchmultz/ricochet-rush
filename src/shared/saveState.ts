@@ -252,4 +252,3 @@ function booleanVolume(value: unknown, fallback: number): number {
 function volumeValue(value: unknown, fallback: number): number {
   return clamp(numberValue(value, fallback), 0, 1);
 }
-

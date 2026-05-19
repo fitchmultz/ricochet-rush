@@ -159,7 +159,7 @@ function readBody(request: IncomingMessage): Promise<string> {
 }
 
 function isMissingFileError(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ENOENT";
+  return error instanceof Error && "code" in error && ["ENOENT", "ENOTDIR", "EISDIR"].includes(String(error.code));
 }
 
 function sendJson(response: ServerResponse, status: number, payload: unknown) {

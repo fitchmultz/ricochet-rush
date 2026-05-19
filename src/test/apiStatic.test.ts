@@ -60,4 +60,11 @@ describe("static file confinement", () => {
       expect(response.status).toBe(404);
     });
   });
+
+  it("returns not found when a path descends through a file", async () => {
+    await withStaticServer({ "index.html": "<html>ok</html>" }, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/index.html/child`);
+      expect(response.status).toBe(404);
+    });
+  });
 });

@@ -4,7 +4,11 @@ const FOCUSABLE_SELECTOR =
 export function trapFocus(container: HTMLElement, onEscape?: () => void): () => void {
   const handleKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Escape") {
-      onEscape?.();
+      if (onEscape) {
+        event.preventDefault();
+        event.stopPropagation();
+        onEscape();
+      }
       return;
     }
     if (event.key !== "Tab") return;

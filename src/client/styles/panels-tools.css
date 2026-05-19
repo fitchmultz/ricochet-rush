@@ -780,7 +780,7 @@
 
   .shell {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(360px, min(72vh, 72dvh)) auto;
+    grid-template-rows: minmax(340px, min(64vh, 64dvh)) auto;
     width: 100%;
     max-width: 100%;
     height: auto;
@@ -793,7 +793,7 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding: 10px 12px calc(88px + env(safe-area-inset-bottom));
+    padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
   }
 
   .console-head {
@@ -802,25 +802,13 @@
 
   .tool-dock {
     order: 1;
-    position: fixed;
-    left: max(10px, env(safe-area-inset-left));
-    right: max(10px, env(safe-area-inset-right));
-    bottom: max(10px, env(safe-area-inset-bottom));
-    z-index: 6;
+    position: static;
+    z-index: auto;
     padding: 6px;
     border: 1px solid rgba(126, 241, 255, 0.22);
     border-radius: 10px;
     background: rgba(10, 15, 22, 0.94);
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42);
-  }
-
-  .stage.has-visible-overlay ~ .panel .tool-dock,
-  .stage.has-visible-overlay + .panel .tool-dock {
-    z-index: 2;
-  }
-
-  .shell.is-tool-panel-open .tool-dock {
-    z-index: 2;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
   }
 
   .board-card {
@@ -965,7 +953,7 @@
   }
 
   .stage {
-    min-height: 420px;
+    min-height: 390px;
     border-width: 0;
   }
 

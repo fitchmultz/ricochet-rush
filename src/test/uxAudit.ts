@@ -94,6 +94,7 @@ const address = server.address();
 if (!address || typeof address === "string") throw new Error("Preview server did not expose a TCP port.");
 
 const baseUrl = `http://127.0.0.1:${address.port}`;
+const appUrl = `${baseUrl}/?debugGame=1`;
 const browser = await chromium.launch({ headless: true });
 
 try {
@@ -253,7 +254,7 @@ async function runMobileAudit(page: Page) {
 
 async function bootFresh(page: Page, viewport: { width: number; height: number }) {
   await page.setViewportSize(viewport);
-  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await page.goto(appUrl, { waitUntil: "domcontentloaded" });
   await page.evaluate(() => localStorage.clear());
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
@@ -632,29 +633,37 @@ async function assertMobileToolDockReachable(page: Page, label: string) {
     const dock = document.querySelector<HTMLElement>(".tool-dock");
     const boards = document.querySelector<HTMLButtonElement>('[data-tool-panel="packs"]');
     const designer = document.querySelector<HTMLButtonElement>('[data-tool-panel="designer"]');
-    if (!dock || !boards || !designer) return null;
+    const consoleHead = document.querySelector<HTMLElement>(".console-head");
+    const boardCard = document.querySelector<HTMLElement>(".board-card");
+    if (!dock || !boards || !designer || !consoleHead || !boardCard) return null;
     const dockRect = dock.getBoundingClientRect();
     const boardsRect = boards.getBoundingClientRect();
+    const designerRect = designer.getBoundingClientRect();
+    const consoleHeadRect = consoleHead.getBoundingClientRect();
+    const boardCardRect = boardCard.getBoundingClientRect();
+    const overlapsConsoleHead =
+      dockRect.left < consoleHeadRect.right && dockRect.right > consoleHeadRect.left && dockRect.top < consoleHeadRect.bottom && dockRect.bottom > consoleHeadRect.top;
+    const overlapsBoardCard =
+      dockRect.left < boardCardRect.right && dockRect.right > boardCardRect.left && dockRect.top < boardCardRect.bottom && dockRect.bottom > boardCardRect.top;
     return {
       dockTop: dockRect.top,
       dockBottom: dockRect.bottom,
       boardsVisible: boardsRect.top >= 0 && boardsRect.bottom <= window.innerHeight + 1,
+      designerVisible: designerRect.top >= 0 && designerRect.bottom <= window.innerHeight + 1,
+      overlapsConsole: overlapsConsoleHead || overlapsBoardCard,
       overflowed: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
     };
   });
   recordCheck(metrics?.overflowed === false, `${label}: no horizontal overflow on load`, metrics?.overflowed ? "Page still scrolls horizontally." : "No horizontal overflow.");
-  const dockPinnedToViewport =
-    metrics !== null &&
-    metrics.dockBottom <= (page.viewportSize()?.height ?? 760) + 2 &&
-    metrics.dockBottom >= (page.viewportSize()?.height ?? 760) - 140;
   recordCheck(
-    dockPinnedToViewport,
-    `${label}: tool dock is pinned for quick access`,
+    metrics !== null && metrics.dockTop >= 0 && metrics.dockBottom <= (page.viewportSize()?.height ?? 760) + 1,
+    `${label}: tool dock is visible without scrolling`,
     metrics
       ? `Tool dock sits ${Math.round(metrics.dockTop)}-${Math.round(metrics.dockBottom)}px in a ${page.viewportSize()?.height ?? 760}px viewport.`
       : "Tool dock missing."
   );
-  recordCheck(metrics?.boardsVisible === true, `${label}: core tool buttons are reachable`, metrics?.boardsVisible ? "Boards and Designer are visible without scrolling." : "Tool buttons require scrolling on first paint.");
+  recordCheck(metrics?.overlapsConsole === false, `${label}: tool dock does not cover console content`, metrics?.overlapsConsole ? "Tool dock intersects the console title or board card." : "Tool dock is in flow with console content.");
+  recordCheck(metrics?.boardsVisible === true && metrics?.designerVisible === true, `${label}: core tool buttons are reachable`, metrics?.boardsVisible && metrics?.designerVisible ? "Boards and Designer are visible without scrolling." : "Tool buttons require scrolling on first paint.");
 }
 
 async function assertStageInViewport(page: Page, label: string) {

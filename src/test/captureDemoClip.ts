@@ -18,6 +18,7 @@ const address = server.address();
 if (!address || typeof address === "string") throw new Error("Preview server did not expose a TCP port.");
 
 const baseUrl = `http://127.0.0.1:${address.port}`;
+const appUrl = `${baseUrl}/?debugGame=1`;
 const browser = await chromium.launch({ headless: true });
 
 try {
@@ -26,7 +27,7 @@ try {
     recordVideo: { dir: videoDir, size: { width: 1280, height: 820 } }
   });
   const page = await context.newPage();
-  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await page.goto(appUrl, { waitUntil: "domcontentloaded" });
   await page.evaluate(() => localStorage.clear());
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");

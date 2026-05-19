@@ -39,13 +39,7 @@ import {
   trimSavedBoards
 } from "../../shared/boardPacks";
 import { createBoardExportPayload, encodeBoardExport, parseBoardExport } from "../../shared/shareState";
-import {
-  gameEvent,
-  gameEventsToStrings,
-  inferTechnicalAudience,
-  type GameEventAudience,
-  type GameEventRecord
-} from "../../shared/gameEvents";
+import { gameEvent, gameEventsToStrings, type GameEventAudience, type GameEventRecord } from "../../shared/gameEvents";
 import { clamp, escapeAttribute, escapeHtml } from "../../shared/util";
 import { trapFocus } from "../ui/focusTrap";
 import {
@@ -77,7 +71,7 @@ import {
   type PaddleReboundInput,
   type StuckBallLaunchInput
 } from "./physics";
-import { penaltyPowerupPool, powerupToneFor, prizePowerupPool, type PowerupPoolInput, type PowerupTone } from "./powerups";
+import { penaltyPowerupPool, powerupToneFor, prizePowerupPool, type PowerupKind, type PowerupPoolInput, type PowerupTone } from "./powerups";
 import { LAUNCH_LOSS_GRACE_SECONDS } from "./tuning";
 
 interface Ball {
@@ -102,28 +96,6 @@ interface Brick {
   hp: number;
   maxHp: number;
 }
-
-type PowerupKind =
-  | "expandPaddle"
-  | "shrinkPaddle"
-  | "superShrink"
-  | "splitBall"
-  | "eightBall"
-  | "megaBall"
-  | "slowBall"
-  | "fastBall"
-  | "fireball"
-  | "thruBrick"
-  | "shootingPaddle"
-  | "grabPaddle"
-  | "extraLife"
-  | "levelWarp"
-  | "zapBricks"
-  | "fallingBricks"
-  | "setOffExploding"
-  | "expandExploding"
-  | "killPaddle"
-  | "shrinkBall";
 
 interface Powerup {
   x: number;
@@ -412,27 +384,6 @@ const POWERUP_NAMES: Record<PowerupKind, string> = {
   shrinkBall: "Shrink ball"
 };
 
-const SAFE_REWARD_POWERUPS: PowerupKind[] = [
-  "expandPaddle",
-  "splitBall",
-  "slowBall",
-  "fireball",
-  "thruBrick",
-  "shootingPaddle",
-  "grabPaddle",
-  "extraLife"
-];
-const SKILL_REWARD_POWERUPS: PowerupKind[] = ["megaBall", "zapBricks"];
-const VOLATILE_REWARD_POWERUPS: PowerupKind[] = [
-  "eightBall",
-  "levelWarp",
-  "setOffExploding",
-  "expandExploding"
-];
-const MILD_HAZARD_POWERUPS: PowerupKind[] = ["shrinkPaddle", "fastBall", "shrinkBall"];
-const HARD_HAZARD_POWERUPS: PowerupKind[] = ["superShrink", "fallingBricks", "killPaddle"];
-const NEGATIVE_POWERUPS: PowerupKind[] = [...MILD_HAZARD_POWERUPS, ...HARD_HAZARD_POWERUPS];
-const VOLATILE_POWERUPS = new Set<PowerupKind>(VOLATILE_REWARD_POWERUPS);
 const POWERUP_VISUALS: Record<PowerupTone, { tint: string; emissive: string; spark: string; floatingKind: FloatingText["kind"] }> = {
   reward: { tint: "#7bf1a8", emissive: "#28e68a", spark: "#7bf1a8", floatingKind: "powerupReward" },
   hazard: { tint: "#ff5c7a", emissive: "#ff244c", spark: "#ff5c7a", floatingKind: "powerupHazard" },
@@ -1004,6 +955,7 @@ export class RicochetRushGame {
     this.laserTimer = Math.max(0, this.laserTimer - delta);
     this.laserCooldown = Math.max(0, this.laserCooldown - delta);
     this.grabTimer = Math.max(0, this.grabTimer - delta);
+    this.launchLossGraceTimer = Math.max(0, this.launchLossGraceTimer - delta);
     this.updateLaser(delta);
 
     for (const ball of this.balls) {
@@ -1029,7 +981,6 @@ export class RicochetRushGame {
     this.balls.splice(0, this.balls.length, ...this.balls.filter((ball) => ball.y < HEIGHT + 80));
     if (this.balls.length === 0) {
       this.noBallTimer += delta;
-      this.launchLossGraceTimer = Math.max(0, this.launchLossGraceTimer - delta);
       if (this.noBallTimer >= 0.22 && this.launchLossGraceTimer <= 0) this.loseLife();
     } else {
       this.noBallTimer = 0;
@@ -2046,7 +1997,7 @@ export class RicochetRushGame {
     this.audio.play("levelClear", this.settings.sfxVolume);
     this.triggerHaptic([18, 24, 18]);
     this.shakeBoard(0.28, 2.6);
-    this.saveCheckpoint("Level checkpoint saved.");
+    this.saveCheckpoint("Level checkpoint saved.", false, "technical");
     const nextStep = this.nextLevelCompleteStep(completedContext);
     const actions: SummaryAction[] = [
       { label: nextStep.actionLabel, primary: true, action: () => void this.continueToNextLevel() },
@@ -2127,25 +2078,25 @@ export class RicochetRushGame {
           const result = await requestGeneratedLevel(request);
           if (result.source === "fallback" && attempt < maxAttempts) {
             lastError = result.warning ?? "Board designer used local backup instead of Cursor SDK.";
-            this.pushEvent(`${lastError} Retrying with a fresh seed.`);
+            this.pushEvent(`${lastError} Retrying with a fresh seed.`, "technical");
             continue;
           }
           const fingerprint = blueprintFingerprint(result.level);
           if (fingerprint === previousFingerprint && attempt < maxAttempts) {
             lastError = "Designer returned the same wall layout; retrying with a fresh seed.";
-            this.pushEvent(lastError);
+            this.pushEvent(lastError, "technical");
             continue;
           }
           const sourceEvent = `${result.level.name} is ready.`;
           if (result.source === "fallback" && result.warning) {
-            this.pushEvent(result.warning);
+            this.pushEvent(result.warning, "technical");
           }
           this.loadLevel(result.level, sourceEvent, result.trace, result.summary, { source: "generated", packId: null, boardIndex: 0 }, sourcePrompt);
           return;
         } catch (error) {
           lastError = error instanceof Error ? error.message : "unknown error";
           if (attempt < maxAttempts && !isLevelGenerationNetworkError(error)) {
-            this.pushEvent(`Generation attempt ${attempt} failed. Retrying.`);
+            this.pushEvent(`Generation attempt ${attempt} failed. Retrying.`, "technical");
             continue;
           }
           const fallback = fallbackLevel(request);
@@ -2372,7 +2323,7 @@ export class RicochetRushGame {
       this.level,
       this.bricks.length,
       this.combo.toFixed(2),
-      this.recentEvents.map((entry) => entry.text).join("|"),
+      this.recentEvents.map((entry) => `${entry.audience}:${entry.text}`).join("|"),
       this.announcement,
       this.loadingLevel,
       this.hasSave,
@@ -2455,8 +2406,7 @@ export class RicochetRushGame {
   }
 
   private pushEvent(event: string, audience: GameEventAudience = "player") {
-    const resolvedAudience = audience === "player" && inferTechnicalAudience(event) ? "technical" : audience;
-    this.recentEvents.unshift(gameEvent(event, resolvedAudience));
+    this.recentEvents.unshift(gameEvent(event, audience));
     this.recentEvents.splice(6);
   }
 
@@ -2471,7 +2421,7 @@ export class RicochetRushGame {
     this.announcement = message;
   }
 
-  private saveCheckpoint(event?: string, force = false) {
+  private saveCheckpoint(event?: string, force = false, audience: GameEventAudience = "player") {
     const now = performance.now();
     if (!force && !event && now - this.lastCheckpointAt < 1000) return;
     this.lastCheckpointAt = now;
@@ -2500,7 +2450,7 @@ export class RicochetRushGame {
       levelBlueprint: this.levelBlueprint,
       levelSourcePrompt: this.levelSourcePrompt,
       bricks: this.bricks.map(toSavedBrick),
-      recentEvents: event ? [gameEvent(event), ...this.recentEvents].slice(0, 6) : this.recentEvents,
+      recentEvents: event ? [gameEvent(event, audience), ...this.recentEvents].slice(0, 6) : this.recentEvents,
       laserTimer: this.laserTimer,
       grabTimer: this.grabTimer,
       explosionScale: this.explosionScale,
@@ -3047,6 +2997,11 @@ export class RicochetRushGame {
       if (button && !action.disabled) button.addEventListener("click", action.action, { once: true });
     }
     this.overlay.querySelector<HTMLButtonElement>("[data-summary-action]:not([disabled])")?.focus({ preventScroll: true });
+    const card = this.overlay.querySelector<HTMLElement>(".run-summary");
+    if (card) {
+      this.releaseOverlayFocusTrap?.();
+      this.releaseOverlayFocusTrap = trapFocus(card, () => undefined);
+    }
   }
 
   private openBoardPicker() {
@@ -3100,7 +3055,6 @@ export class RicochetRushGame {
       this.releaseOverlayFocusTrap?.();
       this.releaseOverlayFocusTrap = trapFocus(card, () => {
         if (secondaryAction) secondaryAction();
-        else this.hideOverlay();
       });
     }
   }
@@ -3302,8 +3256,9 @@ function brickAudioOptions(brick: Brick, combo: number, destroyed: boolean): Gam
 function soundForPowerup(kind: PowerupKind): GameSoundKind {
   if (kind === "extraLife") return "extraLife";
   if (kind === "levelWarp") return "levelWarp";
-  if (VOLATILE_POWERUPS.has(kind)) return "volatilePowerup";
-  if (NEGATIVE_POWERUPS.includes(kind)) return "badPowerup";
+  const tone = powerupToneFor(kind);
+  if (tone === "volatile") return "volatilePowerup";
+  if (tone === "hazard") return "badPowerup";
   return "goodPowerup";
 }
 
@@ -3366,7 +3321,7 @@ export { LAUNCH_LOSS_GRACE_SECONDS } from "./tuning";
 export { calculatePaddleRebound, computeStuckBallLaunch, normalizeLoopRiskVelocity } from "./physics";
 export type { LoopRiskVelocity, LoopRiskVelocityInput, PaddleRebound, PaddleReboundInput, StuckBallLaunchInput } from "./physics";
 export { penaltyPowerupPool, powerupToneFor, prizePowerupPool } from "./powerups";
-export type { PowerupPoolInput, PowerupTone } from "./powerups";
+export type { PowerupKind, PowerupPoolInput, PowerupTone } from "./powerups";
 
 function toSavedBall(ball: Ball): SavedBallState {
   return {
