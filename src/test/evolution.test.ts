@@ -53,6 +53,8 @@ import { parseLevelJsonFromCandidates } from "../server/levelJson";
 import { appendAssistantTextChunk } from "../server/streamText";
 import {
   calculatePaddleRebound,
+  computeStuckBallLaunch,
+  LAUNCH_LOSS_GRACE_SECONDS,
   normalizeLoopRiskVelocity,
   penaltyPowerupPool,
   powerupToneFor,
@@ -1270,6 +1272,61 @@ describe("Ricochet Rush curated board packs", () => {
     expect(parseBoardExport(JSON.stringify(badKind))).toMatchObject({ ok: false });
     expect(parseBoardExport(JSON.stringify({ app: "ricochet-rush", version: 999, board: {} }))).toMatchObject({ ok: false, message: expect.stringContaining("unsupported") });
     expect(parseBoardExport(JSON.stringify({ app: "other", version: BOARD_EXPORT_VERSION, board: {} }))).toMatchObject({ ok: false, message: expect.stringContaining("not a Ricochet") });
+  });
+});
+
+describe("Ricochet Rush launch fairness", () => {
+  it("keeps centered launches readable instead of hard-biasing to a side lane", () => {
+    const launch = computeStuckBallLaunch({
+      stuckOffset: 0,
+      paddleWidth: 116,
+      paddleVelocityX: 0,
+      storedVx: 210,
+      speedMultiplier: 1
+    });
+
+    expect(Math.abs(launch.vx)).toBeLessThan(launch.speed * 0.22);
+    expect(launch.vy).toBeLessThan(0);
+    expect(Math.abs(launch.vx)).toBeGreaterThanOrEqual(launch.speed * 0.18 - 0.001);
+  });
+
+  it("applies paddle spin to centered launches", () => {
+    const left = computeStuckBallLaunch({
+      stuckOffset: 0,
+      paddleWidth: 116,
+      paddleVelocityX: -620,
+      storedVx: 210,
+      speedMultiplier: 1
+    });
+    const right = computeStuckBallLaunch({
+      stuckOffset: 0,
+      paddleWidth: 116,
+      paddleVelocityX: 620,
+      storedVx: 210,
+      speedMultiplier: 1
+    });
+
+    expect(left.vx).toBeLessThan(0);
+    expect(right.vx).toBeGreaterThan(0);
+    expect(left.vy).toBeLessThan(0);
+    expect(right.vy).toBeLessThan(0);
+  });
+
+  it("still respects aimed offset launches away from center", () => {
+    const launch = computeStuckBallLaunch({
+      stuckOffset: 40,
+      paddleWidth: 116,
+      paddleVelocityX: 0,
+      storedVx: 210,
+      speedMultiplier: 1
+    });
+
+    expect(Math.abs(launch.vx)).toBeGreaterThan(launch.speed * 0.22);
+    expect(launch.vy).toBeLessThan(0);
+  });
+
+  it("exposes a minimum post-launch survival window before life loss", () => {
+    expect(LAUNCH_LOSS_GRACE_SECONDS).toBeGreaterThanOrEqual(2);
   });
 });
 

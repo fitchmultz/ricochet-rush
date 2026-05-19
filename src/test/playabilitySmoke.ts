@@ -1,6 +1,7 @@
 import { once } from "node:events";
 import { resolve } from "node:path";
 import { chromium, type Page } from "playwright";
+import { LAUNCH_LOSS_GRACE_SECONDS } from "../client/game/RicochetRushGame";
 import { createApiServer } from "../server/api";
 
 process.env.RICOCHET_RUSH_FORCE_FALLBACK = "1";
@@ -271,6 +272,7 @@ try {
   await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().boardSource === "generated");
   assert(await page.locator('[data-action="save-board"]').isEnabled(), "Expected restored generated board to stay keepable.");
+  await assertLaunchSurvivalWindow(page, "generated center launch");
   await page.locator('[data-action="save-board"]').click();
   assert(await hasLocalStorageKey(page, "ricochet-rush-saved-boards"), "Expected kept generated board to persist in Saved Designs.");
   assert(!(await page.locator('[data-pack-id="saved-designs"]').isDisabled()), "Expected Saved Designs to unlock after keeping a board.");
@@ -315,6 +317,10 @@ try {
   await page.locator('[data-pack-id="starter"]').click();
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().currentPackId === "starter");
   assert(await page.locator('[data-action="save-board"]').isDisabled(), "Expected authored boards not to be keepable.");
+  await assertLaunchSurvivalWindow(page, "starter center launch", { reloadAfter: true });
+  await page.locator('[data-tool-panel="packs"]').click();
+  await page.locator('[data-pack-id="starter"]').click();
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().currentPackId === "starter");
 
   await page.locator("[data-overlay-action]").click();
   await page.keyboard.down("ArrowRight");
@@ -533,6 +539,31 @@ try {
       else resolveClose();
     });
   });
+}
+
+async function assertLaunchSurvivalWindow(
+  page: Page,
+  label: string,
+  options?: { survivalMs?: number; reloadAfter?: boolean }
+): Promise<void> {
+  const before = await snapshot(page);
+  assert(before.phase === "ready", `${label}: expected ready before launch survival check, got ${before.phase}.`);
+  if (await page.locator("[data-tool-backdrop]").isVisible()) {
+    await page.locator('[data-action="close-tool-panel"]').click();
+    await page.waitForFunction(() => !document.querySelector("[data-tool-backdrop]"));
+  }
+  await page.waitForSelector(".game-overlay.is-visible [data-overlay-action]");
+  await page.keyboard.press("Space");
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "playing");
+  const survivalMs = options?.survivalMs ?? Math.round((LAUNCH_LOSS_GRACE_SECONDS - 0.25) * 1000);
+  await page.waitForTimeout(survivalMs);
+  const after = await snapshot(page);
+  assert(after.lives === before.lives, `${label}: expected no life lost during post-launch survival window.`);
+  if (options?.reloadAfter) {
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
+    await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
+  }
 }
 
 async function snapshot(page: { evaluate: <T>(callback: () => T) => Promise<T> }): Promise<DebugSnapshot> {

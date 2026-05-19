@@ -2,6 +2,7 @@ import { once } from "node:events";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { chromium, type ConsoleMessage, type Page } from "playwright";
+import { LAUNCH_LOSS_GRACE_SECONDS } from "../client/game/RicochetRushGame";
 import { createApiServer } from "../server/api";
 
 process.env.RICOCHET_RUSH_FORCE_FALLBACK = "1";
@@ -135,6 +136,10 @@ async function runDesktopAudit(page: Page) {
   await assertLayoutHealth(page, "desktop ready", { failSmallTouchTargets: false });
   await assertDesktopStageSeparation(page);
   await capture(page, "desktop-ready");
+  await assertLaunchSurvivalWindow(page, "desktop center launch");
+  await bootFresh(page, DESKTOP_VIEWPORT);
+  await assertShellHealth(page, "desktop launch prep");
+  await assertReadyState(page, "desktop launch prep");
 
   const launchBefore = await snapshot(page);
   await page.locator("[data-overlay-action]").click();
@@ -260,6 +265,27 @@ async function assertShellHealth(page: Page, label: string) {
     return Boolean(overlay) || bodyText.includes("Internal server error") || bodyText.includes("Failed to load module script");
   });
   recordCheck(!hasFrameworkOverlay, `${label}: no framework error overlay`, hasFrameworkOverlay ? "Framework error content found." : "No framework overlay detected.");
+}
+
+async function assertLaunchSurvivalWindow(page: Page, label: string) {
+  const before = await snapshot(page);
+  if (await page.locator("[data-tool-backdrop]").isVisible()) {
+    await page.locator('[data-action="close-tool-panel"]').click();
+    await page.waitForFunction(() => !document.querySelector("[data-tool-backdrop]"));
+  }
+  await page.waitForSelector(".game-overlay.is-visible [data-overlay-action]");
+  await page.keyboard.press("Space");
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "playing");
+  const survivalMs = Math.round((LAUNCH_LOSS_GRACE_SECONDS - 0.25) * 1000);
+  await page.waitForTimeout(survivalMs);
+  const after = await snapshot(page);
+  recordCheck(
+    after.lives === before.lives,
+    `${label}: center launch keeps life during survival window`,
+    after.lives === before.lives
+      ? `No life lost in the first ${(survivalMs / 1000).toFixed(1)}s after launch.`
+      : `Lives dropped ${before.lives} -> ${after.lives}.`
+  );
 }
 
 async function assertReadyState(page: Page, label: string) {

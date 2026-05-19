@@ -275,6 +275,9 @@ const LAUNCH_SIDE_SPEED = 190;
 const LAUNCH_OFFSET_INFLUENCE = 300;
 const LAUNCH_SPIN_INFLUENCE = 0.1;
 const LAUNCH_UPWARD_SPEED = 410;
+/** Minimum seconds after launch before an empty board can cost a life. */
+export const LAUNCH_LOSS_GRACE_SECONDS = 2.2;
+const LAUNCH_CENTER_OFFSET_THRESHOLD = 0.08;
 const MIN_BALL_SPEED = 420;
 const MAX_BALL_SPEED = 860;
 const MAX_LAUNCH_SPEED = 760;
@@ -532,6 +535,7 @@ export class RicochetRushGame {
   private grabTimer = 0;
   private explosionScale = 1;
   private noBallTimer = 0;
+  private launchLossGraceTimer = 0;
   private loadingLevel = false;
   private hasSave = false;
   private autosaveSuppressed = false;
@@ -1032,7 +1036,8 @@ export class RicochetRushGame {
     this.balls.splice(0, this.balls.length, ...this.balls.filter((ball) => ball.y < HEIGHT + 80));
     if (this.balls.length === 0) {
       this.noBallTimer += delta;
-      if (this.noBallTimer >= 0.22) this.loseLife();
+      this.launchLossGraceTimer = Math.max(0, this.launchLossGraceTimer - delta);
+      if (this.noBallTimer >= 0.22 && this.launchLossGraceTimer <= 0) this.loseLife();
     } else {
       this.noBallTimer = 0;
     }
@@ -1391,6 +1396,7 @@ export class RicochetRushGame {
     this.laserTimer = 0;
     this.grabTimer = 0;
     this.noBallTimer = 0;
+    this.launchLossGraceTimer = 0;
     this.explosionScale = 1;
     this.lastPaddleHit = null;
     this.lastLoopCorrection = null;
@@ -1476,19 +1482,23 @@ export class RicochetRushGame {
   }
 
   private launchBalls() {
+    let launched = false;
     for (const ball of this.balls) {
-      if (ball.stuck) {
-        const offset = clamp(ball.stuckOffset / (this.paddleWidth / 2), -1, 1);
-        const fallbackX = Math.abs(ball.vx) > 60 ? Math.sign(ball.vx) * LAUNCH_SIDE_SPEED : LAUNCH_SIDE_SPEED;
-        const launchSpeed = clamp(Math.hypot(fallbackX, LAUNCH_UPWARD_SPEED * this.levelBlueprint.speed), MIN_BALL_SPEED, MAX_LAUNCH_SPEED);
-        const desiredVx = (Math.abs(offset) > 0.08 ? LAUNCH_OFFSET_INFLUENCE * offset : fallbackX) + this.paddleVelocityX * LAUNCH_SPIN_INFLUENCE;
-        const launch = upwardVelocity(launchSpeed, desiredVx, Math.sign(desiredVx) || Math.sign(ball.vx) || 1);
-        ball.stuck = false;
-        ball.stuckOffset = 0;
-        ball.vx = launch.vx;
-        ball.vy = launch.vy;
-      }
+      if (!ball.stuck) continue;
+      const launch = computeStuckBallLaunch({
+        stuckOffset: ball.stuckOffset,
+        paddleWidth: this.paddleWidth,
+        paddleVelocityX: this.paddleVelocityX,
+        storedVx: ball.vx,
+        speedMultiplier: this.levelBlueprint.speed
+      });
+      ball.stuck = false;
+      ball.stuckOffset = 0;
+      ball.vx = launch.vx;
+      ball.vy = launch.vy;
+      launched = true;
     }
+    if (launched) this.launchLossGraceTimer = LAUNCH_LOSS_GRACE_SECONDS;
   }
 
   private collideWalls(ball: Ball) {
@@ -1539,6 +1549,7 @@ export class RicochetRushGame {
     ball.vy = rebound.vy;
     this.lastPaddleHit = { ...rebound, hitZone: hit, paddleVelocityX: this.paddleVelocityX };
     ball.y = PADDLE_Y - 10 - ball.radius;
+    this.launchLossGraceTimer = 0;
     this.audio.play(Math.abs(hit) > 0.72 ? "paddleEdge" : "paddle", this.settings.sfxVolume, {
       intensity: 0.88 + Math.min(0.36, Math.abs(this.paddleVelocityX) / MAX_PADDLE_VELOCITY),
       pitch: 0.94 + Math.abs(hit) * 0.16
@@ -1935,6 +1946,7 @@ export class RicochetRushGame {
     this.lives -= 1;
     this.combo = 1;
     this.noBallTimer = 0;
+    this.launchLossGraceTimer = 0;
     this.audio.play("loseLife", this.settings.sfxVolume);
     this.lifeFlashTimer = 0.45;
     this.shakeBoard(0.18, 3.2);
@@ -3261,6 +3273,24 @@ function bricksFitLevel(savedBricks: readonly SavedBrick[], level: LevelBlueprin
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+export interface StuckBallLaunchInput {
+  stuckOffset: number;
+  paddleWidth: number;
+  paddleVelocityX: number;
+  storedVx: number;
+  speedMultiplier: number;
+}
+
+export function computeStuckBallLaunch(input: StuckBallLaunchInput): PaddleRebound {
+  const offset = clamp(input.stuckOffset / (input.paddleWidth / 2), -1, 1);
+  const aimedLaunch = Math.abs(offset) > LAUNCH_CENTER_OFFSET_THRESHOLD;
+  const fallbackX = Math.abs(input.storedVx) > 60 ? Math.sign(input.storedVx) * LAUNCH_SIDE_SPEED : LAUNCH_SIDE_SPEED;
+  const launchSpeed = clamp(Math.hypot(fallbackX, LAUNCH_UPWARD_SPEED * input.speedMultiplier), MIN_BALL_SPEED, MAX_LAUNCH_SPEED);
+  const desiredVx =
+    (aimedLaunch ? LAUNCH_OFFSET_INFLUENCE * offset : 0) + input.paddleVelocityX * LAUNCH_SPIN_INFLUENCE;
+  return upwardVelocity(launchSpeed, desiredVx, Math.sign(desiredVx) || Math.sign(input.storedVx) || 1);
 }
 
 export function calculatePaddleRebound(input: PaddleReboundInput): PaddleRebound {
