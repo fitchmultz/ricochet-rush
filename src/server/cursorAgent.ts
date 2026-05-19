@@ -361,6 +361,7 @@ export function runCursorWorker(requestJson: string, apiKey: string, options: Ru
       ? options.spawnWorker()
       : spawn(process.execPath, ["--import", "tsx", "src/server/cursorWorker.ts"], {
           cwd: process.cwd(),
+          // Pass the resolved API key explicitly so the worker subprocess does not depend on shell-inherited env.
           env: {
             ...process.env,
             CURSOR_API_KEY: apiKey
@@ -487,13 +488,17 @@ function parseWorkerEnvelope(stdout: string): CursorWorkerEnvelope {
     .reverse()) {
     const candidate = line.trim();
     if (candidate.startsWith("{") && candidate.endsWith("}")) {
-      const parsed = JSON.parse(candidate);
-      if (isRecord(parsed) && "parseStatus" in parsed) return normalizeWorkerEnvelope(parsed, candidate);
-      return {
-        parsed: extractParsedOutput(parsed),
-        parseStatus: "success",
-        rawOutput: candidate
-      };
+      try {
+        const parsed = JSON.parse(candidate);
+        if (isRecord(parsed) && "parseStatus" in parsed) return normalizeWorkerEnvelope(parsed, candidate);
+        return {
+          parsed: extractParsedOutput(parsed),
+          parseStatus: "success",
+          rawOutput: candidate
+        };
+      } catch {
+        continue;
+      }
     }
   }
   throw new Error("Cursor SDK worker did not return JSON.");

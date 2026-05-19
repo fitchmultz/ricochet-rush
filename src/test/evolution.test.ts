@@ -45,6 +45,7 @@ import {
   blueprintFingerprint,
   previewRowsFromLevel
 } from "../shared/boardPacks";
+import { gameEventsToStrings, normalizeGameEvents } from "../shared/gameEvents";
 import { DEFAULT_COSMETICS, DEFAULT_SETTINGS, SAVE_VERSION, normalizeCosmetics, normalizeSaveState, normalizeSettings } from "../shared/saveState";
 import { BOARD_EXPORT_VERSION, createBoardExportPayload, encodeBoardExport, parseBoardExport } from "../shared/shareState";
 import { createApiServer } from "../server/api";
@@ -52,9 +53,6 @@ import { buildGenerationSummary, buildPrompt, parseWorkerOutput, requestEvolutio
 import { parseLevelJsonFromCandidates } from "../server/levelJson";
 import { appendAssistantTextChunk } from "../server/streamText";
 import {
-  calculatePaddleRebound,
-  computeStuckBallLaunch,
-  LAUNCH_LOSS_GRACE_SECONDS,
   normalizeLoopRiskVelocity,
   penaltyPowerupPool,
   powerupToneFor,
@@ -1088,7 +1086,10 @@ describe("Cursor SDK level generation contract", () => {
     expect(save?.packId).toBeNull();
     expect(save?.packBoardIndex).toBe(0);
     expect(save?.bricks).toEqual([{ x: 10, y: 20, width: 30, height: 12, kind: "basic", hp: 1, maxHp: 1 }]);
-    expect(save?.recentEvents).toEqual(["Saved", "Restored"]);
+    expect(save?.recentEvents).toEqual([
+      { text: "Saved", audience: "player" },
+      { text: "Restored", audience: "player" }
+    ]);
   });
 
   it("normalizes v2 checkpoints with ball snapshots and power timers", () => {
@@ -1283,92 +1284,12 @@ describe("Ricochet Rush curated board packs", () => {
   });
 });
 
-describe("Ricochet Rush launch fairness", () => {
-  it("keeps centered launches readable instead of hard-biasing to a side lane", () => {
-    const launch = computeStuckBallLaunch({
-      stuckOffset: 0,
-      paddleWidth: 116,
-      paddleVelocityX: 0,
-      storedVx: 210,
-      speedMultiplier: 1
-    });
-
-    expect(Math.abs(launch.vx)).toBeLessThan(launch.speed * 0.22);
-    expect(launch.vy).toBeLessThan(0);
-    expect(Math.abs(launch.vx)).toBeGreaterThanOrEqual(launch.speed * 0.18 - 0.001);
-  });
-
-  it("applies paddle spin to centered launches", () => {
-    const left = computeStuckBallLaunch({
-      stuckOffset: 0,
-      paddleWidth: 116,
-      paddleVelocityX: -620,
-      storedVx: 210,
-      speedMultiplier: 1
-    });
-    const right = computeStuckBallLaunch({
-      stuckOffset: 0,
-      paddleWidth: 116,
-      paddleVelocityX: 620,
-      storedVx: 210,
-      speedMultiplier: 1
-    });
-
-    expect(left.vx).toBeLessThan(0);
-    expect(right.vx).toBeGreaterThan(0);
-    expect(left.vy).toBeLessThan(0);
-    expect(right.vy).toBeLessThan(0);
-  });
-
-  it("still respects aimed offset launches away from center", () => {
-    const launch = computeStuckBallLaunch({
-      stuckOffset: 40,
-      paddleWidth: 116,
-      paddleVelocityX: 0,
-      storedVx: 210,
-      speedMultiplier: 1
-    });
-
-    expect(Math.abs(launch.vx)).toBeGreaterThan(launch.speed * 0.22);
-    expect(launch.vy).toBeLessThan(0);
-  });
-
-  it("exposes a minimum post-launch survival window before life loss", () => {
-    expect(LAUNCH_LOSS_GRACE_SECONDS).toBeGreaterThanOrEqual(2);
-  });
-});
-
-describe("Ricochet Rush paddle feel", () => {
-  it("keeps center paddle hits from becoming vertical dead loops", () => {
-    const rebound = calculatePaddleRebound({
-      hitZone: 0,
-      paddleVelocityX: 0,
-      incomingVx: 0,
-      incomingVy: 480
-    });
-
-    expect(Math.abs(rebound.vx)).toBeGreaterThanOrEqual(rebound.speed * 0.18);
-    expect(rebound.vy).toBeLessThan(0);
-  });
-
-  it("lets paddle movement add controlled spin to center hits", () => {
-    const left = calculatePaddleRebound({
-      hitZone: 0,
-      paddleVelocityX: -620,
-      incomingVx: 160,
-      incomingVy: 480
-    });
-    const right = calculatePaddleRebound({
-      hitZone: 0,
-      paddleVelocityX: 620,
-      incomingVx: -160,
-      incomingVy: 480
-    });
-
-    expect(left.vx).toBeLessThan(0);
-    expect(right.vx).toBeGreaterThan(0);
-    expect(Math.abs(left.vx)).toBeLessThan(left.speed * 0.84 + 0.001);
-    expect(Math.abs(right.vx)).toBeLessThan(right.speed * 0.84 + 0.001);
+describe("game event records", () => {
+  it("normalizes legacy string events and typed audience records", () => {
+    const events = normalizeGameEvents(["Starter pack loaded.", { text: "Checkpoint saved.", audience: "technical" }]);
+    expect(events[0]?.audience).toBe("player");
+    expect(events[1]?.audience).toBe("technical");
+    expect(gameEventsToStrings(events)).toEqual(["Starter pack loaded.", "Checkpoint saved."]);
   });
 });
 

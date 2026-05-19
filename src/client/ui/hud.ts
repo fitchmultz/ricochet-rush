@@ -4,6 +4,7 @@ import {
   type ComposerAgentTrace,
   type GenerationSummary
 } from "../../shared/evolution";
+import { type GameEventRecord, gameEventAudience, gameEventText } from "../../shared/gameEvents";
 import type { GameCosmetics } from "../../shared/saveState";
 import { escapeAttribute, escapeHtml } from "../../shared/util";
 import { trapFocus } from "./focusTrap";
@@ -59,7 +60,7 @@ export interface HudState {
     generationSummary?: GenerationSummary;
     previewRows?: string[];
   };
-  events: string[];
+  events: GameEventRecord[];
   announcement: string;
   sidebarCollapsed?: boolean;
   agentTrace?: ComposerAgentTrace;
@@ -126,10 +127,10 @@ export function createHud(root: HTMLDivElement | null): HudApi {
         </div>
         <div data-combo class="combo-badge" hidden></div>
         <div class="touch-controls" aria-label="Touch controls">
-          <button type="button" data-touch-action="left" aria-label="Move paddle left">←</button>
-          <button type="button" data-touch-action="primary" class="touch-primary">Launch</button>
-          <button type="button" data-touch-action="right" aria-label="Move paddle right">→</button>
-          <button type="button" data-touch-action="pause">Pause</button>
+          <button type="button" data-touch-action="left" aria-label="Move paddle left" aria-keyshortcuts="ArrowLeft">←</button>
+          <button type="button" data-touch-action="primary" class="touch-primary" aria-keyshortcuts="Space Enter">Launch</button>
+          <button type="button" data-touch-action="right" aria-label="Move paddle right" aria-keyshortcuts="ArrowRight">→</button>
+          <button type="button" data-touch-action="pause" aria-keyshortcuts="KeyP Escape">Pause</button>
         </div>
         <div class="hint">A/D or arrows move - Space/Enter launch or continue - P/Escape pause - N design or reroll</div>
         <div data-live-announcement class="sr-only" aria-live="polite" aria-atomic="true"></div>
@@ -633,7 +634,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
         packList.innerHTML = packListMarkup;
         previousPackListMarkup = packListMarkup;
       }
-      const eventsMarkup = state.events.map((event) => `<li>${escapeHtml(event)}</li>`).join("");
+      const eventsMarkup = state.events.map((event) => `<li>${escapeHtml(gameEventText(event))}</li>`).join("");
       if (eventsMarkup !== previousEventsMarkup) {
         events.innerHTML = eventsMarkup;
         previousEventsMarkup = eventsMarkup;
@@ -702,28 +703,8 @@ function renderLives(lives: number): string {
 
 function playerStatusFor(state: HudState): string {
   if (state.pending) return "Designer is shaping a playable wall.";
-  const playerEvent = state.events.find((event) => !isTechnicalEvent(event));
-  const status = !isTechnicalEvent(state.status) ? state.status : "";
-  return playerEvent || status || state.hint || "Aim the rebound. Keep the streak alive.";
-}
-
-function isTechnicalEvent(event: string): boolean {
-  const normalized = event.toLowerCase();
-  return (
-    normalized.includes("generated power-up atlas") ||
-    normalized.includes("power-up icons are ready") ||
-    normalized.includes("power-up icons switched") ||
-    normalized.includes("power-up art failed") ||
-    normalized.includes("cursor sdk") ||
-    normalized.includes("api failure") ||
-    normalized.includes("parse") ||
-    normalized.includes("trace") ||
-    normalized.includes("fallback") ||
-    normalized.includes("local backup") ||
-    normalized.includes("checkpoint saved") ||
-    normalized.includes("saved board rebuilt") ||
-    normalized.startsWith("generated ")
-  );
+  const playerEvent = state.events.find((event) => gameEventAudience(event) === "player");
+  return (playerEvent ? gameEventText(playerEvent) : "") || state.status || state.hint || "Aim the rebound. Keep the streak alive.";
 }
 
 function renderBoardMeta(state: HudState): string {

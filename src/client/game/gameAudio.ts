@@ -389,12 +389,24 @@ function playTone(context: AudioContext, start: number, voice: ToneVoice, destin
   if (voice.noise) playNoise(context, start, duration * 0.72, voice.peak * 0.45, destination);
 }
 
-function playNoise(context: AudioContext, start: number, duration: number, peak: number, destination: AudioNode) {
-  const buffer = context.createBuffer(1, Math.max(1, Math.floor(context.sampleRate * duration)), context.sampleRate);
+const noiseBufferCache = new Map<string, AudioBuffer>();
+
+function noiseBufferFor(context: AudioContext, duration: number): AudioBuffer {
+  const sampleCount = Math.max(1, Math.floor(context.sampleRate * duration));
+  const cacheKey = `${context.sampleRate}:${sampleCount}`;
+  const cached = noiseBufferCache.get(cacheKey);
+  if (cached) return cached;
+  const buffer = context.createBuffer(1, sampleCount, context.sampleRate);
   const channel = buffer.getChannelData(0);
   for (let index = 0; index < channel.length; index += 1) {
     channel[index] = (Math.random() * 2 - 1) * (1 - index / channel.length);
   }
+  noiseBufferCache.set(cacheKey, buffer);
+  return buffer;
+}
+
+function playNoise(context: AudioContext, start: number, duration: number, peak: number, destination: AudioNode) {
+  const buffer = noiseBufferFor(context, duration);
   const source = context.createBufferSource();
   const gain = context.createGain();
   gain.gain.setValueAtTime(peak, start);

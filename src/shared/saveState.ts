@@ -1,4 +1,5 @@
 import { normalizeLevel, type BrickKind, type LevelBlueprint } from "./evolution";
+import { normalizeGameEvents, type GameEventRecord } from "./gameEvents";
 import { clamp, isRecord } from "./util";
 
 export const SAVE_VERSION = 3;
@@ -68,7 +69,7 @@ export interface GameSave {
   levelBlueprint: LevelBlueprint;
   levelSourcePrompt: string;
   bricks: SavedBrick[];
-  recentEvents: string[];
+  recentEvents: GameEventRecord[];
   laserTimer: number;
   grabTimer: number;
   explosionScale: number;
@@ -157,7 +158,7 @@ export function normalizeSaveState(input: unknown): GameSave | null {
     levelBlueprint,
     levelSourcePrompt: stringValue(input.levelSourcePrompt, "Default Ricochet board prompt", 180),
     bricks: input.bricks.map(normalizeBrick).filter((brick): brick is SavedBrick => brick !== null),
-    recentEvents: Array.isArray(input.recentEvents) ? input.recentEvents.filter((event): event is string => typeof event === "string").slice(0, 6) : [],
+    recentEvents: normalizeGameEvents(input.recentEvents, 6),
     laserTimer,
     grabTimer,
     explosionScale,
