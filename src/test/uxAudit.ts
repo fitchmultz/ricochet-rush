@@ -207,8 +207,13 @@ async function runMobileAudit(page: Page) {
   await capture(page, "mobile-ready");
 
   await openToolPanel(page, "designer", "Board Designer");
+  await assertMobileToolDrawerSizing(page, "mobile designer panel");
   await assertLayoutHealth(page, "mobile designer panel", { failSmallTouchTargets: true });
   await capture(page, "mobile-designer");
+  await page.locator('[data-action="close-tool-panel"]').click();
+  await page.waitForFunction(() => document.querySelector("[data-tool-surface]")?.hasAttribute("hidden") === true);
+  await openToolPanel(page, "options", "Options");
+  await assertMobileToolDrawerSizing(page, "mobile options panel");
   await page.locator('[data-action="close-tool-panel"]').click();
   await page.waitForFunction(() => document.querySelector("[data-tool-surface]")?.hasAttribute("hidden") === true);
 
@@ -591,6 +596,34 @@ async function assertStageCoverage(page: Page, label: string) {
   const viewportWidth = page.viewportSize()?.width ?? 999;
   const maxCoverage = viewportWidth <= 520 ? 0.38 : 0.22;
   recordCheck(coverage.coverageRatio < maxCoverage, `${label}: overlays leave the playfield readable`, `${Math.round(coverage.coverageRatio * 100)}% sampled overlay coverage`, "warn");
+}
+
+async function assertMobileToolDrawerSizing(page: Page, label: string) {
+  const metrics = await page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>(".tool-panel");
+    const body = document.querySelector<HTMLElement>(".tool-body");
+    const view = document.querySelector<HTMLElement>(".tool-view:not([hidden])");
+    if (!panel || !body || !view) return null;
+    const panelRect = panel.getBoundingClientRect();
+    const bodyRect = body.getBoundingClientRect();
+    const viewRect = view.getBoundingClientRect();
+    const emptySlab = bodyRect.height - viewRect.height;
+    return {
+      panelHeight: panelRect.height,
+      bodyHeight: bodyRect.height,
+      viewHeight: viewRect.height,
+      emptySlab,
+      overflowed: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
+    };
+  });
+  recordCheck(metrics?.overflowed === false, `${label}: no horizontal overflow`, metrics?.overflowed ? "Drawer caused horizontal scroll." : "No horizontal overflow.");
+  recordCheck(
+    (metrics?.emptySlab ?? 999) < 72,
+    `${label}: drawer body fits tool content`,
+    metrics
+      ? `Panel ${Math.round(metrics.panelHeight)}px, body ${Math.round(metrics.bodyHeight)}px, view ${Math.round(metrics.viewHeight)}px.`
+      : "Tool drawer metrics unavailable."
+  );
 }
 
 async function assertMobileToolDockReachable(page: Page, label: string) {

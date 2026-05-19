@@ -1994,9 +1994,31 @@ body {
 
   .tool-panel {
     position: fixed;
-    inset: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    inset: auto max(10px, env(safe-area-inset-right)) max(calc(88px + env(safe-area-inset-bottom)), 10px) max(10px, env(safe-area-inset-left));
     width: auto;
     min-width: 0;
+    height: fit-content;
+    max-height: min(72dvh, calc(100dvh - 108px));
+    grid-template-rows: auto auto;
+    align-content: start;
+  }
+
+  .tool-body {
+    height: fit-content;
+    max-height: min(60dvh, calc(100dvh - 168px));
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .shell.is-pack-panel-open .tool-panel {
+    max-height: min(78dvh, calc(100dvh - 108px));
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .shell.is-pack-panel-open .tool-body {
+    height: auto;
+    min-height: 0;
+    max-height: min(66dvh, calc(100dvh - 168px));
   }
 
   .console-status {
