@@ -497,6 +497,9 @@ export class RicochetRushGame {
   private readonly paddleGlowMesh = new THREE.Mesh(this.paddleGlowGeometry, this.paddleGlowMaterial);
   private readonly paddleSpecularMesh = new THREE.Mesh(this.paddleSpecularGeometry, this.paddleSpecularMaterial);
   private sparksPoints: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial> | null = null;
+  private sparksPositionBuffer: Float32Array | null = null;
+  private sparksColorBuffer: Float32Array | null = null;
+  private static readonly MAX_SPARKS = 180;
   private bricks: Brick[] = [];
   private levelBlueprint: LevelBlueprint = fallbackLevel({ level: 1, score: 0, lives: 3, clearedLevels: 0, recentEvents: [] });
   private levelLayout: LevelLayout = computeLevelLayout(fallbackLevel({ level: 1, score: 0, lives: 3, clearedLevels: 0, recentEvents: [] }));
@@ -2837,15 +2840,31 @@ export class RicochetRushGame {
   }
 
   private syncSparks() {
-    if (this.sparksPoints) {
-      this.sparksPoints.geometry.dispose();
-      this.sparksGroup.remove(this.sparksPoints);
-      this.sparksPoints = null;
+    if (this.sparks.length === 0) {
+      this.sparksPoints?.geometry.setDrawRange(0, 0);
+      return;
     }
-    if (this.sparks.length === 0) return;
-    const positions = new Float32Array(this.sparks.length * 3);
-    const colors = new Float32Array(this.sparks.length * 3);
-    for (const [index, spark] of this.sparks.entries()) {
+    const count = Math.min(this.sparks.length, RicochetRushGame.MAX_SPARKS);
+    if (!this.sparksPoints || !this.sparksPositionBuffer || !this.sparksColorBuffer) {
+      this.sparksPositionBuffer = new Float32Array(RicochetRushGame.MAX_SPARKS * 3);
+      this.sparksColorBuffer = new Float32Array(RicochetRushGame.MAX_SPARKS * 3);
+      const geometry = new THREE.BufferGeometry();
+      const positionAttr = new THREE.BufferAttribute(this.sparksPositionBuffer, 3);
+      positionAttr.setUsage(THREE.DynamicDrawUsage);
+      const colorAttr = new THREE.BufferAttribute(this.sparksColorBuffer, 3);
+      colorAttr.setUsage(THREE.DynamicDrawUsage);
+      geometry.setAttribute("position", positionAttr);
+      geometry.setAttribute("color", colorAttr);
+      this.sparksPoints = new THREE.Points(
+        geometry,
+        new THREE.PointsMaterial({ size: 4, vertexColors: true, transparent: true, opacity: 0.92 })
+      );
+      this.sparksGroup.add(this.sparksPoints);
+    }
+    const positions = this.sparksPositionBuffer;
+    const colors = this.sparksColorBuffer;
+    for (let index = 0; index < count; index += 1) {
+      const spark = this.sparks[index];
       const position = toWorld(spark.x, spark.y, 78);
       positions[index * 3] = position.x;
       positions[index * 3 + 1] = position.y;
@@ -2855,12 +2874,12 @@ export class RicochetRushGame {
       colors[index * 3 + 1] = color.g;
       colors[index * 3 + 2] = color.b;
     }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    const size = this.sparks.reduce((largest, spark) => Math.max(largest, spark.size), 4);
-    this.sparksPoints = new THREE.Points(geometry, new THREE.PointsMaterial({ size, vertexColors: true, transparent: true, opacity: 0.92 }));
-    this.sparksGroup.add(this.sparksPoints);
+    const geometry = this.sparksPoints.geometry;
+    geometry.setDrawRange(0, count);
+    geometry.attributes.position.needsUpdate = true;
+    geometry.attributes.color.needsUpdate = true;
+    const size = this.sparks.slice(0, count).reduce((largest, spark) => Math.max(largest, spark.size), 4);
+    this.sparksPoints.material.size = size;
   }
 
   private syncFloatingTexts() {
