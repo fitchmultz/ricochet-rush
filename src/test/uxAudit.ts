@@ -203,6 +203,7 @@ async function runMobileAudit(page: Page) {
   await assertReadyState(page, "mobile ready");
   await assertCanvasClarity(page, "mobile ready");
   await assertLayoutHealth(page, "mobile ready", { failSmallTouchTargets: true });
+  await assertMobileToolDockReachable(page, "mobile ready");
   await capture(page, "mobile-ready");
 
   await openToolPanel(page, "designer", "Board Designer");
@@ -590,6 +591,36 @@ async function assertStageCoverage(page: Page, label: string) {
   const viewportWidth = page.viewportSize()?.width ?? 999;
   const maxCoverage = viewportWidth <= 520 ? 0.38 : 0.22;
   recordCheck(coverage.coverageRatio < maxCoverage, `${label}: overlays leave the playfield readable`, `${Math.round(coverage.coverageRatio * 100)}% sampled overlay coverage`, "warn");
+}
+
+async function assertMobileToolDockReachable(page: Page, label: string) {
+  const metrics = await page.evaluate(() => {
+    const dock = document.querySelector<HTMLElement>(".tool-dock");
+    const boards = document.querySelector<HTMLButtonElement>('[data-tool-panel="packs"]');
+    const designer = document.querySelector<HTMLButtonElement>('[data-tool-panel="designer"]');
+    if (!dock || !boards || !designer) return null;
+    const dockRect = dock.getBoundingClientRect();
+    const boardsRect = boards.getBoundingClientRect();
+    return {
+      dockTop: dockRect.top,
+      dockBottom: dockRect.bottom,
+      boardsVisible: boardsRect.top >= 0 && boardsRect.bottom <= window.innerHeight + 1,
+      overflowed: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
+    };
+  });
+  recordCheck(metrics?.overflowed === false, `${label}: no horizontal overflow on load`, metrics?.overflowed ? "Page still scrolls horizontally." : "No horizontal overflow.");
+  const dockPinnedToViewport =
+    metrics !== null &&
+    metrics.dockBottom <= (page.viewportSize()?.height ?? 760) + 2 &&
+    metrics.dockBottom >= (page.viewportSize()?.height ?? 760) - 140;
+  recordCheck(
+    dockPinnedToViewport,
+    `${label}: tool dock is pinned for quick access`,
+    metrics
+      ? `Tool dock sits ${Math.round(metrics.dockTop)}-${Math.round(metrics.dockBottom)}px in a ${page.viewportSize()?.height ?? 760}px viewport.`
+      : "Tool dock missing."
+  );
+  recordCheck(metrics?.boardsVisible === true, `${label}: core tool buttons are reachable`, metrics?.boardsVisible ? "Boards and Designer are visible without scrolling." : "Tool buttons require scrolling on first paint.");
 }
 
 async function assertStageInViewport(page: Page, label: string) {

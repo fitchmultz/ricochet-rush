@@ -61,8 +61,10 @@ body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--active-panel-width);
   gap: 12px;
-  width: 100vw;
+  width: 100%;
+  max-width: 100%;
   height: 100vh;
+  height: 100dvh;
   padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
 }
 
@@ -1844,16 +1846,80 @@ body {
 }
 
 @media (max-width: 860px) {
+  html {
+    overflow-x: clip;
+  }
+
   body {
-    overflow: auto;
+    overflow-x: clip;
+    overflow-y: auto;
   }
 
   .shell {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(438px, 72vh) auto;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(360px, min(72vh, 72dvh)) auto;
+    width: 100%;
+    max-width: 100%;
     height: auto;
     min-height: 100vh;
-    overflow-x: hidden;
+    min-height: 100dvh;
+    overflow-x: clip;
+  }
+
+  .play-console {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 12px calc(88px + env(safe-area-inset-bottom));
+  }
+
+  .console-head {
+    order: 0;
+  }
+
+  .tool-dock {
+    order: 1;
+    position: fixed;
+    left: max(10px, env(safe-area-inset-left));
+    right: max(10px, env(safe-area-inset-right));
+    bottom: max(10px, env(safe-area-inset-bottom));
+    z-index: 6;
+    padding: 6px;
+    border: 1px solid rgba(126, 241, 255, 0.22);
+    border-radius: 10px;
+    background: rgba(10, 15, 22, 0.94);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42);
+  }
+
+  .stage.has-visible-overlay ~ .panel .tool-dock,
+  .stage.has-visible-overlay + .panel .tool-dock {
+    z-index: 2;
+  }
+
+  .shell.is-tool-panel-open .tool-dock {
+    z-index: 2;
+  }
+
+  .board-card {
+    order: 2;
+  }
+
+  .compact-summary {
+    order: 3;
+  }
+
+  .powerup-primer {
+    order: 4;
+    max-height: min(28vh, 220px);
+    overflow: auto;
+  }
+
+  .actions {
+    order: 5;
+  }
+
+  .console-status {
+    order: 6;
   }
 
   .stage,
