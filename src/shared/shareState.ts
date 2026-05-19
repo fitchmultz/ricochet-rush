@@ -1,5 +1,6 @@
 import { BRICK_COLUMNS, BRICK_ROWS, normalizeLevel, type BrickKind, type LevelBlueprint, type LevelRequest } from "./evolution";
 import { previewRowsFromLevel } from "./boardPacks";
+import { isRecord } from "./util";
 
 export const BOARD_EXPORT_VERSION = 1;
 export const BOARD_EXPORT_APP = "ricochet-rush";
@@ -97,6 +98,3 @@ function cloneLevel(level: LevelBlueprint): LevelBlueprint {
   };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}

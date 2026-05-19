@@ -30,6 +30,7 @@ import {
   DESIGNER_BRICK_COLUMNS,
   DESIGNER_BRICK_ROWS
 } from "../shared/evolution.js";
+import { isRecord } from "../shared/util.js";
 
 export interface WorkerInvocationResult {
   parsed: unknown | null;
@@ -516,10 +517,6 @@ function extractParsedOutput(payload: unknown): unknown {
     return payload.parsed;
   }
   return payload;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function clampAttempts(value: number): number {

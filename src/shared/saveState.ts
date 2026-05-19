@@ -1,4 +1,5 @@
 import { normalizeLevel, type BrickKind, type LevelBlueprint } from "./evolution";
+import { clamp, isRecord } from "./util";
 
 export const SAVE_VERSION = 3;
 
@@ -251,10 +252,3 @@ function volumeValue(value: unknown, fallback: number): number {
   return clamp(numberValue(value, fallback), 0, 1);
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}

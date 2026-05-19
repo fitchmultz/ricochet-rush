@@ -39,7 +39,7 @@ import {
   trimSavedBoards
 } from "../../shared/boardPacks";
 import { createBoardExportPayload, encodeBoardExport, parseBoardExport } from "../../shared/shareState";
-import { escapeAttribute, escapeHtml } from "../../shared/util";
+import { clamp, escapeAttribute, escapeHtml } from "../../shared/util";
 import { trapFocus } from "../ui/focusTrap";
 import {
   DEFAULT_COSMETICS,
@@ -3361,10 +3361,6 @@ function bricksFitLevel(savedBricks: readonly SavedBrick[], level: LevelBlueprin
         saved.hp <= brick.maxHp
     )
   );
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
 }
 
 export interface StuckBallLaunchInput {

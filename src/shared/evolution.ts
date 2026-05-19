@@ -1,3 +1,5 @@
+import { clamp, isRecord } from "./util";
+
 export const CURSOR_MODEL = {
   id: "composer-2.5",
   params: [{ id: "mode", value: "fast" }]
@@ -979,14 +981,6 @@ function numberValue(value: unknown, fallback: number): number {
 function boundedInteger(value: unknown, min: number, max: number): number | null {
   if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > max) return null;
   return value;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function isDesignerStyle(value: string): value is DesignerStyle {

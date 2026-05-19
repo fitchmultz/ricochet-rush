@@ -1,3 +1,5 @@
+import { clamp } from "../../shared/util";
+
 export type GameSoundKind =
   | "paddle"
   | "paddleEdge"
@@ -408,6 +410,3 @@ function playNoise(context: AudioContext, start: number, duration: number, peak:
   source.stop(start + duration);
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
