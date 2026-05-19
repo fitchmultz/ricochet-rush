@@ -70,10 +70,12 @@ function isStrictLevelBlueprint(value: Record<string, unknown>): boolean {
   if (typeof value.briefing !== "string" || value.briefing.trim().length === 0) return false;
   if (typeof value.paddleHint !== "string" || value.paddleHint.trim().length === 0) return false;
   if (typeof value.speed !== "number" || !Number.isFinite(value.speed) || value.speed < 0.65 || value.speed > 1.8) return false;
-  if (!Array.isArray(value.rows) || value.rows.length !== BRICK_ROWS) return false;
+  if (!Array.isArray(value.rows) || value.rows.length < 1) return false;
+  const columns = Array.isArray(value.rows[0]) ? value.rows[0].length : 0;
+  if (columns < 1) return false;
   let brickCount = 0;
   for (const row of value.rows) {
-    if (!Array.isArray(row) || row.length !== BRICK_COLUMNS) return false;
+    if (!Array.isArray(row) || row.length !== columns) return false;
     for (const cell of row) {
       if (cell === null) continue;
       if (!isRecord(cell)) return false;

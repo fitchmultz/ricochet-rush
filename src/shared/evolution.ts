@@ -3,10 +3,27 @@ export const CURSOR_MODEL = {
   params: [{ id: "mode", value: "fast" }]
 };
 
+/** Curated pack boards and legacy authored layouts. */
 export const BRICK_COLUMNS = 14;
 export const BRICK_ROWS = 9;
+
+/** Composer designer canvas — finer grid for icon/creative prompts. */
+export const DESIGNER_BRICK_COLUMNS = 20;
+export const DESIGNER_BRICK_ROWS = 12;
+
+export const PACK_CELL_COUNT = BRICK_COLUMNS * BRICK_ROWS;
+export const DESIGNER_CELL_COUNT = DESIGNER_BRICK_COLUMNS * DESIGNER_BRICK_ROWS;
+
+function scalePackCountToDesigner(packCount: number): number {
+  return Math.max(1, Math.round((packCount * DESIGNER_CELL_COUNT) / PACK_CELL_COUNT));
+}
+
 export const MIN_BRICKS = 34;
 export const MAX_BRICKS = 86;
+
+/** Playable brick bounds on the designer canvas (scaled from the pack grid). */
+export const MIN_DESIGNER_BRICKS = scalePackCountToDesigner(MIN_BRICKS);
+export const MAX_DESIGNER_BRICKS = scalePackCountToDesigner(MAX_BRICKS);
 
 export const DESIGNER_STYLES = ["balanced", "open-lanes", "bomb-chains", "precision", "boss-core"] as const;
 
@@ -43,6 +60,10 @@ export interface LevelRequest {
   designer?: BoardDesignerIntent;
 }
 
+export type DesignerVisualPreset = "arcade" | "icon";
+
+export type DesignerBriefMode = "arcade" | "silhouette";
+
 export interface BoardDesignerIntent {
   style: DesignerStyle;
   difficulty: number;
@@ -50,6 +71,13 @@ export interface BoardDesignerIntent {
   specialBias: number;
   seed: string;
   brief: string;
+  visualPreset?: DesignerVisualPreset;
+}
+
+export interface DesignerBriefClassification {
+  mode: DesignerBriefMode;
+  wantsMixedKinds: boolean;
+  wantsNegativeSpace: boolean;
 }
 
 export interface LevelBlueprint {
@@ -137,8 +165,27 @@ export const DEFAULT_DESIGNER_INTENT: BoardDesignerIntent = {
   density: 0.52,
   specialBias: 0.45,
   seed: "fresh-angle",
-  brief: ""
+  brief: "",
+  visualPreset: "arcade"
 };
+
+/** Icon/silhouette boards need lower fill so outlines read in 3D. */
+export const ICON_DENSITY_CAP = 0.32;
+export const ICON_SPECIAL_BIAS_CAP = 0.35;
+/** Playable brick bounds for creative/silhouette SDK boards on the designer canvas. */
+export const MIN_SILHOUETTE_BRICKS = scalePackCountToDesigner(22);
+export const MAX_SILHOUETTE_BRICKS = scalePackCountToDesigner(48);
+export const MIN_RAW_SILHOUETTE_BRICKS = scalePackCountToDesigner(14);
+
+export function designerGridDimensions(): { columns: number; rows: number } {
+  return { columns: DESIGNER_BRICK_COLUMNS, rows: DESIGNER_BRICK_ROWS };
+}
+
+export function levelGridDimensions(level: LevelBlueprint): { columns: number; rows: number } {
+  const rows = level.rows.length;
+  const columns = level.rows[0]?.length ?? BRICK_COLUMNS;
+  return { columns, rows };
+}
 
 const STYLE_LABELS: Record<DesignerStyle, string> = {
   balanced: "Balanced",
@@ -215,9 +262,15 @@ export type SdkLevelValidation = SdkLevelValidationSuccess | SdkLevelValidationF
 /** Minimum occupied cells in raw SDK grid before server-side repair. */
 export const MIN_RAW_SDK_BRICKS = Math.max(24, Math.floor(MIN_BRICKS * 0.65));
 
+export const CURSOR_EVOLUTION_MAX_ATTEMPTS = 3;
+export const CURSOR_WORKER_TIMEOUT_MS = 75_000;
+/** Browser fetch budget: server attempts × worker timeout + startup buffer. */
+export const CURSOR_GENERATION_BUDGET_MS = CURSOR_EVOLUTION_MAX_ATTEMPTS * CURSOR_WORKER_TIMEOUT_MS + 15_000;
+
 export function normalizeLevel(input: unknown, request: LevelRequest): LevelBlueprint {
   const raw = isRecord(input) ? input : {};
-  const normalizedRows = normalizeLevelRows(raw, request);
+  const dimensions = dimensionsForRawLevel(raw);
+  const normalizedRows = normalizeLevelRows(raw, request, dimensions);
   if (!normalizedRows) return fallbackLevel(request);
   const rows = repairBrickCount(normalizedRows, request.level);
   return {
@@ -238,26 +291,31 @@ export function validateAndNormalizeSdkLevel(input: unknown, request: LevelReque
     return { ok: false, reason: "SDK output is missing grid or rows.", rawBrickCount: 0 };
   }
 
-  const rawBrickCount = Array.isArray(raw.grid) ? countCompactGridGlyphs(raw.grid) : countRowsBrickSpecs(raw.rows);
-  if (rawBrickCount < MIN_RAW_SDK_BRICKS) {
+  const designer = resolveDesignerIntentForGeneration(request.designer);
+  const bounds = generationBrickBounds(designer);
+
+  const rawBrickCount = Array.isArray(raw.grid)
+    ? countCompactGridGlyphs(raw.grid, designerGridDimensions())
+    : countRowsBrickSpecs(raw.rows);
+  if (rawBrickCount < bounds.minRaw) {
     return {
       ok: false,
-      reason: `SDK grid is too sparse (${rawBrickCount} occupied cells; need at least ${MIN_RAW_SDK_BRICKS}).`,
+      reason: `SDK grid is too sparse (${rawBrickCount} occupied cells; need at least ${bounds.minRaw}).`,
       rawBrickCount
     };
   }
 
-  const normalizedRows = normalizeLevelRows(raw, request);
+  const normalizedRows = normalizeLevelRows(raw, request, designerGridDimensions());
   if (!normalizedRows) {
     return { ok: false, reason: "SDK grid could not be normalized.", rawBrickCount };
   }
 
-  const rows = repairBrickCount(normalizedRows, request.level);
+  const rows = normalizedRows;
   const brickCount = countBricks(rows);
-  if (brickCount < MIN_BRICKS || brickCount > MAX_BRICKS) {
+  if (brickCount < bounds.min || brickCount > bounds.max) {
     return {
       ok: false,
-      reason: `Playable brick count ${brickCount} is outside ${MIN_BRICKS}-${MAX_BRICKS}.`,
+      reason: `Playable brick count ${brickCount} is outside ${bounds.min}-${bounds.max}.`,
       rawBrickCount
     };
   }
@@ -268,26 +326,45 @@ export function validateAndNormalizeSdkLevel(input: unknown, request: LevelReque
   if (!name || !briefing || !paddleHint) {
     return { ok: false, reason: "SDK output is missing name, briefing, or paddleHint.", rawBrickCount };
   }
+  const level: LevelBlueprint = {
+    name,
+    briefing,
+    paddleHint,
+    speed: clamp(numberValue(raw.speed, 1 + request.level * 0.04), 0.85, 1.85),
+    rows
+  };
+
+  const fidelity = validateCreativeFidelity(level, designer.brief, designer.visualPreset);
+  if (!fidelity.ok) {
+    return { ok: false, reason: fidelity.reason, rawBrickCount: brickCount };
+  }
 
   return {
     ok: true,
-    rawBrickCount,
-    level: {
-      name,
-      briefing,
-      paddleHint,
-      speed: clamp(numberValue(raw.speed, 1 + request.level * 0.04), 0.85, 1.85),
-      rows: applyDesignerBriefConstraints(rows, normalizeDesignerIntent(request.designer))
-    }
+    rawBrickCount: brickCount,
+    level
   };
 }
 
-function countCompactGridGlyphs(grid: unknown[]): number {
+function dimensionsForRawLevel(raw: Record<string, unknown>): { columns: number; rows: number } {
+  if (Array.isArray(raw.grid)) return designerGridDimensions();
+  if (Array.isArray(raw.rows) && raw.rows.length > 0) {
+    const firstRow = raw.rows[0];
+    const columns = Array.isArray(firstRow) ? firstRow.length : BRICK_COLUMNS;
+    const rows = raw.rows.length;
+    if (columns === DESIGNER_BRICK_COLUMNS && rows === DESIGNER_BRICK_ROWS) return designerGridDimensions();
+    if (columns === BRICK_COLUMNS && rows === BRICK_ROWS) return { columns: BRICK_COLUMNS, rows: BRICK_ROWS };
+    return { columns: BRICK_COLUMNS, rows: BRICK_ROWS };
+  }
+  return { columns: BRICK_COLUMNS, rows: BRICK_ROWS };
+}
+
+function countCompactGridGlyphs(grid: unknown[], dimensions: { columns: number; rows: number }): number {
   let count = 0;
-  for (let y = 0; y < BRICK_ROWS; y += 1) {
+  for (let y = 0; y < dimensions.rows; y += 1) {
     const rawRow = grid[y];
     const sourceRow = typeof rawRow === "string" ? rawRow : "";
-    const normalized = sourceRow.padEnd(BRICK_COLUMNS, ".").slice(0, BRICK_COLUMNS);
+    const normalized = sourceRow.padEnd(dimensions.columns, ".").slice(0, dimensions.columns);
     for (const char of normalized) {
       const code = char.toLowerCase();
       if (code !== "." && code !== "_" && code !== "-" && code.trim().length > 0) count += 1;
@@ -308,19 +385,28 @@ function countRowsBrickSpecs(rows: unknown): number {
   return count;
 }
 
-function normalizeLevelRows(raw: Record<string, unknown>, request: LevelRequest): BrickCell[][] | null {
-  if (Array.isArray(raw.rows)) return normalizeRows(raw.rows, request.level);
-  if (Array.isArray(raw.grid)) return normalizeCompactGrid(raw.grid, raw, request);
+function normalizeLevelRows(
+  raw: Record<string, unknown>,
+  request: LevelRequest,
+  dimensions: { columns: number; rows: number } = { columns: BRICK_COLUMNS, rows: BRICK_ROWS }
+): BrickCell[][] | null {
+  if (Array.isArray(raw.rows)) return normalizeRows(raw.rows, request.level, dimensions);
+  if (Array.isArray(raw.grid)) return normalizeCompactGrid(raw.grid, raw, request, dimensions);
   return null;
 }
 
-function normalizeCompactGrid(grid: unknown[], raw: Record<string, unknown>, request: LevelRequest): BrickCell[][] {
+function normalizeCompactGrid(
+  grid: unknown[],
+  raw: Record<string, unknown>,
+  request: LevelRequest,
+  dimensions: { columns: number; rows: number }
+): BrickCell[][] {
   const designer = normalizeDesignerIntent(request.designer);
   const defaultKind = brickKindValue(raw.brick) ?? brickKindValue(raw.kind) ?? brickKindValue(raw.fillKind);
   const legend = isRecord(raw.legend) ? raw.legend : {};
-  return Array.from({ length: BRICK_ROWS }, (_, y) => {
+  return Array.from({ length: dimensions.rows }, (_, y) => {
     const sourceRow = typeof grid[y] === "string" ? grid[y] : "";
-    const cells = [...sourceRow.padEnd(BRICK_COLUMNS, ".").slice(0, BRICK_COLUMNS)];
+    const cells = [...sourceRow.padEnd(dimensions.columns, ".").slice(0, dimensions.columns)];
     return cells.map((char) => compactGridCell(char, legend, defaultKind, designer, request.level));
   });
 }
@@ -351,14 +437,130 @@ export function normalizeDesignerIntent(input: unknown): BoardDesignerIntent {
   const raw = isRecord(input) ? input : {};
   const rawStyle = raw.style;
   const style: DesignerStyle = typeof rawStyle === "string" && isDesignerStyle(rawStyle) ? rawStyle : DEFAULT_DESIGNER_INTENT.style;
+  const visualPreset: DesignerVisualPreset = raw.visualPreset === "icon" ? "icon" : "arcade";
+  const densityDefault = visualPreset === "icon" ? ICON_DENSITY_CAP : DEFAULT_DESIGNER_INTENT.density;
+  const specialDefault = visualPreset === "icon" ? ICON_SPECIAL_BIAS_CAP : DEFAULT_DESIGNER_INTENT.specialBias;
   return {
     style,
     difficulty: clamp(Math.round(numberValue(raw.difficulty, DEFAULT_DESIGNER_INTENT.difficulty)), 1, 5),
-    density: clamp(numberValue(raw.density, DEFAULT_DESIGNER_INTENT.density), 0.34, 0.82),
-    specialBias: clamp(numberValue(raw.specialBias, DEFAULT_DESIGNER_INTENT.specialBias), 0, 1),
+    density: clamp(numberValue(raw.density, densityDefault), 0.34, 0.82),
+    specialBias: clamp(numberValue(raw.specialBias, specialDefault), 0, 1),
     seed: stringValue(raw.seed, DEFAULT_DESIGNER_INTENT.seed).slice(0, 36),
-    brief: briefValue(raw.brief, DEFAULT_DESIGNER_INTENT.brief)
+    brief: briefValue(raw.brief, DEFAULT_DESIGNER_INTENT.brief),
+    visualPreset
   };
+}
+
+export function classifyDesignerBrief(brief: string, visualPreset: DesignerVisualPreset = "arcade"): DesignerBriefClassification {
+  const text = brief.toLowerCase();
+  const silhouetteKeywords =
+    /\b(face|smiley|smile|grin|emoji|icon|logo|silhouette|portrait|symbol|letter|outline|figure|character|mask|mascot|pixel art)\b/.test(text) ||
+    /\b(shaped|shape of|looks like|look like)\b/.test(text);
+  const effectiveSilhouette = visualPreset === "icon" || silhouetteKeywords;
+  const mentionedKinds = brickKindsFromBrief(text);
+  const wantsMixedKinds =
+    mentionedKinds.length > 1 ||
+    /\b(eyes?|mouth|cheeks?|only the|except|but the|accent|highlights?)\b/.test(text) ||
+    (mentionedKinds.length === 1 && /\b(eyes?|center|core|corners?|edges?)\b/.test(text));
+  const wantsNegativeSpace =
+    effectiveSilhouette || /\b(hollow|empty center|open center|negative space|outline|ring outline|donut)\b/.test(text);
+  return {
+    mode: effectiveSilhouette ? "silhouette" : "arcade",
+    wantsMixedKinds,
+    wantsNegativeSpace
+  };
+}
+
+/** Effective designer tuning for a live generation request (does not mutate stored UI state). */
+export function resolveDesignerIntentForGeneration(input: unknown): BoardDesignerIntent {
+  const base = normalizeDesignerIntent(input);
+  const classification = classifyDesignerBrief(base.brief, base.visualPreset);
+  if (classification.mode === "silhouette") {
+    return {
+      ...base,
+      density: Math.min(base.density, ICON_DENSITY_CAP),
+      specialBias: Math.min(base.specialBias, ICON_SPECIAL_BIAS_CAP)
+    };
+  }
+  return base;
+}
+
+export function generationBrickBounds(designer: BoardDesignerIntent): { min: number; max: number; minRaw: number; mode: DesignerBriefMode } {
+  const resolved = resolveDesignerIntentForGeneration(designer);
+  const mode = classifyDesignerBrief(resolved.brief, resolved.visualPreset).mode;
+  if (mode === "silhouette") {
+    return { min: MIN_SILHOUETTE_BRICKS, max: MAX_SILHOUETTE_BRICKS, minRaw: MIN_RAW_SILHOUETTE_BRICKS, mode };
+  }
+  return {
+    min: MIN_DESIGNER_BRICKS,
+    max: MAX_DESIGNER_BRICKS,
+    minRaw: Math.max(MIN_RAW_SILHOUETTE_BRICKS, Math.floor(MIN_DESIGNER_BRICKS * 0.65)),
+    mode
+  };
+}
+
+export function validateCreativeFidelity(
+  level: LevelBlueprint,
+  brief: string,
+  visualPreset: DesignerVisualPreset = "arcade"
+): { ok: true } | { ok: false; reason: string } {
+  const trimmed = brief.trim();
+  if (trimmed.length === 0) return { ok: true };
+
+  const text = trimmed.toLowerCase();
+  const classification = classifyDesignerBrief(trimmed, visualPreset);
+  const analysis = analyzeDesignerBrief(trimmed);
+  const rows = level.rows;
+  const brickCount = countBricks(rows);
+
+  if (classification.mode === "silhouette") {
+    if (brickCount > MAX_SILHOUETTE_BRICKS) {
+      return {
+        ok: false,
+        reason: `Silhouette prompt produced an overfilled wall (${brickCount} bricks; target at most ${MAX_SILHOUETTE_BRICKS}).`
+      };
+    }
+    if (classification.wantsNegativeSpace && centerRegionEmptyRatio(rows) < 0.28) {
+      return { ok: false, reason: "Silhouette prompt needs more open center space for the motif to read." };
+    }
+  }
+
+  if (/\b(face|smiley|smile|grin|emoji)\b/.test(text) && /\b(explod|bomb|blast|detonat)/.test(text)) {
+    if (countKind(rows, "bomb") < 2) {
+      return { ok: false, reason: "Face prompt with exploding eyes needs at least two bomb bricks." };
+    }
+  }
+
+  if (analysis.exclusiveKind) {
+    const mismatched = rows.flat().filter((brick) => brick && brick.kind !== analysis.exclusiveKind).length;
+    if (mismatched > 0) {
+      return { ok: false, reason: `Prompt requires every occupied brick to be ${analysis.exclusiveKind}.` };
+    }
+  }
+
+  return { ok: true };
+}
+
+function centerRegionEmptyRatio(rows: BrickCell[][]): number {
+  const columns = rows[0]?.length ?? BRICK_COLUMNS;
+  const rowCount = rows.length;
+  const minX = Math.max(1, Math.floor(columns * 0.21));
+  const maxX = Math.min(columns - 2, Math.ceil(columns * 0.79) - 1);
+  const minY = Math.max(1, Math.floor(rowCount * 0.22));
+  const maxY = Math.min(rowCount - 2, Math.ceil(rowCount * 0.78) - 1);
+  let total = 0;
+  let empty = 0;
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      total += 1;
+      if (!rows[y]?.[x]) empty += 1;
+    }
+  }
+  return total === 0 ? 0 : empty / total;
+}
+
+function countKind(rows: BrickCell[][], kind: BrickKind): number {
+  return rows.flat().filter((brick) => brick?.kind === kind).length;
 }
 
 export function designerStyleLabel(style: DesignerStyle): string {
@@ -384,6 +586,24 @@ export function designerTargets(intentInput: unknown, level = 1): DesignerTarget
   };
 }
 
+/** Targets for live composer generation (respects brief-driven silhouette tuning). */
+export function designerTargetsForGeneration(intentInput: unknown, level = 1): DesignerTargets {
+  const intent = resolveDesignerIntentForGeneration(intentInput);
+  const bounds = generationBrickBounds(intent);
+  const rawTarget = Math.round(DESIGNER_CELL_COUNT * intent.density);
+  const brickTarget = clamp(rawTarget, bounds.min, bounds.max);
+  const specialRatio = bounds.mode === "silhouette" ? 0.04 + intent.specialBias * 0.2 : 0.06 + intent.specialBias * 0.32;
+  const difficultyRatio = bounds.mode === "silhouette" ? 0.02 + intent.difficulty * 0.02 : 0.05 + intent.difficulty * 0.035;
+  return {
+    brickTarget,
+    specialTarget: clamp(Math.round(brickTarget * specialRatio), intent.specialBias > 0 ? 1 : 0, Math.max(2, Math.round(brickTarget * 0.42))),
+    hardTarget: clamp(Math.round(brickTarget * difficultyRatio), bounds.mode === "silhouette" ? 0 : 1, Math.max(2, Math.round(brickTarget * 0.28))),
+    speedTarget: clamp(0.9 + level * 0.035 + intent.difficulty * 0.06, 0.95, 1.75),
+    difficultyLabel: DIFFICULTY_LABELS[intent.difficulty - 1] ?? "sharp",
+    styleGoal: bounds.mode === "silhouette" ? "Readable motif from the player brief with negative space." : designerStyleGoal(intent.style)
+  };
+}
+
 export function describeDesignerIntent(intentInput: unknown): string {
   const intent = normalizeDesignerIntent(intentInput);
   const targets = designerTargets(intent);
@@ -400,7 +620,7 @@ export function nextDesignerSeed(seed: string, request: LevelRequest, nonce = Da
 
 export function fallbackLevel(request: LevelRequest): LevelBlueprint {
   const designer = normalizeDesignerIntent(request.designer);
-  const targets = designerTargets(designer, request.level);
+  const targets = designerTargetsForGeneration(designer, request.level);
   const rows = applyDesignerBriefConstraints(repairBrickCount(buildFallbackRows(request, designer), request.level), designer);
   const brief = analyzeDesignerBrief(designer.brief);
 
@@ -416,16 +636,20 @@ export function fallbackLevel(request: LevelRequest): LevelBlueprint {
 }
 
 function buildFallbackRows(request: LevelRequest, designer: BoardDesignerIntent): BrickCell[][] {
-  const rows = Array.from({ length: BRICK_ROWS }, () => Array.from({ length: BRICK_COLUMNS }, () => null as BrickCell));
-  const targets = designerTargets(designer, request.level);
+  const { columns, rows: rowCount } = designerGridDimensions();
+  const rows = Array.from({ length: rowCount }, () => Array.from({ length: columns }, () => null as BrickCell));
+  const targets = designerTargetsForGeneration(designer, request.level);
   const seed = hashText(`${request.level}:${request.score}:${designer.style}:${designer.seed}`);
   const brief = analyzeDesignerBrief(designer.brief);
   const candidates: { x: number; y: number; score: number }[] = [];
-  for (let y = 0; y < BRICK_ROWS - 2; y += 1) {
-    for (let x = 0; x < BRICK_COLUMNS; x += 1) {
-      if (designer.style === "open-lanes" && y > 0 && (x === 2 || x === 11)) continue;
-      if (designer.style === "precision" && y > 0 && Math.abs(x - 6.5) > 4 && (x + y + seed) % 3 === 0) continue;
-      const centerBias = designer.style === "boss-core" ? Math.abs(x - 6.5) * 17 + y * 5 : 0;
+  const laneSkipA = Math.round((2 / (BRICK_COLUMNS - 1)) * (columns - 1));
+  const laneSkipB = Math.round((11 / (BRICK_COLUMNS - 1)) * (columns - 1));
+  const centerX = (columns - 1) / 2;
+  for (let y = 0; y < rowCount - 2; y += 1) {
+    for (let x = 0; x < columns; x += 1) {
+      if (designer.style === "open-lanes" && y > 0 && (x === laneSkipA || x === laneSkipB)) continue;
+      if (designer.style === "precision" && y > 0 && Math.abs(x - centerX) > columns * 0.28 && (x + y + seed) % 3 === 0) continue;
+      const centerBias = designer.style === "boss-core" ? Math.abs(x - centerX) * 17 + y * 5 : 0;
       candidates.push({ x, y, score: hashNumber(seed, x, y) + centerBias });
     }
   }
@@ -460,13 +684,15 @@ function buildFallbackRows(request: LevelRequest, designer: BoardDesignerIntent)
   }
 
   if (designer.style === "boss-core" || (request.level % 5 === 0 && designer.difficulty >= 4)) {
+    const bossX = Math.round(centerX - 0.5);
+    const bossY = Math.max(2, Math.round(rowCount * 0.22));
     for (const [x, y] of [
-      [6, 2],
-      [7, 2],
-      [6, 3],
-      [7, 3]
+      [bossX, bossY],
+      [bossX + 1, bossY],
+      [bossX, bossY + 1],
+      [bossX + 1, bossY + 1]
     ]) {
-      rows[y][x] = { kind: "boss", hp: clamp(4 + designer.difficulty + Math.floor(request.level / 4), 5, 12) };
+      if (y < rowCount && x < columns) rows[y][x] = { kind: "boss", hp: clamp(4 + designer.difficulty + Math.floor(request.level / 4), 5, 12) };
     }
   }
   return rows;
@@ -518,7 +744,7 @@ function brickKindsFromBrief(text: string): BrickKind[] {
 function shapeFromBrief(text: string): DesignerBriefShape | undefined {
   if (/\b(heart|love|valentine)\b/.test(text)) return "heart";
   if (/\b(diamond|gem|rhombus)\b/.test(text)) return "diamond";
-  if (/\b(circle|round|orb|ring)\b/.test(text)) return "circle";
+  if (/\b(circle|round|orb|circular)\b/.test(text)) return "circle";
   if (/\b(triangle|pyramid)\b/.test(text)) return "triangle";
   if (/\b(cross|plus)\b/.test(text)) return "cross";
   if (/\b(x[- ]?shape|letter x|big x)\b/.test(text)) return "x";
@@ -527,15 +753,21 @@ function shapeFromBrief(text: string): DesignerBriefShape | undefined {
 
 function selectFallbackCells(candidates: { x: number; y: number; score: number }[], brief: DesignerBriefAnalysis, targetCount: number) {
   if (!brief.shape) return candidates.slice(0, targetCount);
-  const shaped = cellsForShape(brief.shape).map(({ x, y }) => ({ x, y, score: 0 }));
-  if (shaped.length >= MIN_BRICKS && shaped.length <= MAX_BRICKS) return shaped;
-  if (shaped.length > MAX_BRICKS) return shaped.slice(0, MAX_BRICKS);
+  const shaped = embedPackCellsOnDesignerGrid(cellsForShape(brief.shape));
+  if (shaped.length >= MIN_SILHOUETTE_BRICKS && shaped.length <= MAX_DESIGNER_BRICKS) return shaped;
+  if (shaped.length > MAX_DESIGNER_BRICKS) return shaped.slice(0, MAX_DESIGNER_BRICKS);
   const selected = new Map(shaped.map((cell) => [cellKey(cell), cell]));
   for (const cell of candidates) {
-    if (selected.size >= MIN_BRICKS) break;
+    if (selected.size >= MIN_SILHOUETTE_BRICKS) break;
     selected.set(cellKey(cell), cell);
   }
   return [...selected.values()];
+}
+
+function embedPackCellsOnDesignerGrid(cells: { x: number; y: number }[]): { x: number; y: number }[] {
+  const offsetX = Math.floor((DESIGNER_BRICK_COLUMNS - BRICK_COLUMNS) / 2);
+  const offsetY = Math.floor((DESIGNER_BRICK_ROWS - BRICK_ROWS) / 2);
+  return cells.map((cell) => ({ x: cell.x + offsetX, y: cell.y + offsetY }));
 }
 
 function cellsForShape(shape: DesignerBriefShape): { x: number; y: number }[] {
@@ -586,7 +818,7 @@ function applyDesignerBriefConstraints(rows: BrickCell[][], designer: BoardDesig
   let constrained = rows.map((row) => [...row]);
 
   if (brief.shape) {
-    const shapeCells = new Set(cellsForShape(brief.shape).map(cellKey));
+    const shapeCells = new Set(embedPackCellsOnDesignerGrid(cellsForShape(brief.shape)).map(cellKey));
     constrained = constrained.map((row, y) =>
       row.map((brick, x) => {
         if (!shapeCells.has(cellKey({ x, y }))) return null;
@@ -638,13 +870,17 @@ function hintForDesignerIntent(designer: BoardDesignerIntent, brief: DesignerBri
   return hintForDesignerStyle(designer.style);
 }
 
-function normalizeRows(input: unknown, level: number): BrickCell[][] {
+function normalizeRows(
+  input: unknown,
+  level: number,
+  dimensions: { columns: number; rows: number } = { columns: BRICK_COLUMNS, rows: BRICK_ROWS }
+): BrickCell[][] {
   if (!Array.isArray(input)) return fallbackLevel({ level, score: 0, lives: 3, clearedLevels: 0, recentEvents: [] }).rows;
   const rows: BrickCell[][] = [];
-  for (let y = 0; y < BRICK_ROWS; y += 1) {
+  for (let y = 0; y < dimensions.rows; y += 1) {
     const sourceRow = Array.isArray(input[y]) ? input[y] : [];
     const row: BrickCell[] = [];
-    for (let x = 0; x < BRICK_COLUMNS; x += 1) {
+    for (let x = 0; x < dimensions.columns; x += 1) {
       row.push(normalizeBrick(sourceRow[x]));
     }
     rows.push(row);
@@ -667,18 +903,21 @@ function countBricks(rows: BrickCell[][]): number {
 
 function repairBrickCount(rows: BrickCell[][], level: number): BrickCell[][] {
   const repaired = rows.map((row) => [...row]);
+  const rowCount = repaired.length;
+  const columnCount = repaired[0]?.length ?? BRICK_COLUMNS;
+  const { min, max } = brickBoundsForGrid(columnCount, rowCount);
   let count = countBricks(repaired);
-  if (count > MAX_BRICKS) {
-    for (let y = BRICK_ROWS - 1; y >= 0 && count > MAX_BRICKS; y -= 1) {
-      for (let x = (y + level) % 2; x < BRICK_COLUMNS && count > MAX_BRICKS; x += 2) {
+  if (count > max) {
+    for (let y = rowCount - 1; y >= 0 && count > max; y -= 1) {
+      for (let x = (y + level) % 2; x < columnCount && count > max; x += 2) {
         const brick = repaired[y][x];
         if (!brick || brick.kind === "boss") continue;
         repaired[y][x] = null;
         count -= 1;
       }
     }
-    for (let y = BRICK_ROWS - 1; y >= 0 && count > MAX_BRICKS; y -= 1) {
-      for (let x = (y + level + 1) % 2; x < BRICK_COLUMNS && count > MAX_BRICKS; x += 2) {
+    for (let y = rowCount - 1; y >= 0 && count > max; y -= 1) {
+      for (let x = (y + level + 1) % 2; x < columnCount && count > max; x += 2) {
         if (!repaired[y][x]) continue;
         repaired[y][x] = null;
         count -= 1;
@@ -686,9 +925,9 @@ function repairBrickCount(rows: BrickCell[][], level: number): BrickCell[][] {
     }
   }
 
-  if (count < MIN_BRICKS) {
-    for (let y = 0; y < BRICK_ROWS && count < MIN_BRICKS; y += 1) {
-      for (let x = (y + level) % 3; x < BRICK_COLUMNS && count < MIN_BRICKS; x += 3) {
+  if (count < min) {
+    for (let y = 0; y < rowCount && count < min; y += 1) {
+      for (let x = (y + level) % 3; x < columnCount && count < min; x += 3) {
         if (repaired[y][x]) continue;
         const toughLane = level > 2 && (x + y + level) % 5 === 0;
         repaired[y][x] = toughLane ? { kind: "hard", hp: 2 } : { kind: "basic", hp: 1 };
@@ -698,6 +937,13 @@ function repairBrickCount(rows: BrickCell[][], level: number): BrickCell[][] {
   }
 
   return repaired;
+}
+
+function brickBoundsForGrid(columns: number, rowCount: number): { min: number; max: number } {
+  if (columns === DESIGNER_BRICK_COLUMNS && rowCount === DESIGNER_BRICK_ROWS) {
+    return { min: MIN_DESIGNER_BRICKS, max: MAX_DESIGNER_BRICKS };
+  }
+  return { min: MIN_BRICKS, max: MAX_BRICKS };
 }
 
 function stringValue(value: unknown, fallback: string): string {

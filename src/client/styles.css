@@ -1167,6 +1167,13 @@ body {
   line-height: 1.35;
 }
 
+.designer-hint {
+  margin: 0;
+  color: #9fb5b5;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
 .generation-summary {
   display: grid;
   gap: 6px;

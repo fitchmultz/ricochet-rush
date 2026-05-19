@@ -187,8 +187,16 @@ export function createHud(root: HTMLDivElement | null): HudApi {
             <div class="designer-controls">
               <label class="designer-brief">
                 <span>Board prompt</span>
-                <textarea data-designer="brief" maxlength="180" rows="4" placeholder="heart shaped board with only exploding blocks"></textarea>
+                <textarea data-designer="brief" maxlength="180" rows="4" placeholder="make a smiley face and the eyes are exploding bricks"></textarea>
               </label>
+              <label>
+                <span>Visual preset</span>
+                <select data-designer="visual-preset">
+                  <option value="arcade">Arcade wall</option>
+                  <option value="icon">Icon / silhouette</option>
+                </select>
+              </label>
+              <p class="designer-hint">Face, logo, and icon prompts use lower density automatically so outlines read clearly. Pick Icon for the strictest silhouette rules.</p>
             </div>
             <div class="designer-actions">
               <button type="button" data-action="new-board">Design board</button>
@@ -328,6 +336,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   const sidebarToggle = queryButton(root, '[data-action="toggle-sidebar"]');
   const toolClose = queryButton(root, '[data-action="close-tool-panel"]');
   const designerBrief = queryTextArea(root, '[data-designer="brief"]');
+  const designerVisualPreset = querySelect(root, '[data-designer="visual-preset"]');
   const designerPending = query(root, "[data-designer-pending]");
   const generationSummary = query(root, "[data-generation-summary]");
   const compactGenerationSummary = query(root, "[data-compact-generation-summary]");
@@ -393,7 +402,8 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   const emitDesigner = () => {
     actions?.updateDesigner({
       ...DEFAULT_DESIGNER_INTENT,
-      brief: designerBrief.value
+      brief: designerBrief.value,
+      visualPreset: designerVisualPreset.value === "icon" ? "icon" : "arcade"
     });
   };
 
@@ -516,6 +526,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
     actions?.selectPack(button.dataset.packId ?? "");
   });
   designerBrief.addEventListener("input", emitDesigner);
+  designerVisualPreset.addEventListener("change", emitDesigner);
   sfxVolume.addEventListener("input", emitSettings);
   musicVolume.addEventListener("input", emitSettings);
   particles.addEventListener("change", emitSettings);
@@ -556,6 +567,9 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       sidebarToggle.setAttribute("aria-expanded", String(!state.sidebarCollapsed));
       if (document.activeElement !== designerBrief) {
         designerBrief.value = state.designer.intent.brief;
+      }
+      if (document.activeElement !== designerVisualPreset) {
+        designerVisualPreset.value = state.designer.intent.visualPreset === "icon" ? "icon" : "arcade";
       }
       renderSummary(generationSummary, state.designer.generationSummary, state.designer.previewRows);
       renderCompactSummary(compactGenerationSummary, state);

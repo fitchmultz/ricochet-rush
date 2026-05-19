@@ -12,6 +12,8 @@ import {
   fallbackLevel,
   nextDesignerSeed,
   normalizeDesignerIntent,
+  resolveDesignerIntentForGeneration,
+  levelGridDimensions,
   designerTargets,
   normalizeLevel
 } from "../../shared/evolution";
@@ -248,6 +250,21 @@ const BRICK_GAP = 5;
 const BRICK_TOP = 72;
 const BRICK_WIDTH = (WIDTH - WALL * 2 - BRICK_GAP * (BRICK_COLUMNS - 1)) / BRICK_COLUMNS;
 const BRICK_HEIGHT = 28;
+
+interface LevelLayout {
+  columns: number;
+  rows: number;
+  brickWidth: number;
+  brickHeight: number;
+}
+
+function computeLevelLayout(level: LevelBlueprint): LevelLayout {
+  const { columns, rows } = levelGridDimensions(level);
+  const brickWidth = (WIDTH - WALL * 2 - BRICK_GAP * (columns - 1)) / columns;
+  const availableHeight = PADDLE_Y - BRICK_TOP - BRICK_GAP;
+  const brickHeight = Math.min(BRICK_HEIGHT, Math.floor((availableHeight - BRICK_GAP * Math.max(0, rows - 1)) / Math.max(1, rows)));
+  return { columns, rows, brickWidth, brickHeight };
+}
 const PADDLE_Y = HEIGHT - 52;
 const PADDLE_SPEED = 620;
 const MAX_PADDLE_VELOCITY = 920;
@@ -495,6 +512,7 @@ export class RicochetRushGame {
   private sparksPoints: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial> | null = null;
   private bricks: Brick[] = [];
   private levelBlueprint: LevelBlueprint = fallbackLevel({ level: 1, score: 0, lives: 3, clearedLevels: 0, recentEvents: [] });
+  private levelLayout: LevelLayout = computeLevelLayout(fallbackLevel({ level: 1, score: 0, lives: 3, clearedLevels: 0, recentEvents: [] }));
   private levelSourcePrompt = "Default Ricochet board prompt";
   private settings: GameSettings = DEFAULT_SETTINGS;
   private cosmetics: GameCosmetics = DEFAULT_COSMETICS;
@@ -556,7 +574,11 @@ export class RicochetRushGame {
     this.bestScore = Math.max(readBestScore(), readSave()?.bestScore ?? 0);
     this.cosmetics = this.clampCosmetics(this.cosmetics);
     const storedDesignerIntent = readJson(DESIGNER_INTENT_KEY, normalizeDesignerIntent);
-    this.designerIntent = { ...DEFAULT_DESIGNER_INTENT, brief: storedDesignerIntent?.brief ?? DEFAULT_DESIGNER_INTENT.brief };
+    this.designerIntent = {
+      ...DEFAULT_DESIGNER_INTENT,
+      brief: storedDesignerIntent?.brief ?? DEFAULT_DESIGNER_INTENT.brief,
+      visualPreset: storedDesignerIntent?.visualPreset ?? DEFAULT_DESIGNER_INTENT.visualPreset
+    };
     this.sidebarCollapsed = readJson(SIDEBAR_COLLAPSED_KEY, normalizeBoolean) ?? false;
     this.powerupPrimerDismissed = readJson(POWERUP_PRIMER_DISMISSED_KEY, normalizeBoolean) ?? false;
     this.setupRenderer();
@@ -1271,7 +1293,11 @@ export class RicochetRushGame {
 
   private updateDesignerIntent(intent: BoardDesignerIntent) {
     const normalized = normalizeDesignerIntent(intent);
-    this.designerIntent = { ...DEFAULT_DESIGNER_INTENT, brief: normalized.brief };
+    this.designerIntent = {
+      ...DEFAULT_DESIGNER_INTENT,
+      brief: normalized.brief,
+      visualPreset: normalized.visualPreset
+    };
     writeJson(DESIGNER_INTENT_KEY, this.designerIntent);
     this.refreshHud("Designer intent updated.");
   }
@@ -1354,7 +1380,8 @@ export class RicochetRushGame {
     this.latestGenerationSummary = context.source === "generated" ? summary : undefined;
     this.levelSourcePrompt = context.source === "generated" ? sourcePrompt : "";
     this.levelBlueprint = level;
-    this.bricks = materializeLevelBricks(level);
+    this.levelLayout = computeLevelLayout(level);
+    this.bricks = materializeLevelBricks(level, this.levelLayout);
     this.runStats.levelStartedAt = Date.now();
     this.powerups.splice(0);
     this.sparks.splice(0);
@@ -1396,8 +1423,9 @@ export class RicochetRushGame {
     const restoredLevel = restoredPackLevel ?? save.levelBlueprint;
     const savedBricksFitLevel = save.bricks.length > 0 && bricksFitLevel(save.bricks, restoredLevel);
     this.levelBlueprint = restoredLevel;
+    this.levelLayout = computeLevelLayout(restoredLevel);
     this.levelSourcePrompt = save.levelSourcePrompt;
-    this.bricks = savedBricksFitLevel ? save.bricks.map((brick) => ({ ...brick })) : materializeLevelBricks(restoredLevel);
+    this.bricks = savedBricksFitLevel ? save.bricks.map((brick) => ({ ...brick })) : materializeLevelBricks(restoredLevel, this.levelLayout);
     this.recentEvents = save.recentEvents.length > 0 ? [...save.recentEvents] : this.recentEvents;
     this.phase = "ready";
     this.hasSave = true;
@@ -2113,7 +2141,10 @@ export class RicochetRushGame {
       lives: this.lives,
       clearedLevels: this.clearedLevels,
       recentEvents: this.recentEvents.slice(0, 5),
-      designer: this.designerIntent
+      designer: resolveDesignerIntentForGeneration({
+        ...this.designerIntent,
+        seed: this.designerIntent.seed
+      })
     };
   }
 
@@ -2493,7 +2524,9 @@ export class RicochetRushGame {
       const punch = this.settings.reducedMotion ? 0 : impact * 0.07;
       const wobble = this.settings.reducedMotion ? 0 : Math.sin(now / 170 + centerX * 0.03) * visual.wobble;
       const zScale = visual.depthScale + hpRatio * visual.hpDepthBoost + punch;
-      mesh.scale.set(1 + punch, 1 + punch * 0.7, zScale);
+      const widthScale = brick.width / BRICK_WIDTH;
+      const heightScale = brick.height / BRICK_HEIGHT;
+      mesh.scale.set((1 + punch) * widthScale, (1 + punch * 0.7) * heightScale, zScale);
       mesh.rotation.z = brick.kind === "bomb" && !this.settings.reducedMotion ? Math.sin(now / 180) * 0.04 : wobble;
 
       rim.position.copy(mesh.position);
@@ -3188,17 +3221,17 @@ function toWorld(x: number, y: number, z = 0): THREE.Vector3 {
   return new THREE.Vector3(x - WIDTH / 2, HEIGHT / 2 - y, z);
 }
 
-function materializeLevelBricks(level: LevelBlueprint): Brick[] {
+function materializeLevelBricks(level: LevelBlueprint, layout: LevelLayout): Brick[] {
   const bricks: Brick[] = [];
-  for (let row = 0; row < BRICK_ROWS; row += 1) {
-    for (let column = 0; column < BRICK_COLUMNS; column += 1) {
+  for (let row = 0; row < layout.rows; row += 1) {
+    for (let column = 0; column < layout.columns; column += 1) {
       const spec = level.rows[row]?.[column];
       if (!spec) continue;
       bricks.push({
-        x: WALL + column * (BRICK_WIDTH + BRICK_GAP),
-        y: BRICK_TOP + row * (BRICK_HEIGHT + BRICK_GAP),
-        width: BRICK_WIDTH,
-        height: BRICK_HEIGHT,
+        x: WALL + column * (layout.brickWidth + BRICK_GAP),
+        y: BRICK_TOP + row * (layout.brickHeight + BRICK_GAP),
+        width: layout.brickWidth,
+        height: layout.brickHeight,
         kind: spec.kind,
         hp: spec.hp,
         maxHp: spec.hp
@@ -3209,7 +3242,7 @@ function materializeLevelBricks(level: LevelBlueprint): Brick[] {
 }
 
 function bricksFitLevel(savedBricks: readonly SavedBrick[], level: LevelBlueprint): boolean {
-  const expected = materializeLevelBricks(level);
+  const expected = materializeLevelBricks(level, computeLevelLayout(level));
   if (savedBricks.length > expected.length) return false;
   return savedBricks.every((saved) =>
     expected.some(

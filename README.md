@@ -6,7 +6,7 @@
 
 Ricochet Rush is a fast 3D browser brick-breaker with a sharp paddle, angled rebounds, lives, score, multiball, laser and grab paddles, bomb chains, boss bricks, and a power-up atlas.
 
-The game includes curated board packs for repeatable runs, plus a prompt-first board designer for generated walls. The server asks Cursor SDK `composer-2.5` in fast mode for a compact 14x9 board draft from the player’s board prompt, then validates and materializes it into the canonical brick grid. If Cursor auth is missing or the SDK fails, the local fallback generator keeps the run playable.
+The game includes curated board packs for repeatable runs, plus a prompt-first board designer for generated walls. Curated packs use a compact **14×9** grid; the board designer asks Cursor SDK `composer-2.5` in fast mode for a finer **20×12** canvas so icon and silhouette prompts (faces, logos, motifs) have enough resolution to read in 3D. The server validates composer output without rewriting the layout, then materializes it into the playable brick grid. If Cursor auth is missing or the SDK fails, the local fallback generator keeps the run playable.
 
 ![Ricochet Rush desktop gameplay](docs/media/ricochet-rush-desktop.png)
 

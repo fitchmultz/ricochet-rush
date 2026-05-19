@@ -379,7 +379,10 @@ export function blueprintFingerprint(level: LevelBlueprint): string {
 }
 
 export function previewRowsFromLevel(level: LevelBlueprint): string[] {
-  return level.rows.slice(0, BRICK_ROWS).map((row) => row.slice(0, BRICK_COLUMNS).map((cell) => (cell ? glyphForKind(cell.kind) : ".")).join("").padEnd(BRICK_COLUMNS, "."));
+  const columns = level.rows[0]?.length ?? BRICK_COLUMNS;
+  return level.rows.map((row) =>
+    row.slice(0, columns).map((cell) => (cell ? glyphForKind(cell.kind) : ".")).join("").padEnd(columns, ".")
+  );
 }
 
 function deriveUnlocks(progress: PackProgressState, savedBoardCount: number): PackProgressState {

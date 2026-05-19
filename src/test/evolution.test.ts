@@ -14,8 +14,19 @@ import {
   normalizeLevel,
   nextDesignerSeed,
   normalizeLevelRequest,
+  classifyDesignerBrief,
+  designerTargetsForGeneration,
+  generationBrickBounds,
+  MAX_SILHOUETTE_BRICKS,
+  MIN_SILHOUETTE_BRICKS,
+  resolveDesignerIntentForGeneration,
+  validateCreativeFidelity,
   validateAndNormalizeSdkLevel,
   MIN_RAW_SDK_BRICKS,
+  DESIGNER_BRICK_COLUMNS,
+  DESIGNER_BRICK_ROWS,
+  MIN_DESIGNER_BRICKS,
+  MAX_DESIGNER_BRICKS,
   type LevelBlueprint,
   type LevelRequest
 } from "../shared/evolution";
@@ -62,6 +73,39 @@ const request: LevelRequest = {
   clearedLevels: 3,
   recentEvents: ["Wall cleared."]
 };
+
+const DESIGNER_ARCADE_GRID = [
+  "....................",
+  "..xxxxxxxxxxxxxx....",
+  ".xxxxxxxxxxxxxxxx...",
+  ".xxxxxxxxxxxxxxxx...",
+  "..xxxxxxxxxxxxxx....",
+  "...xxxxxxxxxxxx.....",
+  "....xxxxxxxxxx......",
+  ".....xxxxxxxx.......",
+  "......xxxxxx........",
+  ".......xxxx.........",
+  "........xx..........",
+  "...................."
+];
+
+const DESIGNER_LANE_GRID = [
+  "....................",
+  "..xxxx....xxxx......",
+  ".xxxxx....xxxxx.....",
+  ".xxxxxx..xxxxxx.....",
+  "..xxxxxx..xxxxxx....",
+  "..xxxx....xxxx......",
+  "...xxx....xxx.......",
+  "....xx....xx........",
+  ".....xx..xx.........",
+  "......xxxx..........",
+  ".......xx...........",
+  "...................."
+];
+
+const HEART_EMBEDDED_ROW_COUNTS = [0, 6, 10, 12, 14, 12, 10, 8, 6, 4, 0, 0];
+const DESIGNER_PAD = ".".repeat(DESIGNER_BRICK_COLUMNS);
 
 const SPECIAL_TEST_BRICKS = new Set(["bomb", "prize", "penalty", "laser", "grab", "fire", "thru", "split", "wide", "slow", "boss"]);
 
@@ -205,7 +249,8 @@ describe("Cursor SDK level generation contract", () => {
     });
     expect(buildPrompt(request)).toContain("composer-2.5 in fast mode");
     expect(buildPrompt(request)).toContain("Ricochet Rush");
-    expect(buildPrompt(request)).toContain(`${MIN_BRICKS} bricks and at most ${MAX_BRICKS} bricks`);
+    expect(buildPrompt(request)).toContain(`${MIN_DESIGNER_BRICKS} bricks and at most ${MAX_DESIGNER_BRICKS} bricks`);
+    expect(buildPrompt(request)).toContain("20 columns by 12 rows");
     expect(buildPrompt(request)).toContain("Do not calculate exact brick counts");
     expect(buildPrompt(request)).toContain("Never reuse a previous board name");
     expect(buildPrompt({ ...request, recentEvents: ["Cleared Blast Monolith.", "Designing the next wall."] })).toContain("Blast Monolith");
@@ -225,9 +270,9 @@ describe("Cursor SDK level generation contract", () => {
     });
 
     expect(prompt).toContain('Player board prompt:\n- "left rail fireworks with bomb pockets"');
-    expect(prompt).toContain("Prompt locks: preferred brick kind=bomb");
-    expect(prompt).toContain("Target about 86 bricks");
-    expect(prompt).toContain("Target about 27 specials and 19 hard bricks");
+    expect(prompt).toContain("Brief guidance:");
+    expect(prompt).toContain("Target about 164 bricks");
+    expect(prompt).toContain("Target about 52 specials and 37 hard bricks");
     expect(prompt).toContain('wild difficulty, speed near');
     expect(prompt).toContain('seed "left rail fireworks"');
     expect(prompt).toContain('"level":4');
@@ -243,14 +288,41 @@ describe("Cursor SDK level generation contract", () => {
     });
 
     expect(prompt).toContain('Player board prompt:\n- "create a heart shaped board that has nothing but exploding blocks"');
-    expect(prompt).toContain("Prompt locks: shape=heart, exclusive occupied brick kind=bomb");
-    expect(prompt).toContain("Priority order: prompt shape/material");
-    expect(prompt).toContain("For \"exploding blocks\", use bomb bricks.");
-    expect(prompt).toContain("Return exactly this compact shape");
+    expect(prompt).toContain("Brief guidance:");
+    expect(prompt).toContain("Every occupied brick must be bomb.");
+    expect(prompt).toContain("Silhouette mode");
+    expect(prompt).toContain("prefer 42-91 bricks");
     expect(prompt).toContain('"grid"');
   });
 
-  it("does not collapse multi-component prompts into one preferred brick kind", () => {
+  it("uses icon preset density and mixed-grid example for silhouette prompts", () => {
+    const prompt = buildPrompt({
+      ...request,
+      designer: resolveDesignerIntentForGeneration({
+        ...DEFAULT_DESIGNER_INTENT,
+        visualPreset: "icon",
+        brief: "make a smiley face and the eyes are exploding bricks"
+      })
+    });
+
+    expect(prompt).toContain("Visual preset: icon / silhouette");
+    expect(prompt).toContain("Exploding eyes should be bomb (o) cells");
+    expect(prompt).not.toContain('"brick": "basic"');
+    expect(prompt).toContain("....bb........oo....");
+    expect(prompt).toContain("Creative/silhouette prompt");
+    expect(prompt).not.toContain("Target about 125 bricks");
+  });
+
+  it("uses arcade density targets for non-creative briefs", () => {
+    const prompt = buildPrompt({
+      ...request,
+      designer: { ...DEFAULT_DESIGNER_INTENT, visualPreset: "arcade", brief: "left rail fireworks with bomb pockets" }
+    });
+    expect(prompt).toContain("Arcade mode");
+    expect(classifyDesignerBrief("left rail fireworks with bomb pockets", "arcade").mode).toBe("arcade");
+  });
+
+  it("does not treat shield ring wording as a forced circle shape in brief guidance", () => {
     const prompt = buildPrompt({
       ...request,
       designer: {
@@ -260,8 +332,9 @@ describe("Cursor SDK level generation contract", () => {
     });
 
     expect(prompt).toContain('Player board prompt:\n- "boss core with a hard shield ring and fire routes through the sides"');
-    expect(prompt).toContain("Prompt locks: shape=circle, components=boss,hard,fire");
-    expect(prompt).toContain("Priority order: prompt shape/material");
+    expect(prompt).not.toContain("shape=circle");
+    expect(prompt).toContain("Brief guidance:");
+    expect(prompt).toContain("Use mixed grid codes");
   });
 
   it("normalizes board designer controls into safe prompt bounds", () => {
@@ -320,10 +393,10 @@ describe("Cursor SDK level generation contract", () => {
   it("keeps the game playable without Cursor auth by producing fallback levels", () => {
     const level = fallbackLevel(request);
     const bricks = level.rows.flat().filter(Boolean);
-    expect(level.rows).toHaveLength(BRICK_ROWS);
-    expect(level.rows[0]).toHaveLength(BRICK_COLUMNS);
-    expect(bricks.length).toBeGreaterThanOrEqual(MIN_BRICKS);
-    expect(bricks.length).toBeLessThanOrEqual(MAX_BRICKS);
+    expect(level.rows).toHaveLength(DESIGNER_BRICK_ROWS);
+    expect(level.rows[0]).toHaveLength(DESIGNER_BRICK_COLUMNS);
+    expect(bricks.length).toBeGreaterThanOrEqual(MIN_DESIGNER_BRICKS);
+    expect(bricks.length).toBeLessThanOrEqual(MAX_DESIGNER_BRICKS);
   });
 
   it("rotates designer seeds between generation requests", () => {
@@ -375,7 +448,7 @@ describe("Cursor SDK level generation contract", () => {
         paddleHint: "Bank off the left wall.",
         speed: 1.05,
         brick: "basic",
-        grid: ["..............", "..xxxx..xxxx..", ".xxxxxxxxxxxx.", ".xxxxxxxxxxxx.", "..xxxxxxxxxx..", "...xxxxxxxx...", "....xxxxxx....", ".....xxxx.....", ".............."]
+        grid: DESIGNER_ARCADE_GRID
       },
       request
     );
@@ -383,6 +456,98 @@ describe("Cursor SDK level generation contract", () => {
     if (!valid.ok) return;
     expect(valid.level.name).toBe("Lane Vault");
     expect(valid.rawBrickCount).toBeGreaterThanOrEqual(MIN_RAW_SDK_BRICKS);
+  });
+
+  it("preserves composer SDK layouts instead of applying fallback shape stencils", () => {
+    const validated = validateAndNormalizeSdkLevel(
+      {
+        name: "Composer Lanes",
+        briefing: "Bank the open channels.",
+        paddleHint: "Stay shallow.",
+        speed: 1.05,
+        brick: "basic",
+        grid: DESIGNER_LANE_GRID
+      },
+      {
+        ...request,
+        designer: {
+          ...DEFAULT_DESIGNER_INTENT,
+          visualPreset: "arcade",
+          brief: "open lane wall with side channels"
+        }
+      }
+    );
+    expect(validated.ok).toBe(true);
+    if (!validated.ok) return;
+    expect(validated.level.rows.map((row) => row.filter(Boolean).length)).toEqual([0, 8, 10, 12, 12, 8, 6, 4, 4, 4, 2, 0]);
+    expect(validated.level.rows.flat().filter(Boolean).length).toBeGreaterThanOrEqual(MIN_DESIGNER_BRICKS);
+  });
+
+  it("rejects overfilled silhouette SDK boards for retry", () => {
+    const dense = validateAndNormalizeSdkLevel(
+      {
+        name: "Blob",
+        briefing: "Too dense.",
+        paddleHint: "Retry.",
+        speed: 1,
+        brick: "basic",
+        grid: Array.from({ length: DESIGNER_BRICK_ROWS }, () => "x".repeat(DESIGNER_BRICK_COLUMNS))
+      },
+      {
+        ...request,
+        designer: resolveDesignerIntentForGeneration({
+          ...DEFAULT_DESIGNER_INTENT,
+          visualPreset: "icon",
+          brief: "make a smiley face and the eyes are exploding bricks"
+        })
+      }
+    );
+    expect(dense.ok).toBe(false);
+    if (dense.ok) return;
+    expect(dense.reason).toMatch(/overfilled|outside 42-91/);
+  });
+
+  it("lowers density for icon preset and silhouette briefs", () => {
+    const icon = resolveDesignerIntentForGeneration({
+      ...DEFAULT_DESIGNER_INTENT,
+      visualPreset: "icon",
+      brief: "logo outline"
+    });
+    expect(icon.density).toBeLessThanOrEqual(0.4);
+    expect(classifyDesignerBrief("make a smiley face", "icon").mode).toBe("silhouette");
+    expect(classifyDesignerBrief("make a smiley face", "arcade").mode).toBe("silhouette");
+    const tuned = resolveDesignerIntentForGeneration({
+      ...DEFAULT_DESIGNER_INTENT,
+      visualPreset: "arcade",
+      brief: "make a smiley face and the eyes are exploding bricks"
+    });
+    expect(tuned.density).toBeLessThanOrEqual(0.32);
+    const bounds = generationBrickBounds(tuned);
+    expect(bounds.min).toBe(MIN_SILHOUETTE_BRICKS);
+    expect(bounds.max).toBe(MAX_SILHOUETTE_BRICKS);
+    const targets = designerTargetsForGeneration(tuned, 1);
+    expect(targets.brickTarget).toBeLessThanOrEqual(MAX_SILHOUETTE_BRICKS);
+  });
+
+  it("validates creative fidelity for smiley bomb-eye prompts", () => {
+    const ok = validateCreativeFidelity(
+      {
+        name: "Grin",
+        briefing: "Pop the eyes.",
+        paddleHint: "Bank shots.",
+        speed: 1,
+        rows: Array.from({ length: DESIGNER_BRICK_ROWS }, (_, y) =>
+          Array.from({ length: DESIGNER_BRICK_COLUMNS }, (_, x) => {
+            if (y === 2 && (x === 5 || x === 14)) return { kind: "bomb", hp: 1 } as const;
+            if (y === 3 && x >= 5 && x <= 14) return { kind: "basic", hp: 1 } as const;
+            return null;
+          })
+        )
+      },
+      "make a smiley face and the eyes are exploding bricks",
+      "icon"
+    );
+    expect(ok.ok).toBe(true);
   });
 
   it("retries composer-2.5 generation before falling back", async () => {
@@ -413,7 +578,7 @@ describe("Cursor SDK level generation contract", () => {
               paddleHint: "Stay shallow.",
               speed: 1.1,
               brick: "basic",
-              grid: ["..............", "..xxxx..xxxx..", ".xxxxxxxxxxxx.", ".xxxxxxxxxxxx.", "..xxxxxxxxxx..", "...xxxxxxxx...", "....xxxxxx....", ".....xxxx.....", ".............."]
+              grid: DESIGNER_ARCADE_GRID
             },
             parseStatus: "success",
             rawOutput: "{}",
@@ -447,8 +612,8 @@ describe("Cursor SDK level generation contract", () => {
     const bricks = level.rows.flat().filter(Boolean);
     expect(level.name).toBe("Generated Sector 4");
     expect(level.briefing).toContain("center furnace");
-    expect(bricks.length).toBeGreaterThanOrEqual(MIN_BRICKS);
-    expect(bricks.length).toBeLessThanOrEqual(MAX_BRICKS);
+    expect(bricks.length).toBeGreaterThanOrEqual(MIN_DESIGNER_BRICKS);
+    expect(bricks.length).toBeLessThanOrEqual(MAX_DESIGNER_BRICKS);
     expect(level.rows.flat().some((brick) => brick?.kind === "boss")).toBe(true);
   });
 
@@ -475,8 +640,8 @@ describe("Cursor SDK level generation contract", () => {
         brief: ""
       }
     });
-    const sparseTargets = designerTargets({ style: "precision", difficulty: 2, density: 0.34, specialBias: 0, seed: "needle", brief: "" }, request.level);
-    const denseTargets = designerTargets({ style: "bomb-chains", difficulty: 5, density: 0.82, specialBias: 1, seed: "fireworks", brief: "" }, request.level);
+    const sparseTargets = designerTargetsForGeneration({ style: "precision", difficulty: 2, density: 0.34, specialBias: 0, seed: "needle", brief: "" }, request.level);
+    const denseTargets = designerTargetsForGeneration({ style: "bomb-chains", difficulty: 5, density: 0.82, specialBias: 1, seed: "fireworks", brief: "" }, request.level);
 
     expect(countBricks(sparse)).toBe(sparseTargets.brickTarget);
     expect(countBricks(dense)).toBe(denseTargets.brickTarget);
@@ -497,7 +662,7 @@ describe("Cursor SDK level generation contract", () => {
     const rowCounts = level.rows.map((row) => row.filter(Boolean).length);
     const bricks = level.rows.flat().filter((brick): brick is NonNullable<typeof brick> => brick !== null);
 
-    expect(rowCounts).toEqual([6, 10, 12, 14, 12, 10, 8, 6, 4]);
+    expect(rowCounts).toEqual(HEART_EMBEDDED_ROW_COUNTS);
     expect(bricks).toHaveLength(82);
     expect(bricks.every((brick) => brick.kind === "bomb" && brick.hp === 1)).toBe(true);
     expect(level.name).toContain("Heart");
@@ -538,7 +703,7 @@ describe("Cursor SDK level generation contract", () => {
     );
     const rowCounts = level.rows.map((row) => row.filter(Boolean).length);
     const bricks = level.rows.flat().filter((brick): brick is NonNullable<typeof brick> => brick !== null);
-    expect(rowCounts).toEqual([6, 10, 12, 14, 12, 10, 8, 6, 4]);
+    expect(rowCounts).toEqual(HEART_EMBEDDED_ROW_COUNTS);
     expect(bricks).toHaveLength(82);
     expect(bricks.every((brick) => brick.kind === "bomb")).toBe(true);
   });
@@ -564,7 +729,7 @@ describe("Cursor SDK level generation contract", () => {
     const rowCounts = level.rows.map((row) => row.filter(Boolean).length);
     const bricks = level.rows.flat().filter((brick): brick is NonNullable<typeof brick> => brick !== null);
     expect(level.name).toBe("Compact Heart");
-    expect(rowCounts).toEqual([6, 10, 12, 14, 12, 10, 8, 6, 4]);
+    expect(rowCounts).toEqual(HEART_EMBEDDED_ROW_COUNTS);
     expect(bricks).toHaveLength(82);
     expect(bricks.every((brick) => brick.kind === "bomb")).toBe(true);
   });
@@ -574,7 +739,7 @@ describe("Cursor SDK level generation contract", () => {
       {
         name: "Mixed Compact",
         brick: "basic",
-        grid: ["bohx.........", "..............", "..............", "..............", "..............", "..............", "..............", "..............", ".............."]
+        grid: ["bohx................", `${DESIGNER_PAD}`, `${DESIGNER_PAD}`, `${DESIGNER_PAD}`, `${DESIGNER_PAD}`, `${DESIGNER_PAD}`, `${DESIGNER_PAD}`, `${DESIGNER_PAD}`, `${DESIGNER_PAD}`, `${DESIGNER_PAD}`, `${DESIGNER_PAD}`, `${DESIGNER_PAD}`]
       },
       request
     );
@@ -1074,7 +1239,7 @@ describe("Ricochet Rush curated board packs", () => {
     expect(saved[0]?.sourcePrompt).toBe("Saved from generated board");
     expect(saved[0]?.bestScore).toBe(0);
     expect(progress[SAVED_DESIGNS_PACK_ID]?.unlocked).toBe(true);
-    expect(previewRowsFromLevel(saved[0]!.levelBlueprint)).toHaveLength(BRICK_ROWS);
+    expect(previewRowsFromLevel(saved[0]!.levelBlueprint)).toHaveLength(DESIGNER_BRICK_ROWS);
   });
 
   it("exports and imports public-safe versioned board JSON", () => {
@@ -1088,7 +1253,7 @@ describe("Ricochet Rush curated board packs", () => {
     expect(parsed.ok).toBe(true);
     expect(parsed.level?.name).toBe(level.name);
     expect(parsed.sourcePrompt).toBe("share prompt");
-    expect(parsed.level?.rows).toHaveLength(BRICK_ROWS);
+    expect(parsed.level?.rows).toHaveLength(DESIGNER_BRICK_ROWS);
   });
 
   it("rejects malformed or unsupported board exports without normalizing them", () => {

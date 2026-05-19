@@ -1,6 +1,6 @@
-import type { LevelRequest, LevelResponse } from "../../shared/evolution";
+import { CURSOR_GENERATION_BUDGET_MS, type LevelRequest, type LevelResponse } from "../../shared/evolution";
 
-export const LEVEL_GENERATION_TIMEOUT_MS = 65_000;
+export const LEVEL_GENERATION_TIMEOUT_MS = CURSOR_GENERATION_BUDGET_MS;
 
 interface LevelGenerationOptions {
   fetcher?: typeof fetch;
