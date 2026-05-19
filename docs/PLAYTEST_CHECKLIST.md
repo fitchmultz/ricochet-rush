@@ -22,7 +22,7 @@ Optional live Cursor SDK probe, only when credentials are available:
 npm run sdk:probe
 ```
 
-The probe skips cleanly without `CURSOR_API_KEY`. With a key, it runs one server-side SDK generation, verifies trace evidence, validates the compact grid/board shape, and confirms the board is playable.
+The probe skips cleanly without `CURSOR_API_KEY`. With a key, it runs up to five server-side SDK generations, verifies trace evidence, validates the compact grid using the same pad/trim rules as production, and confirms the materialized board is playable.
 
 The UX audit captures desktop and mobile screenshots in `dist/playtest-report/screenshots/` and writes `dist/playtest-report/report.md` plus `report.json`. Treat failures as blockers. Treat warnings as the next polish queue for Codex before asking for manual visual review.
 
