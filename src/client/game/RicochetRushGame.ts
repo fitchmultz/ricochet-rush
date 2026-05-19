@@ -2970,6 +2970,7 @@ export class RicochetRushGame {
   }
 
   private showOverlay(title: string, body: string, actionLabel?: string, action?: () => void, busy = false, secondaryLabel?: string, secondaryAction?: () => void) {
+    if (secondaryLabel) this.hud.closeToolPanel();
     this.previouslyFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const stage = this.mount.closest<HTMLElement>(".stage");
     stage?.classList.add("has-visible-overlay");

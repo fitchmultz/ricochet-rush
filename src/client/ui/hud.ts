@@ -81,6 +81,7 @@ export interface HudActions {
 export interface HudApi {
   update(state: HudState): void;
   setActions(actions: HudActions): void;
+  closeToolPanel(): void;
 }
 
 type HudToolPanel = "designer" | "packs" | "share" | "options" | "diagnostics";
@@ -539,6 +540,9 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   return {
     setActions(nextActions) {
       actions = nextActions;
+    },
+    closeToolPanel() {
+      setToolPanel(null);
     },
     update(state) {
       const playerStatus = playerStatusFor(state);

@@ -136,10 +136,11 @@ async function runDesktopAudit(page: Page) {
   await assertLayoutHealth(page, "desktop ready", { failSmallTouchTargets: false });
   await assertDesktopStageSeparation(page);
   await capture(page, "desktop-ready");
-  await assertLaunchSurvivalWindow(page, "desktop center launch");
+  await assertToolDrawerOwnsFocus(page, "desktop ready");
   await bootFresh(page, DESKTOP_VIEWPORT);
   await assertShellHealth(page, "desktop launch prep");
   await assertReadyState(page, "desktop launch prep");
+  await assertLaunchSurvivalWindow(page, "desktop center launch");
 
   const launchBefore = await snapshot(page);
   await page.locator("[data-overlay-action]").click();
@@ -265,6 +266,39 @@ async function assertShellHealth(page: Page, label: string) {
     return Boolean(overlay) || bodyText.includes("Internal server error") || bodyText.includes("Failed to load module script");
   });
   recordCheck(!hasFrameworkOverlay, `${label}: no framework error overlay`, hasFrameworkOverlay ? "Framework error content found." : "No framework overlay detected.");
+}
+
+async function assertToolDrawerOwnsFocus(page: Page, label: string) {
+  await page.locator('[data-tool-panel="designer"]').click();
+  await page.waitForFunction(() => document.querySelector(".shell")?.classList.contains("is-tool-panel-open"));
+  const overlayHidden = await page.evaluate(() => {
+    const overlay = document.querySelector<HTMLElement>(".game-overlay.is-visible");
+    if (!overlay) return false;
+    return getComputedStyle(overlay).visibility === "hidden";
+  });
+  recordCheck(
+    overlayHidden,
+    `${label}: tool drawer hides competing launch overlay`,
+    overlayHidden ? "Launch overlay is suppressed while Designer is open." : "Launch overlay still competes with the tool drawer."
+  );
+  const panelHeight = await page.evaluate(() => document.querySelector<HTMLElement>(".tool-panel")?.getBoundingClientRect().height ?? 0);
+  const bodyHeight = await page.evaluate(() => document.querySelector<HTMLElement>(".tool-body")?.getBoundingClientRect().height ?? 0);
+  recordCheck(
+    panelHeight > 0 && panelHeight < 720,
+    `${label}: tool drawer sizes to content`,
+    `Panel ${panelHeight.toFixed(0)}px tall with ${bodyHeight.toFixed(0)}px body.`
+  );
+  await page.locator('[data-action="close-tool-panel"]').click();
+  await page.waitForFunction(() => !document.querySelector(".shell")?.classList.contains("is-tool-panel-open"));
+  const overlayRestored = await page.evaluate(() => {
+    const overlay = document.querySelector<HTMLElement>(".game-overlay.is-visible");
+    return Boolean(overlay && getComputedStyle(overlay).visibility !== "hidden");
+  });
+  recordCheck(
+    overlayRestored,
+    `${label}: launch overlay returns after closing drawer`,
+    overlayRestored ? "Launch overlay is visible again after closing Designer." : "Launch overlay did not return."
+  );
 }
 
 async function assertLaunchSurvivalWindow(page: Page, label: string) {

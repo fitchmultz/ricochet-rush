@@ -477,6 +477,7 @@ try {
     game.handlePrimaryAction();
   });
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "playing");
+  await page.locator('[data-tool-panel="options"]').click();
   await page.locator('.settings-panel [data-action="reset"]').click();
   await page.locator("[data-overlay-action]").click();
   await page.waitForTimeout(1200);

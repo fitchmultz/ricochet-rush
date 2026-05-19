@@ -1039,6 +1039,19 @@ body {
   text-transform: uppercase;
 }
 
+.shell.is-tool-panel-open .stage:not(.has-priority-overlay) .game-overlay.is-visible {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.shell.is-tool-panel-open .tool-backdrop {
+  z-index: 13;
+}
+
+.shell.is-tool-panel-open .tool-panel {
+  z-index: 14;
+}
+
 .tool-backdrop {
   position: absolute;
   inset: 0 calc(var(--active-panel-width) + 12px) 0 0;
@@ -1053,11 +1066,13 @@ body {
   z-index: 9;
   top: 24px;
   right: calc(var(--active-panel-width) + 24px);
-  bottom: 24px;
+  bottom: auto;
   width: min(440px, calc(100vw - var(--active-panel-width) - 56px));
   min-width: 330px;
+  max-height: calc(100% - 48px);
+  height: fit-content;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
   overflow: hidden;
   border: 1px solid rgba(126, 241, 255, 0.28);
   border-radius: 8px;
