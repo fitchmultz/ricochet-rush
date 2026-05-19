@@ -676,7 +676,7 @@ describe("Cursor SDK level generation contract", () => {
       const response = await requestEvolution(request);
       expect(response.source).toBe("fallback");
       expect(response.warning).toContain("RICOCHET_RUSH_FORCE_FALLBACK");
-      expect(response.summary?.title).toBe("Local backup board");
+      expect(response.summary?.title).toContain("Local backup");
       expect(response.summary?.detail).toContain("final wall has");
     } finally {
       delete process.env.RICOCHET_RUSH_FORCE_FALLBACK;
@@ -1004,8 +1004,10 @@ describe("Cursor SDK level generation contract", () => {
   it("builds a public generation summary without raw trace text", () => {
     const level = fallbackLevel(request);
     const summary = buildGenerationSummary(request, level, "fallback", "Cursor SDK authentication is unavailable.");
-    expect(summary.title).toBe("Local backup board");
+    expect(summary.title).toContain("Local backup");
+    expect(summary.title).toContain(level.name);
     expect(summary.detail).toContain(level.name);
+    expect(summary.detail).toContain("default arcade brief");
     expect(summary.detail).toContain("final wall has");
     expect(summary.detail).toContain("Target was");
     expect(summary.warning).toBe("Cursor SDK authentication is unavailable.");

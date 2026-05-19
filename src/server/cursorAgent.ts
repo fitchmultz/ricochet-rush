@@ -307,13 +307,21 @@ export function buildGenerationSummary(
   const targets = designerTargetsForGeneration(designer, request.level);
   const brickCount = level.rows.flat().filter(Boolean).length;
   const sourceLabel = source === "cursor-sdk" ? "Board designer" : "Local backup";
-  const modeLabel = designer.visualPreset === "icon" || classifyDesignerBrief(designer.brief, designer.visualPreset).mode === "silhouette" ? "icon/silhouette" : "arcade";
+  const classification = classifyDesignerBrief(designer.brief, designer.visualPreset);
+  const modeLabel = designer.visualPreset === "icon" || classification.mode === "silhouette" ? "icon/silhouette" : "arcade";
+  const promptLabel = designer.brief.trim()
+    ? `your prompt: "${designer.brief.trim().slice(0, 88)}${designer.brief.trim().length > 88 ? "…" : ""}"`
+    : "the default arcade brief";
+  const fidelityNote =
+    classification.mode === "silhouette"
+      ? "Silhouette rules were applied so the wall should read like the brief."
+      : "Arcade wall layout.";
   return {
     source,
-    title: `${sourceLabel} board`,
-    detail: `${sourceLabel} built ${level.name} from ${describeDesignerIntent(designer)}. ${source === "cursor-sdk" ? "Composer layout preserved." : "Local template backup."} Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; final wall has ${brickCount} playable bricks.`,
+    title: `${sourceLabel} · ${level.name}`,
+    detail: `${sourceLabel} built "${level.name}" for ${promptLabel}. ${fidelityNote} ${source === "cursor-sdk" ? "Composer layout preserved." : "Local template backup."} Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; final wall has ${brickCount} playable bricks.`,
     chips: [
-      designer.brief ? "prompt" : "default prompt",
+      designer.brief ? `prompt: ${designer.brief.trim().slice(0, 56)}${designer.brief.trim().length > 56 ? "…" : ""}` : "default prompt",
       modeLabel,
       `difficulty ${designer.difficulty}/5`,
       `${Math.round(designer.density * 100)}% density`,

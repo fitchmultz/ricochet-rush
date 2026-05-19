@@ -2164,14 +2164,17 @@ export class RicochetRushGame {
     const brickCount = level.rows.flat().filter(Boolean).length;
     const targets = designerTargets(designer, this.level);
     const serverOffline = reason.includes("npm run dev") || reason.includes("/api/level");
+    const promptLabel = designer.brief.trim()
+      ? `your prompt: "${designer.brief.trim().slice(0, 88)}${designer.brief.trim().length > 88 ? "…" : ""}"`
+      : "the default arcade brief";
     return {
       source: "fallback",
-      title: serverOffline ? "Local backup (server offline)" : "Local backup board",
+      title: serverOffline ? `Local backup · ${level.name}` : `Local backup · ${level.name}`,
       detail: serverOffline
-        ? `${reason} Local backup built ${level.name} so you can keep playing offline. Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; final wall has ${brickCount} playable bricks.`
-        : `Local backup built ${level.name} from the current board prompt. Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; final wall has ${brickCount} playable bricks.`,
+        ? `${reason} Local backup built "${level.name}" for ${promptLabel} so you can keep playing offline. Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; final wall has ${brickCount} playable bricks.`
+        : `Local backup built "${level.name}" for ${promptLabel}. Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; final wall has ${brickCount} playable bricks.`,
       chips: [
-        designer.brief ? "prompt" : "default prompt",
+        designer.brief ? `prompt: ${designer.brief.trim().slice(0, 56)}${designer.brief.trim().length > 56 ? "…" : ""}` : "default prompt",
         `difficulty ${designer.difficulty}/5`,
         `${Math.round(designer.density * 100)}% density`,
         `${Math.round(designer.specialBias * 100)}% specials`

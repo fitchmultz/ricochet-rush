@@ -174,7 +174,8 @@ async function runDesktopAudit(page: Page) {
   });
   const generated = await snapshot(page);
   recordCheck(generated.designerIntent.brief === "radial gold maze with side lanes", "designer prompt applies", generated.designerIntent.brief);
-  recordCheck(generated.generationSummary?.title === "Local backup board", "fallback generation is explained in tools", generated.generationSummary?.title ?? "missing summary");
+  recordCheck(generated.generationSummary?.title.includes("Local backup") === true, "fallback generation is explained in tools", generated.generationSummary?.title ?? "missing summary");
+  recordCheck(generated.generationSummary?.detail.includes("radial gold maze") === true, "generation summary cites the designer prompt", generated.generationSummary?.detail ?? "missing detail");
   recordCheck(await page.locator("[data-generation-summary]").isVisible(), "full generation summary is visible", "Board Designer exposes the result summary.");
   recordCheck(await page.locator("[data-compact-generation-summary]").isHidden(), "generation diagnostics stay out of play rail", "Play Console remains player-facing after generation.");
   recordCheck(!(await page.locator(".console-status").innerText()).toLowerCase().includes("local backup"), "play rail hides fallback diagnostics", "Fallback details stay in tools/log surfaces.");

@@ -262,7 +262,8 @@ try {
   const designed = await snapshot(page);
   assert(designed.designerIntent.brief === generatedPrompt, `Expected designer brief to apply, got ${designed.designerIntent.brief}.`);
   assert(designed.boardTheme.wallGlow === "#7ef1ff", `Expected generated board theme, got ${designed.boardTheme.wallGlow}.`);
-  assert(designed.generationSummary?.title === "Local backup board", "Expected public generation summary for forced fallback.");
+  assert(designed.generationSummary?.title.includes("Local backup") === true, "Expected public generation summary for forced fallback.");
+  assert(designed.generationSummary?.detail.includes(generatedPrompt.slice(0, 40)) === true, "Expected generation summary to reference the designer prompt.");
   assert(await page.locator("[data-generation-summary]").isVisible(), "Expected visible public generation summary in the Designer panel.");
   assert(await page.locator("[data-compact-generation-summary]").isHidden(), "Expected generation diagnostics to stay out of the default play rail.");
   assert(!(await page.locator(".console-status").innerText()).toLowerCase().includes("local backup"), "Expected fallback wording to stay out of the default play rail.");
