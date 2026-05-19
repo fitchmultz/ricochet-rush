@@ -12,7 +12,10 @@ import {
   designerTargets,
   normalizeDesignerIntent,
   normalizeLevel,
+  nextDesignerSeed,
   normalizeLevelRequest,
+  validateAndNormalizeSdkLevel,
+  MIN_RAW_SDK_BRICKS,
   type LevelBlueprint,
   type LevelRequest
 } from "../shared/evolution";
@@ -28,6 +31,7 @@ import {
   normalizePackProgress,
   normalizeSavedBoards,
   boardCountForPack,
+  blueprintFingerprint,
   previewRowsFromLevel
 } from "../shared/boardPacks";
 import { DEFAULT_COSMETICS, DEFAULT_SETTINGS, SAVE_VERSION, normalizeCosmetics, normalizeSaveState, normalizeSettings } from "../shared/saveState";
@@ -44,7 +48,12 @@ import {
   prizePowerupPool
 } from "../client/game/RicochetRushGame";
 import { MUSIC_MASTER_GAIN, MUSIC_MELODY_PEAK, createGameAudio } from "../client/game/gameAudio";
-import { levelGenerationTimeoutMessage, requestGeneratedLevel } from "../client/game/levelApi";
+import {
+  isLevelGenerationNetworkError,
+  levelGenerationServerHint,
+  levelGenerationTimeoutMessage,
+  requestGeneratedLevel
+} from "../client/game/levelApi";
 
 const request: LevelRequest = {
   level: 4,
@@ -198,6 +207,8 @@ describe("Cursor SDK level generation contract", () => {
     expect(buildPrompt(request)).toContain("Ricochet Rush");
     expect(buildPrompt(request)).toContain(`${MIN_BRICKS} bricks and at most ${MAX_BRICKS} bricks`);
     expect(buildPrompt(request)).toContain("Do not calculate exact brick counts");
+    expect(buildPrompt(request)).toContain("Never reuse a previous board name");
+    expect(buildPrompt({ ...request, recentEvents: ["Cleared Blast Monolith.", "Designing the next wall."] })).toContain("Blast Monolith");
   });
 
   it("adds the board prompt and hidden tuning defaults to the Cursor prompt", () => {
@@ -313,6 +324,112 @@ describe("Cursor SDK level generation contract", () => {
     expect(level.rows[0]).toHaveLength(BRICK_COLUMNS);
     expect(bricks.length).toBeGreaterThanOrEqual(MIN_BRICKS);
     expect(bricks.length).toBeLessThanOrEqual(MAX_BRICKS);
+  });
+
+  it("rotates designer seeds between generation requests", () => {
+    const first = nextDesignerSeed(DEFAULT_DESIGNER_INTENT.seed, request, 1);
+    const second = nextDesignerSeed(first, { ...request, level: request.level + 1, clearedLevels: request.clearedLevels + 1 }, 2);
+    expect(first).not.toBe(DEFAULT_DESIGNER_INTENT.seed);
+    expect(second).not.toBe(first);
+  });
+
+  it("changes fallback layouts when level and seed advance", () => {
+    const first = fallbackLevel({ ...request, level: 1, designer: { ...DEFAULT_DESIGNER_INTENT, seed: "fresh-angle" } });
+    const second = fallbackLevel({
+      ...request,
+      level: 2,
+      score: request.score + 500,
+      clearedLevels: 1,
+      designer: { ...DEFAULT_DESIGNER_INTENT, seed: nextDesignerSeed("fresh-angle", { ...request, level: 2, clearedLevels: 1 }) }
+    });
+    expect(blueprintFingerprint(first)).not.toBe(blueprintFingerprint(second));
+  });
+
+  it("detects unreachable level API network failures", () => {
+    expect(isLevelGenerationNetworkError(new TypeError("Failed to fetch"))).toBe(true);
+    expect(isLevelGenerationNetworkError(new Error("Level generation failed with 500"))).toBe(false);
+    expect(levelGenerationServerHint()).toContain("npm run dev");
+  });
+
+  it("rejects sparse SDK grids before accepting composer output", () => {
+    const sparse = validateAndNormalizeSdkLevel(
+      {
+        name: "Too Sparse",
+        briefing: "Not enough bricks.",
+        paddleHint: "Retry.",
+        grid: ["xxxx", "..............", "..............", "..............", "..............", "..............", "..............", "..............", ".............."]
+      },
+      request
+    );
+    expect(sparse.ok).toBe(false);
+    if (sparse.ok) return;
+    expect(sparse.reason).toContain("too sparse");
+    expect(sparse.rawBrickCount).toBeLessThan(MIN_RAW_SDK_BRICKS);
+  });
+
+  it("accepts complete compact SDK grids for composer-2.5 responses", () => {
+    const valid = validateAndNormalizeSdkLevel(
+      {
+        name: "Lane Vault",
+        briefing: "Open the side channels first.",
+        paddleHint: "Bank off the left wall.",
+        speed: 1.05,
+        brick: "basic",
+        grid: ["..............", "..xxxx..xxxx..", ".xxxxxxxxxxxx.", ".xxxxxxxxxxxx.", "..xxxxxxxxxx..", "...xxxxxxxx...", "....xxxxxx....", ".....xxxx.....", ".............."]
+      },
+      request
+    );
+    expect(valid.ok).toBe(true);
+    if (!valid.ok) return;
+    expect(valid.level.name).toBe("Lane Vault");
+    expect(valid.rawBrickCount).toBeGreaterThanOrEqual(MIN_RAW_SDK_BRICKS);
+  });
+
+  it("retries composer-2.5 generation before falling back", async () => {
+    const originalApiKey = process.env.CURSOR_API_KEY;
+    process.env.CURSOR_API_KEY = "test-key";
+    delete process.env.RICOCHET_RUSH_FORCE_FALLBACK;
+    let calls = 0;
+    try {
+      const response = await requestEvolution(request, {
+        maxAttempts: 3,
+        runWorker: async () => {
+          calls += 1;
+          if (calls < 3) {
+            return {
+              parsed: null,
+              parseStatus: "parse-failed",
+              parseError: "Cursor SDK returned invalid JSON.",
+              rawOutput: "not json",
+              rawError: "",
+              startedAt: Date.now(),
+              finishedAt: Date.now()
+            };
+          }
+          return {
+            parsed: {
+              name: "Retry Win",
+              briefing: "Third attempt worked.",
+              paddleHint: "Stay shallow.",
+              speed: 1.1,
+              brick: "basic",
+              grid: ["..............", "..xxxx..xxxx..", ".xxxxxxxxxxxx.", ".xxxxxxxxxxxx.", "..xxxxxxxxxx..", "...xxxxxxxx...", "....xxxxxx....", ".....xxxx.....", ".............."]
+            },
+            parseStatus: "success",
+            rawOutput: "{}",
+            rawError: "",
+            startedAt: Date.now(),
+            finishedAt: Date.now()
+          };
+        }
+      });
+      expect(calls).toBe(3);
+      expect(response.source).toBe("cursor-sdk");
+      expect(response.level.name).toBe("Retry Win");
+    } finally {
+      if (originalApiKey === undefined) delete process.env.CURSOR_API_KEY;
+      else process.env.CURSOR_API_KEY = originalApiKey;
+    }
   });
 
   it("lets fallback boards honor designer intent while staying playable", () => {

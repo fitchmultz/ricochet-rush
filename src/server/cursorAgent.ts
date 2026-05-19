@@ -15,8 +15,11 @@ import {
   describeDesignerIntent,
   designerTargets,
   fallbackLevel,
+  nextDesignerSeed,
   normalizeDesignerIntent,
-  normalizeLevel
+  normalizeLevel,
+  normalizeLevelRequest,
+  validateAndNormalizeSdkLevel
 } from "../shared/evolution.js";
 
 export interface WorkerInvocationResult {
@@ -41,8 +44,14 @@ interface CursorWorkerEnvelope {
   streamStats?: ComposerStreamStats;
 }
 
-const CURSOR_WORKER_TIMEOUT_MS = 60_000;
+const CURSOR_WORKER_TIMEOUT_MS = 75_000;
 const CURSOR_WORKER_SIGKILL_GRACE_MS = 5_000;
+const MAX_EVOLUTION_ATTEMPTS = 3;
+
+export interface RequestEvolutionOptions {
+  maxAttempts?: number;
+  runWorker?: typeof runCursorWorker;
+}
 
 interface CursorWorkerProcess {
   stdout: { setEncoding: (encoding: BufferEncoding) => void; on: (event: "data", listener: (chunk: string) => void) => unknown };
@@ -59,8 +68,9 @@ interface RunCursorWorkerOptions {
   spawnWorker?: () => CursorWorkerProcess;
 }
 
-export async function requestEvolution(request: LevelRequest): Promise<LevelResponse> {
-  const requestJson = JSON.stringify(request);
+export async function requestEvolution(request: LevelRequest, options: RequestEvolutionOptions = {}): Promise<LevelResponse> {
+  const maxAttempts = clampAttempts(options.maxAttempts ?? MAX_EVOLUTION_ATTEMPTS);
+  const invokeWorker = options.runWorker ?? runCursorWorker;
   const prompt = buildPrompt(request);
   const apiKey = readCursorApiKey();
 
@@ -77,6 +87,7 @@ export async function requestEvolution(request: LevelRequest): Promise<LevelResp
 
   if (!apiKey) {
     const warning = "Cursor SDK authentication is unavailable.";
+    const requestJson = JSON.stringify(request);
     const now = Date.now();
     const trace = toTrace(request, requestJson, prompt, {
       parsed: null,
@@ -99,42 +110,53 @@ export async function requestEvolution(request: LevelRequest): Promise<LevelResp
     };
   }
 
-  try {
-    const workerResult = await runCursorWorker(requestJson, apiKey);
-    const trace = toTrace(request, requestJson, prompt, workerResult);
+  const attemptFailures: string[] = [];
+  let lastTrace: ComposerAgentTrace | undefined;
 
-    if (workerResult.parseStatus === "success") {
-      const level = normalizeLevel(workerResult.parsed, request);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const attemptRequest = evolutionAttemptRequest(request, attempt);
+    const attemptJson = JSON.stringify(attemptRequest);
+    const attemptPrompt = buildPrompt(attemptRequest);
+
+    try {
+      const workerResult = await invokeWorker(attemptJson, apiKey);
+      lastTrace = toTrace(attemptRequest, attemptJson, attemptPrompt, workerResult);
+
+      if (workerResult.parseStatus !== "success") {
+        const warning = summarizeLevelError(workerResult.parseError ?? "Cursor SDK worker failed.");
+        attemptFailures.push(`attempt ${attempt}: ${warning}`);
+        continue;
+      }
+
+      const validated = validateAndNormalizeSdkLevel(workerResult.parsed, attemptRequest);
+      if (!validated.ok) {
+        attemptFailures.push(`attempt ${attempt}: ${validated.reason}`);
+        continue;
+      }
+
       return {
-        level,
+        level: validated.level,
         source: "cursor-sdk",
         model: CURSOR_MODEL,
-        summary: buildGenerationSummary(request, level, "cursor-sdk", undefined, trace),
-        trace
+        summary: buildGenerationSummary(attemptRequest, validated.level, "cursor-sdk", undefined, lastTrace),
+        trace: lastTrace
       };
+    } catch (error) {
+      const warning = summarizeLevelError(error);
+      attemptFailures.push(`attempt ${attempt}: ${warning}`);
     }
-    const warning = summarizeLevelError(workerResult.parseError ?? "Cursor SDK worker failed.");
-    const level = fallbackLevel(request);
-
-    return {
-      level,
-      source: "fallback",
-      model: CURSOR_MODEL,
-      summary: buildGenerationSummary(request, level, "fallback", warning, trace),
-      warning,
-      trace
-    };
-  } catch (error) {
-    const warning = summarizeLevelError(error);
-    const level = fallbackLevel(request);
-    return {
-      level,
-      source: "fallback",
-      model: CURSOR_MODEL,
-      summary: buildGenerationSummary(request, level, "fallback", warning),
-      warning
-    };
   }
+
+  const warning = summarizeEvolutionFailures(attemptFailures);
+  const level = fallbackLevel(request);
+  return {
+    level,
+    source: "fallback",
+    model: CURSOR_MODEL,
+    summary: buildGenerationSummary(request, level, "fallback", warning, lastTrace),
+    warning,
+    trace: lastTrace
+  };
 }
 
 export function buildPrompt(request: LevelRequest): string {
@@ -148,6 +170,8 @@ export function buildPrompt(request: LevelRequest): string {
     clearedLevels: request.clearedLevels,
     recentEvents: request.recentEvents.slice(0, 3)
   };
+  const previousBoardNames = clearedBoardNamesFromEvents(request.recentEvents);
+  const avoidNames = previousBoardNames.length > 0 ? previousBoardNames.join(", ") : "none";
   return `You are the level designer for Ricochet Rush, a fast 3D brick-breaker with adaptive arcade boards.
 
 Fast contract:
@@ -155,16 +179,19 @@ Fast contract:
 - Return one compact JSON object only. No markdown, comments, prose, tool calls, shell commands, file inspection, or helper code.
 - Keep the full response under 1,000 characters.
 - Do not calculate exact brick counts. Do not verify with code. Pick a strong playable approximation and return immediately.
-- The server validates, repairs, and rejects unsafe boards, so do not spend time proving the grid.
+- The server rejects sparse, invalid, or repeated boards and will retry, so return a complete grid on the first try.
 - Generate a fresh playable level, not a generic rectangle and not a board that instantly clears.
 - Make the level visually interesting in a 3D arcade arena: diagonals, holes, shields, weak spots, traps, rewards.
 - Difficulty should rise, but the first ball must always have reachable targets.
+- Never reuse a previous board name from this run. Previous names to avoid: ${avoidNames}.
+- If a previous board was just cleared, change both the motif and the brick layout noticeably.
 
 Game rules:
 - Grid is ${BRICK_COLUMNS} columns by ${BRICK_ROWS} rows.
 - Brick kinds: basic, hard, bomb, prize, penalty, laser, grab, fire, thru, split, wide, slow, boss.
 - basic hp 1, hard hp 2-4, boss hp 5-12, all other special bricks hp 1.
-- Use exactly 9 grid strings. Each string must be exactly 14 characters. "." means empty.
+- Use exactly 9 grid strings. Each string must be exactly 14 characters. Count every row before returning; pad with "." on the right or trim to 14.
+- Prefer a uniform grid with "brick":"basic" and occupied cells as "x" unless the prompt requires mixed kinds.
 - If every occupied brick is the same kind, set "brick" to that kind and use "x" for occupied cells.
 - For mixed grids, omit "brick" and use codes: b basic, h hard, o bomb, p prize, n penalty, l laser, g grab, f fire, t thru, s split, w wide, m slow, c boss.
 - Use at least ${MIN_BRICKS} bricks and at most ${MAX_BRICKS} bricks. This is mandatory; too few or too many bricks are rejected.
@@ -420,6 +447,39 @@ function extractParsedOutput(payload: unknown): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function clampAttempts(value: number): number {
+  if (!Number.isFinite(value)) return MAX_EVOLUTION_ATTEMPTS;
+  return Math.max(1, Math.min(5, Math.floor(value)));
+}
+
+function evolutionAttemptRequest(request: LevelRequest, attempt: number): LevelRequest {
+  if (attempt <= 1) return request;
+  const designer = normalizeDesignerIntent(request.designer);
+  return {
+    ...request,
+    designer: {
+      ...designer,
+      seed: nextDesignerSeed(designer.seed, request, attempt * 9_973)
+    }
+  };
+}
+
+function summarizeEvolutionFailures(failures: string[]): string {
+  if (failures.length === 0) return "Cursor SDK request failed after retries.";
+  const last = failures[failures.length - 1]?.replace(/^attempt \d+:\s*/, "") ?? "Cursor SDK request failed.";
+  if (failures.length === 1) return last;
+  return `${last} (${failures.length} composer-2.5 attempts).`;
+}
+
+function clearedBoardNamesFromEvents(events: string[]): string[] {
+  const names = new Set<string>();
+  for (const event of events) {
+    const cleared = event.match(/^Cleared\s+(.+?)\.\s/i) ?? event.match(/^Cleared\s+(.+?)\.$/i);
+    if (cleared?.[1]) names.add(cleared[1].trim());
+  }
+  return [...names].slice(0, 4);
 }
 
 function describePromptLocks(brief: string): string {

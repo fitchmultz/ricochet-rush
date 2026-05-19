@@ -37,3 +37,23 @@ export function levelGenerationTimeoutMessage(timeoutMs: number): string {
   const label = seconds >= 10 ? String(Math.round(seconds)) : String(Number(seconds.toFixed(1)));
   return `Level generation timed out after ${label} seconds.`;
 }
+
+export function isLevelGenerationNetworkError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  const name = error.name.toLowerCase();
+  return (
+    name === "typeerror" ||
+    message.includes("failed to fetch") ||
+    message.includes("fetch failed") ||
+    message.includes("networkerror") ||
+    message.includes("network request failed") ||
+    message.includes("load failed") ||
+    message.includes("connection refused") ||
+    message.includes("err_connection")
+  );
+}
+
+export function levelGenerationServerHint(): string {
+  return "Start the local server with `npm run dev` or `npm run preview` so /api/level can reach the board designer.";
+}

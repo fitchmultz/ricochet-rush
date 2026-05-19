@@ -10,6 +10,7 @@ import {
   type LevelRequest,
   type LevelResponse,
   fallbackLevel,
+  nextDesignerSeed,
   normalizeDesignerIntent,
   designerTargets,
   normalizeLevel
@@ -21,6 +22,7 @@ import {
   type DailyProgressState,
   type PackProgressState,
   type SavedBoardEntry,
+  blueprintFingerprint,
   boardCountForPack,
   getBuiltInPack,
   getNextBuiltInPack,
@@ -51,7 +53,7 @@ import {
 } from "../../shared/saveState";
 import type { HudApi, HudPackItem } from "../ui/hud";
 import { createGameAudio, type GameAudioPlayOptions, type GameSoundKind } from "./gameAudio";
-import { requestGeneratedLevel } from "./levelApi";
+import { isLevelGenerationNetworkError, levelGenerationServerHint, requestGeneratedLevel } from "./levelApi";
 
 interface Ball {
   x: number;
@@ -1987,6 +1989,8 @@ export class RicochetRushGame {
 
   private async continueToNextLevel() {
     if (this.phase !== "levelComplete") return;
+    const clearedBoardName = this.levelBlueprint.name;
+    this.pushEvent(`Cleared ${clearedBoardName}. Designing the next wall.`);
     if (this.boardContext.source === "pack") {
       const { packId, boardIndex } = this.boardContext;
       const nextIndex = boardIndex + 1;
@@ -2034,16 +2038,56 @@ export class RicochetRushGame {
     this.pushEvent(event);
     this.showLoadingOverlay(`Generating Level ${this.level}`, "The game is paused while a playable wall is prepared.");
     this.refreshHud("Designer is shaping a playable wall.");
-    const request = this.levelRequest();
-    const sourcePrompt = request.designer?.brief || "Default Ricochet board prompt";
+    const previousFingerprint = blueprintFingerprint(this.levelBlueprint);
+    const sourcePrompt = this.designerIntent.brief || "Default Ricochet board prompt";
+    const maxAttempts = 3;
+    let lastError = "Level generation failed.";
+
     try {
-      const result = await requestGeneratedLevel(request);
-      const sourceEvent = `${result.level.name} is ready.`;
-      this.loadLevel(result.level, sourceEvent, result.trace, result.summary, { source: "generated", packId: null, boardIndex: 0 }, sourcePrompt);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : "unknown error";
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        this.prepareDesignerForGeneration();
+        const request = this.levelRequest();
+        try {
+          const result = await requestGeneratedLevel(request);
+          if (result.source === "fallback" && attempt < maxAttempts) {
+            lastError = result.warning ?? "Board designer used local backup instead of Cursor SDK.";
+            this.pushEvent(`${lastError} Retrying with a fresh seed.`);
+            continue;
+          }
+          const fingerprint = blueprintFingerprint(result.level);
+          if (fingerprint === previousFingerprint && attempt < maxAttempts) {
+            lastError = "Designer returned the same wall layout; retrying with a fresh seed.";
+            this.pushEvent(lastError);
+            continue;
+          }
+          const sourceEvent = `${result.level.name} is ready.`;
+          if (result.source === "fallback" && result.warning) {
+            this.pushEvent(result.warning);
+          }
+          this.loadLevel(result.level, sourceEvent, result.trace, result.summary, { source: "generated", packId: null, boardIndex: 0 }, sourcePrompt);
+          return;
+        } catch (error) {
+          lastError = error instanceof Error ? error.message : "unknown error";
+          if (attempt < maxAttempts && !isLevelGenerationNetworkError(error)) {
+            this.pushEvent(`Generation attempt ${attempt} failed. Retrying.`);
+            continue;
+          }
+          const fallback = fallbackLevel(request);
+          const warning = isLevelGenerationNetworkError(error)
+            ? `${levelGenerationServerHint()} (${lastError})`
+            : lastError;
+          this.loadLevel(fallback, `${fallback.name} is ready.`, undefined, this.localGenerationSummary(fallback, warning, request.designer), {
+            source: "generated",
+            packId: null,
+            boardIndex: 0
+          }, sourcePrompt);
+          return;
+        }
+      }
+
+      const request = this.levelRequest();
       const fallback = fallbackLevel(request);
-      this.loadLevel(fallback, `${fallback.name} is ready.`, undefined, this.localGenerationSummary(fallback, reason, request.designer), {
+      this.loadLevel(fallback, `${fallback.name} is ready.`, undefined, this.localGenerationSummary(fallback, lastError, request.designer), {
         source: "generated",
         packId: null,
         boardIndex: 0
@@ -2052,6 +2096,14 @@ export class RicochetRushGame {
       this.loadingLevel = false;
       this.refreshHud();
     }
+  }
+
+  private prepareDesignerForGeneration() {
+    const request = this.levelRequest();
+    this.designerIntent = {
+      ...this.designerIntent,
+      seed: nextDesignerSeed(this.designerIntent.seed, request)
+    };
   }
 
   private levelRequest(): LevelRequest {
@@ -2068,10 +2120,13 @@ export class RicochetRushGame {
   private localGenerationSummary(level: LevelBlueprint, reason: string, designer: BoardDesignerIntent = this.designerIntent): GenerationSummary {
     const brickCount = level.rows.flat().filter(Boolean).length;
     const targets = designerTargets(designer, this.level);
+    const serverOffline = reason.includes("npm run dev") || reason.includes("/api/level");
     return {
       source: "fallback",
-      title: "Local backup board",
-      detail: `Local backup built ${level.name} from the current board prompt. Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; final wall has ${brickCount} playable bricks.`,
+      title: serverOffline ? "Local backup (server offline)" : "Local backup board",
+      detail: serverOffline
+        ? `${reason} Local backup built ${level.name} so you can keep playing offline. Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; final wall has ${brickCount} playable bricks.`
+        : `Local backup built ${level.name} from the current board prompt. Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; final wall has ${brickCount} playable bricks.`,
       chips: [
         designer.brief ? "prompt" : "default prompt",
         `difficulty ${designer.difficulty}/5`,

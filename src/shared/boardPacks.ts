@@ -374,6 +374,10 @@ export function trimSavedBoards(entries: SavedBoardEntry[], max = 24): SavedBoar
   return entries.slice(0, max);
 }
 
+export function blueprintFingerprint(level: LevelBlueprint): string {
+  return previewRowsFromLevel(level).join("\n");
+}
+
 export function previewRowsFromLevel(level: LevelBlueprint): string[] {
   return level.rows.slice(0, BRICK_ROWS).map((row) => row.slice(0, BRICK_COLUMNS).map((cell) => (cell ? glyphForKind(cell.kind) : ".")).join("").padEnd(BRICK_COLUMNS, "."));
 }

@@ -12,6 +12,7 @@
     "ux:preview": "tsx src/test/uxAudit.ts",
     "capture:demo": "npm run build && tsx src/test/captureDemoClip.ts",
     "sdk:probe": "tsx src/test/sdkProbe.ts",
+    "sdk:reliability": "tsx src/test/sdkReliability.ts",
     "test": "vitest run",
     "ci": "npm run build && npm run test && npm run smoke && npm run ux:preview"
   },

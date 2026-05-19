@@ -198,6 +198,23 @@ export function normalizeLevelRequest(input: unknown): LevelRequest | null {
   return request;
 }
 
+export interface SdkLevelValidationSuccess {
+  ok: true;
+  level: LevelBlueprint;
+  rawBrickCount: number;
+}
+
+export interface SdkLevelValidationFailure {
+  ok: false;
+  reason: string;
+  rawBrickCount: number;
+}
+
+export type SdkLevelValidation = SdkLevelValidationSuccess | SdkLevelValidationFailure;
+
+/** Minimum occupied cells in raw SDK grid before server-side repair. */
+export const MIN_RAW_SDK_BRICKS = Math.max(24, Math.floor(MIN_BRICKS * 0.65));
+
 export function normalizeLevel(input: unknown, request: LevelRequest): LevelBlueprint {
   const raw = isRecord(input) ? input : {};
   const normalizedRows = normalizeLevelRows(raw, request);
@@ -210,6 +227,85 @@ export function normalizeLevel(input: unknown, request: LevelRequest): LevelBlue
     speed: clamp(numberValue(raw.speed, 1 + request.level * 0.04), 0.85, 1.85),
     rows: applyDesignerBriefConstraints(rows, normalizeDesignerIntent(request.designer))
   };
+}
+
+export function validateAndNormalizeSdkLevel(input: unknown, request: LevelRequest): SdkLevelValidation {
+  if (!isRecord(input)) {
+    return { ok: false, reason: "SDK output is not an object.", rawBrickCount: 0 };
+  }
+  const raw = input;
+  if (!Array.isArray(raw.grid) && !Array.isArray(raw.rows)) {
+    return { ok: false, reason: "SDK output is missing grid or rows.", rawBrickCount: 0 };
+  }
+
+  const rawBrickCount = Array.isArray(raw.grid) ? countCompactGridGlyphs(raw.grid) : countRowsBrickSpecs(raw.rows);
+  if (rawBrickCount < MIN_RAW_SDK_BRICKS) {
+    return {
+      ok: false,
+      reason: `SDK grid is too sparse (${rawBrickCount} occupied cells; need at least ${MIN_RAW_SDK_BRICKS}).`,
+      rawBrickCount
+    };
+  }
+
+  const normalizedRows = normalizeLevelRows(raw, request);
+  if (!normalizedRows) {
+    return { ok: false, reason: "SDK grid could not be normalized.", rawBrickCount };
+  }
+
+  const rows = repairBrickCount(normalizedRows, request.level);
+  const brickCount = countBricks(rows);
+  if (brickCount < MIN_BRICKS || brickCount > MAX_BRICKS) {
+    return {
+      ok: false,
+      reason: `Playable brick count ${brickCount} is outside ${MIN_BRICKS}-${MAX_BRICKS}.`,
+      rawBrickCount
+    };
+  }
+
+  const name = stringValue(raw.name, "");
+  const briefing = stringValue(raw.briefing, "");
+  const paddleHint = stringValue(raw.paddleHint, "");
+  if (!name || !briefing || !paddleHint) {
+    return { ok: false, reason: "SDK output is missing name, briefing, or paddleHint.", rawBrickCount };
+  }
+
+  return {
+    ok: true,
+    rawBrickCount,
+    level: {
+      name,
+      briefing,
+      paddleHint,
+      speed: clamp(numberValue(raw.speed, 1 + request.level * 0.04), 0.85, 1.85),
+      rows: applyDesignerBriefConstraints(rows, normalizeDesignerIntent(request.designer))
+    }
+  };
+}
+
+function countCompactGridGlyphs(grid: unknown[]): number {
+  let count = 0;
+  for (let y = 0; y < BRICK_ROWS; y += 1) {
+    const rawRow = grid[y];
+    const sourceRow = typeof rawRow === "string" ? rawRow : "";
+    const normalized = sourceRow.padEnd(BRICK_COLUMNS, ".").slice(0, BRICK_COLUMNS);
+    for (const char of normalized) {
+      const code = char.toLowerCase();
+      if (code !== "." && code !== "_" && code !== "-" && code.trim().length > 0) count += 1;
+    }
+  }
+  return count;
+}
+
+function countRowsBrickSpecs(rows: unknown): number {
+  if (!Array.isArray(rows)) return 0;
+  let count = 0;
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue;
+    for (const cell of row) {
+      if (cell !== null && cell !== 0 && cell !== false) count += 1;
+    }
+  }
+  return count;
 }
 
 function normalizeLevelRows(raw: Record<string, unknown>, request: LevelRequest): BrickCell[][] | null {
@@ -294,6 +390,12 @@ export function describeDesignerIntent(intentInput: unknown): string {
   const difficulty = targets.difficultyLabel;
   const prompt = intent.brief ? `"${intent.brief}"` : "default prompt";
   return `${prompt} / ${difficulty} / ${Math.round(intent.density * 100)}% density / ${Math.round(intent.specialBias * 100)}% specials`;
+}
+
+/** Derive a fresh designer seed so each generation request varies run context. */
+export function nextDesignerSeed(seed: string, request: LevelRequest, nonce = Date.now()): string {
+  const mixed = hashText(`${seed}:${request.level}:${request.clearedLevels}:${request.score}:${nonce}`);
+  return `run-${mixed.toString(36)}`.slice(0, 36);
 }
 
 export function fallbackLevel(request: LevelRequest): LevelBlueprint {
