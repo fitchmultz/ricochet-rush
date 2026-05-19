@@ -174,7 +174,8 @@ export const ICON_DENSITY_CAP = 0.32;
 export const ICON_SPECIAL_BIAS_CAP = 0.35;
 /** Playable brick bounds for creative/silhouette SDK boards on the designer canvas. */
 export const MIN_SILHOUETTE_BRICKS = scalePackCountToDesigner(22);
-export const MAX_SILHOUETTE_BRICKS = scalePackCountToDesigner(48);
+/** Face/icon prompts stay sparse so outlines read; ~55 bricks max on the 20×12 canvas. */
+export const MAX_SILHOUETTE_BRICKS = scalePackCountToDesigner(29);
 export const MIN_RAW_SILHOUETTE_BRICKS = scalePackCountToDesigner(14);
 
 export function designerGridDimensions(): { columns: number; rows: number } {
@@ -520,14 +521,29 @@ export function validateCreativeFidelity(
         reason: `Silhouette prompt produced an overfilled wall (${brickCount} bricks; target at most ${MAX_SILHOUETTE_BRICKS}).`
       };
     }
-    if (classification.wantsNegativeSpace && centerRegionEmptyRatio(rows) < 0.28) {
+    const centerEmptyMin = isFaceSmileyBrief(text) ? 0.38 : 0.28;
+    if (classification.wantsNegativeSpace && centerRegionEmptyRatio(rows) < centerEmptyMin) {
       return { ok: false, reason: "Silhouette prompt needs more open center space for the motif to read." };
+    }
+    if (isFaceSmileyBrief(text) && hasOverconnectedHorizontalBand(rows)) {
+      return {
+        ok: false,
+        reason:
+          "Face layout uses a wide horizontal bar across the board; use a mouth arc with open cheeks instead of a crossbar ring."
+      };
     }
   }
 
-  if (/\b(face|smiley|smile|grin|emoji)\b/.test(text) && /\b(explod|bomb|blast|detonat)/.test(text)) {
+  if (isFaceSmileyBrief(text) && /\b(explod|bomb|blast|detonat)/.test(text)) {
     if (countKind(rows, "bomb") < 2) {
       return { ok: false, reason: "Face prompt with exploding eyes needs at least two bomb bricks." };
+    }
+    if (!hasSeparatedBombEyes(rows)) {
+      return {
+        ok: false,
+        reason:
+          "Exploding eyes must be two separated bomb features (left and right of center), not one center blob."
+      };
     }
   }
 
@@ -539,6 +555,38 @@ export function validateCreativeFidelity(
   }
 
   return { ok: true };
+}
+
+function isFaceSmileyBrief(text: string): boolean {
+  return /\b(face|smiley|smile|grin|emoji)\b/.test(text);
+}
+
+function hasSeparatedBombEyes(rows: BrickCell[][]): boolean {
+  const columns = rows[0]?.length ?? BRICK_COLUMNS;
+  const bombX: number[] = [];
+  for (let y = 0; y < rows.length; y += 1) {
+    for (let x = 0; x < columns; x += 1) {
+      if (rows[y][x]?.kind === "bomb") bombX.push(x);
+    }
+  }
+  if (bombX.length < 2) return false;
+  const minX = Math.min(...bombX);
+  const maxX = Math.max(...bombX);
+  const leftThird = Math.floor(columns / 3);
+  const rightStart = Math.ceil((columns * 2) / 3);
+  const inLeft = bombX.some((x) => x < leftThird);
+  const inRight = bombX.some((x) => x >= rightStart);
+  if (inLeft && inRight) return true;
+  return maxX - minX >= Math.max(4, Math.floor(columns * 0.28));
+}
+
+function hasOverconnectedHorizontalBand(rows: BrickCell[][]): boolean {
+  const columns = rows[0]?.length ?? BRICK_COLUMNS;
+  let densestRowFill = 0;
+  for (const row of rows) {
+    densestRowFill = Math.max(densestRowFill, row.filter(Boolean).length);
+  }
+  return densestRowFill >= Math.ceil(columns * 0.55);
 }
 
 function centerRegionEmptyRatio(rows: BrickCell[][]): number {

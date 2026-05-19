@@ -291,7 +291,7 @@ describe("Cursor SDK level generation contract", () => {
     expect(prompt).toContain("Brief guidance:");
     expect(prompt).toContain("Every occupied brick must be bomb.");
     expect(prompt).toContain("Silhouette mode");
-    expect(prompt).toContain("prefer 42-91 bricks");
+    expect(prompt).toContain(`prefer ${MIN_SILHOUETTE_BRICKS}-${MAX_SILHOUETTE_BRICKS} bricks`);
     expect(prompt).toContain('"grid"');
   });
 
@@ -306,9 +306,9 @@ describe("Cursor SDK level generation contract", () => {
     });
 
     expect(prompt).toContain("Visual preset: icon / silhouette");
-    expect(prompt).toContain("Exploding eyes should be bomb (o) cells");
+    expect(prompt).toContain("two separated bomb (o) cells");
     expect(prompt).not.toContain('"brick": "basic"');
-    expect(prompt).toContain("....bb........oo....");
+    expect(prompt).toContain("....oo............oo....");
     expect(prompt).toContain("Creative/silhouette prompt");
     expect(prompt).not.toContain("Target about 125 bricks");
   });
@@ -504,7 +504,53 @@ describe("Cursor SDK level generation contract", () => {
     );
     expect(dense.ok).toBe(false);
     if (dense.ok) return;
-    expect(dense.reason).toMatch(/overfilled|outside 42-91/);
+    expect(dense.reason).toMatch(/overfilled|outside \d+-\d+/);
+  });
+
+  it("rejects smiley boards with a single center bomb blob", () => {
+    const centerBlob = validateCreativeFidelity(
+      {
+        name: "Blob Eyes",
+        briefing: "Nope.",
+        paddleHint: "Retry.",
+        speed: 1,
+        rows: Array.from({ length: DESIGNER_BRICK_ROWS }, (_, y) =>
+          Array.from({ length: DESIGNER_BRICK_COLUMNS }, (_, x) => {
+            if (y >= 2 && y <= 3 && x >= 8 && x <= 11) return { kind: "bomb", hp: 1 } as const;
+            if (y === 5 && x >= 6 && x <= 13) return { kind: "basic", hp: 1 } as const;
+            return null;
+          })
+        )
+      },
+      "make a smiley face and the eyes are exploding bricks",
+      "icon"
+    );
+    expect(centerBlob.ok).toBe(false);
+    if (centerBlob.ok) return;
+    expect(centerBlob.reason).toContain("separated");
+  });
+
+  it("rejects smiley boards with a full-width horizontal bar", () => {
+    const bar = validateCreativeFidelity(
+      {
+        name: "Bar Face",
+        briefing: "Nope.",
+        paddleHint: "Retry.",
+        speed: 1,
+        rows: Array.from({ length: DESIGNER_BRICK_ROWS }, (_, y) =>
+          Array.from({ length: DESIGNER_BRICK_COLUMNS }, (_, x) => {
+            if (y === 5) return { kind: "basic", hp: 1 } as const;
+            if (y === 4 || y === 6) return x % 2 === 0 ? { kind: "basic", hp: 1 } as const : null;
+            return null;
+          })
+        )
+      },
+      "make a smiley face and the eyes are exploding bricks",
+      "icon"
+    );
+    expect(bar.ok).toBe(false);
+    if (bar.ok) return;
+    expect(bar.reason).toContain("horizontal bar");
   });
 
   it("lowers density for icon preset and silhouette briefs", () => {
@@ -538,8 +584,10 @@ describe("Cursor SDK level generation contract", () => {
         speed: 1,
         rows: Array.from({ length: DESIGNER_BRICK_ROWS }, (_, y) =>
           Array.from({ length: DESIGNER_BRICK_COLUMNS }, (_, x) => {
-            if (y === 2 && (x === 5 || x === 14)) return { kind: "bomb", hp: 1 } as const;
+            if (y === 2 && x === 4) return { kind: "bomb", hp: 1 } as const;
+            if (y === 2 && x === 15) return { kind: "bomb", hp: 1 } as const;
             if (y === 3 && x >= 5 && x <= 14) return { kind: "basic", hp: 1 } as const;
+            if (y === 6 && x >= 6 && x <= 13) return { kind: "basic", hp: 1 } as const;
             return null;
           })
         )

@@ -283,16 +283,16 @@ const ARCADE_EXAMPLE_GRID = `"brick": "basic",
 
 const SILHOUETTE_EXAMPLE_GRID = `"grid": [
     "${DESIGNER_PAD}",
-    "....bb........oo....",
-    "....bb........oo....",
-    "...bb..........bb...",
-    "..bbbbbbbbbbbbbb....",
-    "...bbbbbbbbbbbb.....",
-    "....bbbb..bbbb......",
-    ".....bbbbbb.........",
-    "......bbbb..........",
-    ".......bb...........",
-    "........b...........",
+    "....oo............oo....",
+    "....bb............bb....",
+    "...bb..............bb...",
+    "........................",
+    "..bb..........bb........",
+    "...bb........bb.........",
+    "....bb......bb..........",
+    ".....bbbbbb...........",
+    "......bb..bb..........",
+    ".......bb.............",
     "${DESIGNER_PAD}"
   ]`;
 
@@ -565,7 +565,12 @@ function describeBriefGuidance(brief: string, visualPreset: "arcade" | "icon" = 
     hints.push(`Use ${analysis.preferredKind} only for the feature the prompt calls for; fill the rest with basic unless mixed grid is clearer.`);
   }
   if (/\b(eyes?)\b/i.test(brief) && analysis.mentionedKinds.includes("bomb")) {
-    hints.push("Exploding eyes should be bomb (o) cells at the eye positions only.");
+    hints.push(
+      "Exploding eyes must be two separated bomb (o) cells: one on the left side of the face and one on the right, not a single center blob."
+    );
+  }
+  if (/\b(face|smiley|smile|grin|emoji)\b/i.test(brief)) {
+    hints.push("Use a mouth arc or smile curve with open cheeks; do not bridge the whole board with one horizontal bar.");
   }
   return hints.length > 0 ? hints.join(" ") : "Follow the player brief literally for layout, motif, and brick placement.";
 }
