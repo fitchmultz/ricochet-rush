@@ -22,3 +22,5 @@ node_modules/
 .cueloop/webhooks/
 .cueloop/trust.json
 .cueloop/trust.jsonc
+
+.debug/
