@@ -10,7 +10,6 @@ import {
   type LevelResponse,
   fallbackLevel,
   nextDesignerSeed,
-  normalizeDesignerIntent,
   resolveDesignerIntentForGeneration,
   levelGridDimensions,
   designerTargets,
@@ -31,16 +30,12 @@ import {
   markPackBoardCleared,
   materializeAuthoredBoard,
   materializeDailyBoard,
-  normalizeDailyProgress,
-  normalizePackProgress,
-  normalizeSavedBoards,
   previewRowsFromLevel,
   trimSavedBoards
 } from "../../shared/boardPacks";
 import { createBoardExportPayload, encodeBoardExport, parseBoardExport } from "../../shared/shareState";
 import { gameEvent, gameEventsToStrings, type GameEventAudience, type GameEventRecord } from "../../shared/gameEvents";
-import { clamp, escapeAttribute, escapeHtml } from "../../shared/util";
-import { trapFocus } from "../ui/focusTrap";
+import { clamp } from "../../shared/util";
 import {
   DEFAULT_COSMETICS,
   DEFAULT_SETTINGS,
@@ -51,7 +46,6 @@ import {
   type SavedBallState,
   type SavedBrick,
   type SavedRunStats,
-  normalizeCosmetics,
   normalizeSaveState,
   normalizeSettings
 } from "../../shared/saveState";
@@ -70,324 +64,114 @@ import {
 } from "./physics";
 import { penaltyPowerupPool, powerupToneFor, prizePowerupPool, type PowerupKind, type PowerupPoolInput, type PowerupTone } from "./powerups";
 import { LAUNCH_LOSS_GRACE_SECONDS } from "./tuning";
-
-interface Ball {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  radius: number;
-  stuck: boolean;
-  stuckOffset: number;
-  fireTimer: number;
-  thruTimer: number;
-  megaTimer: number;
-}
-
-interface Brick {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  kind: BrickKind;
-  hp: number;
-  maxHp: number;
-}
-
-interface Powerup {
-  x: number;
-  y: number;
-  vy: number;
-  kind: PowerupKind;
-}
-
-interface Spark {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  life: number;
-  color: string;
-  gravity: number;
-  size: number;
-}
-
-interface SparkBurstOptions {
-  minSpeed: number;
-  maxSpeed: number;
-  minLife: number;
-  maxLife: number;
-  minSize: number;
-  maxSize: number;
-  gravity: number;
-  ring: boolean;
-}
-
-interface FloatingText {
-  id: number;
-  x: number;
-  y: number;
-  text: string;
-  life: number;
-  duration: number;
-  kind: "score" | "combo" | "status" | "powerupReward" | "powerupHazard" | "powerupVolatile";
-}
-
-interface LaserBeam {
-  x: number;
-  life: number;
-}
-
-interface PaddleHitDebug extends PaddleRebound {
-  hitZone: number;
-  paddleVelocityX: number;
-}
-
-interface LoopCorrectionDebug extends LoopRiskVelocity {
-  source: "wall" | "brick";
-  axis: "x" | "y";
-  beforeVx: number;
-  beforeVy: number;
-}
-
-type GamePhase = "loading" | "ready" | "playing" | "levelComplete" | "gameOver";
-
-type BoardContext =
-  | { source: "pack"; packId: string; boardIndex: number; dailyDateKey?: string }
-  | { source: "generated"; packId: null; boardIndex: 0 };
-
-interface BoardTheme {
-  scene: string;
-  floor: string;
-  wall: string;
-  wallGlow: string;
-  rim: string;
-}
-
-interface RunStats {
-  runStartedAt: number;
-  levelStartedAt: number;
-  scoreAtRunStart: number;
-  bestScoreAtRunStart: number;
-  bricksBroken: number;
-  longestCombo: number;
-  powerupsCaught: number;
-  boardsCleared: number;
-}
-
-interface SummaryStat {
-  label: string;
-  value: string;
-  tone?: "reward" | "neutral" | "warning";
-}
-
-interface SummaryAction {
-  label: string;
-  action: () => void;
-  primary?: boolean;
-  disabled?: boolean;
-}
-
-interface BrickVisualProfile {
-  rim: string;
-  shadow: string;
-  metalness: number;
-  roughness: number;
-  emissiveIntensity: number;
-  depthScale: number;
-  hpDepthBoost: number;
-  rimOpacity: number;
-  impactGlow: number;
-  wobble: number;
-}
-
-interface BallVisual {
-  glow: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
-  trail: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>;
-}
-
-const WIDTH = 960;
-const HEIGHT = 640;
-const WALL = 18;
-const BRICK_GAP = 5;
-const BRICK_TOP = 72;
-const BRICK_WIDTH = (WIDTH - WALL * 2 - BRICK_GAP * (BRICK_COLUMNS - 1)) / BRICK_COLUMNS;
-const BRICK_HEIGHT = 28;
-
-interface LevelLayout {
-  columns: number;
-  rows: number;
-  brickWidth: number;
-  brickHeight: number;
-}
-
-function computeLevelLayout(level: LevelBlueprint): LevelLayout {
-  const { columns, rows } = levelGridDimensions(level);
-  const brickWidth = (WIDTH - WALL * 2 - BRICK_GAP * (columns - 1)) / columns;
-  const availableHeight = PADDLE_Y - BRICK_TOP - BRICK_GAP;
-  const brickHeight = Math.min(BRICK_HEIGHT, Math.floor((availableHeight - BRICK_GAP * Math.max(0, rows - 1)) / Math.max(1, rows)));
-  return { columns, rows, brickWidth, brickHeight };
-}
-const PADDLE_Y = HEIGHT - 52;
-const PADDLE_SPEED = 620;
-const MAX_PADDLE_VELOCITY = 920;
-const MAX_BALL_SPEED = 860;
-const MIN_COLLISION_X_RATIO = 0.16;
-const MIN_COLLISION_Y_RATIO = 0.16;
-const POWERUP_ATLAS_COLUMNS = 5;
-const POWERUP_ATLAS_ROWS = 4;
-const SAVE_KEY = "ricochet-rush-save";
-const SETTINGS_KEY = "ricochet-rush-settings";
-const COSMETICS_KEY = "ricochet-rush-cosmetics";
-const SIDEBAR_COLLAPSED_KEY = "ricochet-rush-sidebar-collapsed";
-const BEST_SCORE_KEY = "ricochet-rush-best-score";
-const PACK_PROGRESS_KEY = "ricochet-rush-pack-progress";
-const DAILY_PROGRESS_KEY = "ricochet-rush-daily-progress";
-const SAVED_BOARDS_KEY = "ricochet-rush-saved-boards";
-const SAVED_BOARDS_MAX = 24;
-const DESIGNER_INTENT_KEY = "ricochet-rush-designer-intent";
-const POWERUP_PRIMER_DISMISSED_KEY = "ricochet-rush-powerup-primer-dismissed";
-const POWER_DURATIONS: Record<string, number> = {
-  Laser: 8,
-  Grab: 12,
-  Fire: 10,
-  Thru: 10,
-  Mega: 12
-};
-const BOARD_THEMES: Record<string, BoardTheme> = {
-  starter: { scene: "#050910", floor: "#07111d", wall: "#183a3d", wallGlow: "#4ecdc4", rim: "#7ef1ff" },
-  classic: { scene: "#090b13", floor: "#0e1320", wall: "#222d48", wallGlow: "#8e7dff", rim: "#d6ff4d" },
-  chaos: { scene: "#11080c", floor: "#180f15", wall: "#3a1621", wallGlow: "#ff5c7a", rim: "#ffe066" },
-  precision: { scene: "#06100f", floor: "#081816", wall: "#173d38", wallGlow: "#b6fffa", rim: "#7bf1a8" },
-  "boss-rush": { scene: "#120b06", floor: "#1b100a", wall: "#4a260d", wallGlow: "#ff9f43", rim: "#ff5c7a" },
-  "saved-designs": { scene: "#080b14", floor: "#101521", wall: "#26314b", wallGlow: "#ffe066", rim: "#7ef1ff" },
-  generated: { scene: "#070912", floor: "#0d1320", wall: "#142a44", wallGlow: "#7ef1ff", rim: "#ff4d8d" }
-};
-
-const COLORS: Record<BrickKind, string> = {
-  basic: "#4ecdc4",
-  hard: "#7d8ca3",
-  bomb: "#ff5c5c",
-  prize: "#7bf1a8",
-  penalty: "#b23a48",
-  laser: "#ff4d8d",
-  grab: "#b6fffa",
-  fire: "#ff7a2f",
-  thru: "#d6ff4d",
-  split: "#ffe066",
-  wide: "#7bf1a8",
-  slow: "#8e7dff",
-  boss: "#ff9f43"
-};
-
-const BRICK_VISUALS: Record<BrickKind, BrickVisualProfile> = {
-  basic: { rim: "#bffcf8", shadow: "#082a2a", metalness: 0.54, roughness: 0.24, emissiveIntensity: 0.26, depthScale: 1.08, hpDepthBoost: 0.16, rimOpacity: 0.5, impactGlow: 0.75, wobble: 0 },
-  hard: { rim: "#d5e4ff", shadow: "#0b1324", metalness: 0.9, roughness: 0.16, emissiveIntensity: 0.18, depthScale: 1.34, hpDepthBoost: 0.2, rimOpacity: 0.7, impactGlow: 0.72, wobble: 0 },
-  bomb: { rim: "#ffd3d3", shadow: "#431015", metalness: 0.62, roughness: 0.18, emissiveIntensity: 0.5, depthScale: 1.2, hpDepthBoost: 0.22, rimOpacity: 0.76, impactGlow: 1.24, wobble: 0.04 },
-  prize: { rim: "#ddffe9", shadow: "#07321d", metalness: 0.44, roughness: 0.22, emissiveIntensity: 0.42, depthScale: 1.14, hpDepthBoost: 0.18, rimOpacity: 0.72, impactGlow: 0.9, wobble: 0.012 },
-  penalty: { rim: "#ffadbd", shadow: "#2b0710", metalness: 0.58, roughness: 0.28, emissiveIntensity: 0.3, depthScale: 1.1, hpDepthBoost: 0.16, rimOpacity: 0.62, impactGlow: 1.0, wobble: 0.018 },
-  laser: { rim: "#ffc6e2", shadow: "#381025", metalness: 0.68, roughness: 0.16, emissiveIntensity: 0.46, depthScale: 1.16, hpDepthBoost: 0.18, rimOpacity: 0.76, impactGlow: 1.0, wobble: 0.012 },
-  grab: { rim: "#ecfffd", shadow: "#0c3538", metalness: 0.46, roughness: 0.2, emissiveIntensity: 0.42, depthScale: 1.12, hpDepthBoost: 0.18, rimOpacity: 0.72, impactGlow: 0.92, wobble: 0.01 },
-  fire: { rim: "#ffd5a8", shadow: "#401708", metalness: 0.62, roughness: 0.2, emissiveIntensity: 0.48, depthScale: 1.18, hpDepthBoost: 0.18, rimOpacity: 0.74, impactGlow: 1.04, wobble: 0.014 },
-  thru: { rim: "#fbffbd", shadow: "#2d3308", metalness: 0.5, roughness: 0.18, emissiveIntensity: 0.46, depthScale: 1.12, hpDepthBoost: 0.16, rimOpacity: 0.7, impactGlow: 0.94, wobble: 0.008 },
-  split: { rim: "#fff2af", shadow: "#3b2f08", metalness: 0.48, roughness: 0.22, emissiveIntensity: 0.44, depthScale: 1.12, hpDepthBoost: 0.18, rimOpacity: 0.7, impactGlow: 0.92, wobble: 0.01 },
-  wide: { rim: "#ddffe9", shadow: "#07321d", metalness: 0.42, roughness: 0.2, emissiveIntensity: 0.42, depthScale: 1.16, hpDepthBoost: 0.18, rimOpacity: 0.72, impactGlow: 0.92, wobble: 0.008 },
-  slow: { rim: "#d8d1ff", shadow: "#161139", metalness: 0.56, roughness: 0.2, emissiveIntensity: 0.4, depthScale: 1.12, hpDepthBoost: 0.16, rimOpacity: 0.72, impactGlow: 0.9, wobble: 0.008 },
-  boss: { rim: "#ffe0ad", shadow: "#4a2305", metalness: 0.88, roughness: 0.12, emissiveIntensity: 0.58, depthScale: 1.72, hpDepthBoost: 0.42, rimOpacity: 0.9, impactGlow: 1.28, wobble: 0.016 }
-};
-
-const BALL_TRAIL_MIN_SPEED = 80;
-const DEFAULT_SPARK_BURST: SparkBurstOptions = {
-  minSpeed: 60,
-  maxSpeed: 220,
-  minLife: 0.34,
-  maxLife: 0.72,
-  minSize: 3.4,
-  maxSize: 5.8,
-  gravity: 220,
-  ring: false
-};
-const BRICK_BURST_SCALE: Record<BrickKind, { chip: number; crumble: number; speed: number; size: number; ring: boolean }> = {
-  basic: { chip: 12, crumble: 28, speed: 1, size: 1, ring: false },
-  hard: { chip: 18, crumble: 36, speed: 0.85, size: 1.2, ring: false },
-  bomb: { chip: 18, crumble: 54, speed: 1.35, size: 1.25, ring: true },
-  prize: { chip: 16, crumble: 36, speed: 1.08, size: 1.1, ring: false },
-  penalty: { chip: 18, crumble: 40, speed: 1.16, size: 1.12, ring: false },
-  laser: { chip: 16, crumble: 38, speed: 1.14, size: 1.08, ring: false },
-  grab: { chip: 16, crumble: 34, speed: 1.04, size: 1.08, ring: false },
-  fire: { chip: 18, crumble: 42, speed: 1.2, size: 1.12, ring: false },
-  thru: { chip: 16, crumble: 34, speed: 1.04, size: 1.06, ring: false },
-  split: { chip: 16, crumble: 36, speed: 1.08, size: 1.08, ring: false },
-  wide: { chip: 16, crumble: 34, speed: 1.04, size: 1.08, ring: false },
-  slow: { chip: 16, crumble: 34, speed: 0.95, size: 1.08, ring: false },
-  boss: { chip: 30, crumble: 72, speed: 1.18, size: 1.45, ring: true }
-};
-
-const POWERUP_ORDER: PowerupKind[] = [
-  "expandPaddle",
-  "shrinkPaddle",
-  "superShrink",
-  "splitBall",
-  "eightBall",
-  "megaBall",
-  "slowBall",
-  "fastBall",
-  "fireball",
-  "thruBrick",
-  "shootingPaddle",
-  "grabPaddle",
-  "extraLife",
-  "levelWarp",
-  "zapBricks",
-  "fallingBricks",
-  "setOffExploding",
-  "expandExploding",
-  "killPaddle",
-  "shrinkBall"
-];
-
-const POWERUP_NAMES: Record<PowerupKind, string> = {
-  expandPaddle: "Expand paddle",
-  shrinkPaddle: "Shrink paddle",
-  superShrink: "Super shrink",
-  splitBall: "Split ball",
-  eightBall: "Eight ball",
-  megaBall: "Mega ball",
-  slowBall: "Slow ball",
-  fastBall: "Fast ball",
-  fireball: "Fireball",
-  thruBrick: "Thru-brick",
-  shootingPaddle: "Shooting paddle",
-  grabPaddle: "Grab paddle",
-  extraLife: "Extra life",
-  levelWarp: "Level warp",
-  zapBricks: "Zap bricks",
-  fallingBricks: "Falling bricks",
-  setOffExploding: "Set off bombs",
-  expandExploding: "Bigger blasts",
-  killPaddle: "Kill paddle",
-  shrinkBall: "Shrink ball"
-};
-
-const POWERUP_VISUALS: Record<PowerupTone, { tint: string; emissive: string; spark: string; floatingKind: FloatingText["kind"] }> = {
-  reward: { tint: "#7bf1a8", emissive: "#28e68a", spark: "#7bf1a8", floatingKind: "powerupReward" },
-  hazard: { tint: "#ff5c7a", emissive: "#ff244c", spark: "#ff5c7a", floatingKind: "powerupHazard" },
-  volatile: { tint: "#ffe066", emissive: "#ff9f43", spark: "#ffe066", floatingKind: "powerupVolatile" }
-};
+import {
+  BRICK_GAP,
+  BRICK_HEIGHT,
+  BRICK_TOP,
+  BRICK_WIDTH,
+  HEIGHT,
+  MAX_BALL_SPEED,
+  MAX_PADDLE_VELOCITY,
+  MIN_COLLISION_X_RATIO,
+  MIN_COLLISION_Y_RATIO,
+  PADDLE_SPEED,
+  PADDLE_Y,
+  WALL,
+  WIDTH,
+  bricksFitLevel,
+  circleRect,
+  computeLevelLayout,
+  materializeLevelBricks
+} from "./gameArena";
+import type {
+  Ball,
+  Brick,
+  BoardContext,
+  FloatingText,
+  GamePhase,
+  LaserBeam,
+  LevelLayout,
+  LoopCorrectionDebug,
+  PaddleHitDebug,
+  Powerup,
+  RunStats,
+  Spark,
+  SparkBurstOptions,
+  SummaryAction
+} from "./gameEntityTypes";
+import {
+  BEST_SCORE_KEY,
+  COSMETICS_KEY,
+  DAILY_PROGRESS_KEY,
+  DESIGNER_INTENT_KEY,
+  PACK_PROGRESS_KEY,
+  POWERUP_PRIMER_DISMISSED_KEY,
+  SAVED_BOARDS_KEY,
+  SAVED_BOARDS_MAX,
+  SAVE_KEY,
+  SETTINGS_KEY,
+  SIDEBAR_COLLAPSED_KEY,
+  actionControlTarget,
+  isArenaPointerTarget,
+  isEditableTarget,
+  normalizeBoolean,
+  normalizeCosmetics,
+  normalizeDailyProgress,
+  normalizeDesignerIntent,
+  normalizePackProgress,
+  normalizeSavedBoards,
+  readBestScore,
+  readJson,
+  readSave,
+  readSettings,
+  toSavedBall,
+  toSavedBrick,
+  writeBestScore,
+  writeJson
+} from "./gameLocalStorage";
+import {
+  buildHudUpdateSignature,
+  clampCosmetics,
+  collectActivePowers,
+  collectCosmeticOptions
+} from "./gameHudBridge";
+import { GameOverlay } from "./gameOverlay";
+import { buildRunSummaryStats, collectPackItems, nextLevelCompleteStep, packNameFor } from "./gamePackCatalog";
+import {
+  authoredBoardRequestForSaved,
+  boardThemeFor,
+  brickAudioOptions,
+  cloneLevelBlueprint,
+  createRunStats,
+  drawScoreCardPreview,
+  formatRunDuration,
+  fromSavedRunStats,
+  pick,
+  pickupLabelFor,
+  powerupAudioOptions,
+  powerupVisualFor,
+  savedBoardIndexFromPackId,
+  savedBoardPackId,
+  soundForBrickDestroy,
+  soundForPowerup,
+  toSavedRunStats
+} from "./gameRuntimeHelpers";
+import { GameSceneView, type SceneFrame } from "./gameSceneView";
+import {
+  BALL_TRAIL_MIN_SPEED,
+  BRICK_BURST_SCALE,
+  BRICK_VISUALS,
+  COLORS,
+  DEFAULT_SPARK_BURST,
+  POWERUP_NAMES,
+  POWER_DURATIONS
+} from "./gameVisualConfig";
 
 export class RicochetRushGame {
   private readonly mount: HTMLDivElement;
   private readonly hud: HudApi;
-  private readonly renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", preserveDrawingBuffer: true });
-  private readonly scene = new THREE.Scene();
-  private readonly camera = new THREE.OrthographicCamera(-WIDTH / 2, WIDTH / 2, HEIGHT / 2, -HEIGHT / 2, 1, 1800);
-  private readonly board = new THREE.Group();
-  private readonly backgroundGroup = new THREE.Group();
-  private readonly bricksGroup = new THREE.Group();
-  private readonly ballsGroup = new THREE.Group();
-  private readonly powerupsGroup = new THREE.Group();
-  private readonly lasersGroup = new THREE.Group();
-  private readonly sparksGroup = new THREE.Group();
+  private readonly sceneView: GameSceneView;
+  private readonly gameOverlay: GameOverlay;
   private readonly overlay = document.createElement("div");
   private readonly effectsLayer = document.createElement("div");
   private readonly keys = new Set<string>();
@@ -396,46 +180,7 @@ export class RicochetRushGame {
   private readonly sparks: Spark[] = [];
   private readonly floatingTexts: FloatingText[] = [];
   private readonly laserBeams: LaserBeam[] = [];
-  private readonly brickMeshes = new Map<Brick, THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>>();
-  private readonly brickRims = new Map<Brick, THREE.LineSegments<THREE.EdgesGeometry, THREE.LineBasicMaterial>>();
-  private readonly brickShadows = new Map<Brick, THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>>();
-  private readonly ballMeshes = new Map<Ball, THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMaterial>>();
-  private readonly ballVisuals = new Map<Ball, BallVisual>();
-  private readonly powerupObjects = new Map<Powerup, THREE.Object3D>();
-  private readonly laserObjects = new Map<LaserBeam, THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>>();
   private readonly brickImpactTimers = new Map<Brick, number>();
-  private readonly floatingTextNodes = new Map<number, HTMLDivElement>();
-  private readonly brickGeometry = new THREE.BoxGeometry(BRICK_WIDTH, BRICK_HEIGHT, 22, 2, 2, 1);
-  private readonly brickRimGeometry = new THREE.EdgesGeometry(this.brickGeometry, 28);
-  private readonly brickShadowGeometry = new THREE.PlaneGeometry(BRICK_WIDTH * 1.16, BRICK_HEIGHT * 1.42);
-  private readonly paddleGeometry = new THREE.BoxGeometry(1, 1, 1, 3, 1, 1);
-  private readonly paddleGlowGeometry = new THREE.BoxGeometry(1, 1, 1, 1, 1, 1);
-  private readonly paddleSpecularGeometry = new THREE.BoxGeometry(1, 1, 1, 1, 1, 1);
-  private readonly ballGeometry = new THREE.SphereGeometry(1, 28, 18);
-  private readonly ballGlowGeometry = new THREE.SphereGeometry(1, 24, 12);
-  private readonly fallbackPowerupGeometry = new THREE.BoxGeometry(38, 24, 10, 2, 1, 1);
-  private readonly backdropMaterial = new THREE.MeshBasicMaterial({ color: "#07111d", transparent: true, opacity: 0.74, depthWrite: false });
-  private readonly backdropFogMaterial = new THREE.MeshBasicMaterial({ color: "#4ecdc4", transparent: true, opacity: 0.16, depthWrite: false, blending: THREE.AdditiveBlending });
-  private readonly backdropGridMaterial = new THREE.LineBasicMaterial({ color: "#7ef1ff", transparent: true, opacity: 0.24, depthWrite: false });
-  private readonly backdropStarMaterial = new THREE.PointsMaterial({ color: "#8aefff", size: 2.4, transparent: true, opacity: 0.66, sizeAttenuation: false, depthWrite: false });
-  private readonly floorMaterial = new THREE.MeshStandardMaterial({ color: "#07111d", metalness: 0.35, roughness: 0.58 });
-  private readonly wallMaterial = new THREE.MeshStandardMaterial({ color: "#18263a", emissive: "#4ecdc4", emissiveIntensity: 0.22, metalness: 0.74, roughness: 0.2 });
-  private readonly brickMaterials = new Map<BrickKind, THREE.MeshStandardMaterial>();
-  private readonly powerupMaterials = new Map<PowerupKind, THREE.SpriteMaterial>();
-  private readonly fallbackPowerupMaterials = new Map<PowerupTone, THREE.MeshStandardMaterial>();
-  private readonly paddleGlowMaterial = new THREE.MeshBasicMaterial({ color: "#7ef1ff", transparent: true, opacity: 0.28, depthWrite: false, blending: THREE.AdditiveBlending });
-  private readonly paddleSpecularMaterial = new THREE.MeshBasicMaterial({ color: "#ffffff", transparent: true, opacity: 0.34, depthWrite: false, blending: THREE.AdditiveBlending });
-  private readonly rimLight = new THREE.PointLight("#ff4d8d", 1.8, 940);
-  private readonly paddleMesh = new THREE.Mesh(
-    this.paddleGeometry,
-    new THREE.MeshStandardMaterial({ color: "#e9ffff", emissive: "#35f3ff", emissiveIntensity: 0.45, metalness: 0.82, roughness: 0.18 })
-  );
-  private readonly paddleGlowMesh = new THREE.Mesh(this.paddleGlowGeometry, this.paddleGlowMaterial);
-  private readonly paddleSpecularMesh = new THREE.Mesh(this.paddleSpecularGeometry, this.paddleSpecularMaterial);
-  private sparksPoints: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial> | null = null;
-  private sparksPositionBuffer: Float32Array | null = null;
-  private sparksColorBuffer: Float32Array | null = null;
-  private static readonly MAX_SPARKS = 180;
   private bricks: Brick[] = [];
   private levelBlueprint: LevelBlueprint = fallbackLevel({ level: 1, score: 0, lives: 3, clearedLevels: 0, recentEvents: [] });
   private levelLayout: LevelLayout = computeLevelLayout(fallbackLevel({ level: 1, score: 0, lives: 3, clearedLevels: 0, recentEvents: [] }));
@@ -463,7 +208,6 @@ export class RicochetRushGame {
   private readonly fireExplodedThisTick = new Set<string>();
   private readonly impactRingTimeouts: number[] = [];
   private readonly screenFlashTimeouts: number[] = [];
-  private releaseOverlayFocusTrap: (() => void) | null = null;
   private loadingLevel = false;
   private hasSave = false;
   private autosaveSuppressed = false;
@@ -484,7 +228,6 @@ export class RicochetRushGame {
   private paddleFlashTimer = 0;
   private levelClearFlashTimer = 0;
   private lifeFlashTimer = 0;
-  private previouslyFocusedElement: HTMLElement | null = null;
   private readonly audio = createGameAudio();
   private savedBoards: SavedBoardEntry[] = [];
   private dailyProgress: DailyProgressState = normalizeDailyProgress(null);
@@ -504,7 +247,7 @@ export class RicochetRushGame {
     this.packProgress =
       readJson(PACK_PROGRESS_KEY, (input) => normalizePackProgress(input, this.savedBoards.length)) ?? normalizePackProgress(null, this.savedBoards.length);
     this.bestScore = Math.max(readBestScore(), readSave()?.bestScore ?? 0);
-    this.cosmetics = this.clampCosmetics(this.cosmetics);
+    this.cosmetics = clampCosmetics(this.cosmetics, this.hudSnapshot());
     const storedDesignerIntent = readJson(DESIGNER_INTENT_KEY, normalizeDesignerIntent);
     this.designerIntent = {
       ...DEFAULT_DESIGNER_INTENT,
@@ -513,23 +256,32 @@ export class RicochetRushGame {
     };
     this.sidebarCollapsed = readJson(SIDEBAR_COLLAPSED_KEY, normalizeBoolean) ?? false;
     this.powerupPrimerDismissed = readJson(POWERUP_PRIMER_DISMISSED_KEY, normalizeBoolean) ?? false;
-    this.setupRenderer();
-    this.setupScene();
-    this.loadPowerupAtlas();
+    this.sceneView = new GameSceneView(mount);
+    this.gameOverlay = new GameOverlay({
+      mount,
+      overlay: this.overlay,
+      closeToolPanel: () => this.hud.closeToolPanel()
+    });
+    this.sceneView.setupRenderer();
+    this.sceneView.setupScene();
+    this.sceneView.installPowerupAtlas(
+      () => this.pushEvent("Power-up icons are ready.", "technical"),
+      () => this.pushEvent("Power-up icons switched to simple gems.", "technical")
+    );
     this.bindHudActions();
     this.applySidebarClass();
   }
 
   start() {
-    this.renderer.domElement.dataset.testid = "ricochet-rush-canvas";
-    this.renderer.domElement.tabIndex = 0;
-    this.renderer.domElement.setAttribute("role", "application");
+    this.sceneView.renderer.domElement.dataset.testid = "ricochet-rush-canvas";
+    this.sceneView.renderer.domElement.tabIndex = 0;
+    this.sceneView.renderer.domElement.setAttribute("role", "application");
     this.updateCanvasLabel();
     this.effectsLayer.className = "game-effects";
     this.effectsLayer.setAttribute("aria-hidden", "true");
     this.overlay.className = "game-overlay";
     this.overlay.setAttribute("aria-live", "polite");
-    this.mount.replaceChildren(this.renderer.domElement, this.effectsLayer, this.overlay);
+    this.mount.replaceChildren(this.sceneView.renderer.domElement, this.effectsLayer, this.overlay);
     this.bindInput();
     const save = readSave();
     if (save) {
@@ -575,12 +327,12 @@ export class RicochetRushGame {
       dailyProgress: this.dailyProgress,
       todayKey: localDateKey(),
       activeDailyKey: this.boardContext.source === "pack" && this.boardContext.packId === DAILY_PACK_ID ? this.resolvedDailyDateKey() : null,
-      runStats: this.summaryStats("debug"),
+      runStats: buildRunSummaryStats("debug", this.score, this.bestScore, this.runStats),
       designerIntent: this.designerIntent,
       generationSummary: this.latestGenerationSummary,
       settings: this.settings,
       cosmetics: this.cosmetics,
-      cosmeticOptions: this.collectCosmeticOptions(),
+      cosmeticOptions: collectCosmeticOptions(this.hudSnapshot()),
       audio: this.audio.debugSnapshot(),
       effects: {
         sparks: this.sparks.length,
@@ -623,133 +375,6 @@ export class RicochetRushGame {
     this.audio.play("volatilePowerup", this.settings.sfxVolume, powerupAudioOptions("eightBall"));
   }
 
-  private setupRenderer() {
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setSize(WIDTH, HEIGHT, false);
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    this.scene.background = new THREE.Color("#050910");
-    this.camera.position.set(0, -48, 980);
-    this.camera.lookAt(0, 0, 0);
-  }
-
-  private setupScene() {
-    this.board.rotation.x = -0.08;
-    this.scene.add(this.board);
-    this.board.add(
-      this.backgroundGroup,
-      this.bricksGroup,
-      this.ballsGroup,
-      this.powerupsGroup,
-      this.lasersGroup,
-      this.sparksGroup,
-      this.paddleGlowMesh,
-      this.paddleMesh,
-      this.paddleSpecularMesh
-    );
-
-    const ambient = new THREE.AmbientLight("#bfd8ff", 1.38);
-    const key = new THREE.DirectionalLight("#ffffff", 2.75);
-    key.position.set(-290, 330, 820);
-    key.castShadow = true;
-    key.shadow.mapSize.width = 1536;
-    key.shadow.mapSize.height = 1536;
-    key.shadow.camera.near = 120;
-    key.shadow.camera.far = 1200;
-    this.rimLight.position.set(470, 125, 340);
-    this.scene.add(ambient, key, this.rimLight);
-    this.setupBackdrop();
-
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(WIDTH - WALL * 2, HEIGHT - WALL * 2), this.floorMaterial);
-    floor.position.set(0, 0, -20);
-    floor.receiveShadow = true;
-    this.board.add(floor);
-
-    const topWall = new THREE.Mesh(new THREE.BoxGeometry(WIDTH, 18, 34), this.wallMaterial);
-    topWall.position.copy(toWorld(WIDTH / 2, WALL / 2, 4));
-    const leftWall = new THREE.Mesh(new THREE.BoxGeometry(18, HEIGHT - WALL, 34), this.wallMaterial);
-    leftWall.position.copy(toWorld(WALL / 2, HEIGHT / 2, 4));
-    const rightWall = new THREE.Mesh(new THREE.BoxGeometry(18, HEIGHT - WALL, 34), this.wallMaterial);
-    rightWall.position.copy(toWorld(WIDTH - WALL / 2, HEIGHT / 2, 4));
-    const bottomWall = new THREE.Mesh(new THREE.BoxGeometry(WIDTH, 18, 18), this.wallMaterial);
-    bottomWall.position.copy(toWorld(WIDTH / 2, HEIGHT - WALL / 2, -2));
-    this.board.add(topWall, leftWall, rightWall, bottomWall);
-
-    for (const kind of Object.keys(COLORS) as BrickKind[]) {
-      const color = COLORS[kind];
-      const visual = BRICK_VISUALS[kind];
-      this.brickMaterials.set(
-        kind,
-        new THREE.MeshStandardMaterial({
-          color,
-          emissive: color,
-          emissiveIntensity: visual.emissiveIntensity,
-          metalness: visual.metalness,
-          roughness: visual.roughness
-        })
-      );
-    }
-    this.paddleMesh.castShadow = true;
-    this.paddleMesh.receiveShadow = true;
-    this.paddleGlowMesh.renderOrder = 2;
-    this.paddleSpecularMesh.renderOrder = 4;
-  }
-
-  private setupBackdrop() {
-    const field = new THREE.Mesh(new THREE.PlaneGeometry(WIDTH * 1.08, HEIGHT * 1.1), this.backdropMaterial);
-    field.position.set(0, 0, -72);
-    const fog = new THREE.Mesh(new THREE.PlaneGeometry(WIDTH * 0.96, HEIGHT * 0.54), this.backdropFogMaterial);
-    fog.position.set(0, 74, -16);
-    fog.scale.set(1, 1.18, 1);
-    this.backgroundGroup.add(field, fog, this.createBackdropGrid(), this.createStarfield());
-  }
-
-  private createBackdropGrid() {
-    const points: number[] = [];
-    const left = -WIDTH / 2 + WALL;
-    const right = WIDTH / 2 - WALL;
-    const top = HEIGHT / 2 - WALL;
-    const bottom = -HEIGHT / 2 + WALL;
-    for (let x = left; x <= right; x += 64) points.push(x, bottom, -15, x, top, -15);
-    for (let y = bottom; y <= top; y += 48) points.push(left, y, -15, right, y, -15);
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
-    return new THREE.LineSegments(geometry, this.backdropGridMaterial);
-  }
-
-  private createStarfield() {
-    const count = 260;
-    const positions = new Float32Array(count * 3);
-    for (let index = 0; index < count; index += 1) {
-      positions[index * 3] = pseudoRandom(index, 17) * WIDTH - WIDTH / 2;
-      positions[index * 3 + 1] = pseudoRandom(index, 41) * HEIGHT - HEIGHT / 2;
-      positions[index * 3 + 2] = -13 - pseudoRandom(index, 73) * 6;
-    }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    return new THREE.Points(geometry, this.backdropStarMaterial);
-  }
-
-  private loadPowerupAtlas() {
-    new THREE.TextureLoader().load(
-      "/assets/powerups.png",
-      (texture) => {
-        texture.colorSpace = THREE.SRGBColorSpace;
-        for (const [index, kind] of POWERUP_ORDER.entries()) {
-          const map = texture.clone();
-          const visual = powerupVisualFor(kind);
-          map.colorSpace = THREE.SRGBColorSpace;
-          map.repeat.set(1 / POWERUP_ATLAS_COLUMNS, 1 / POWERUP_ATLAS_ROWS);
-          map.offset.set((index % POWERUP_ATLAS_COLUMNS) / POWERUP_ATLAS_COLUMNS, 1 - (Math.floor(index / POWERUP_ATLAS_COLUMNS) + 1) / POWERUP_ATLAS_ROWS);
-          map.needsUpdate = true;
-          this.powerupMaterials.set(kind, new THREE.SpriteMaterial({ map, color: visual.tint, transparent: true }));
-        }
-        this.pushEvent("Power-up icons are ready.", "technical");
-      },
-      undefined,
-      () => this.pushEvent("Power-up icons switched to simple gems.", "technical")
-    );
-  }
 
   private bindInput() {
     const unlockAudio = () => {
@@ -789,7 +414,7 @@ export class RicochetRushGame {
     const applyPointerPaddle = (clientX: number) => {
       const now = performance.now();
       if (now < this.lastKeyboardAt) return;
-      const rect = this.renderer.domElement.getBoundingClientRect();
+      const rect = this.sceneView.renderer.domElement.getBoundingClientRect();
       const nextX = ((clientX - rect.left) / rect.width) * WIDTH;
       const elapsedSeconds = this.lastPointerAt > 0 ? (now - this.lastPointerAt) / 1000 : 1 / 60;
       this.lastPointerAt = now;
@@ -797,11 +422,11 @@ export class RicochetRushGame {
     };
     let activeTouchPointerId: number | null = null;
     const stage = this.mount.closest<HTMLElement>(".stage");
-    this.renderer.domElement.addEventListener("pointermove", (event) => {
+    this.sceneView.renderer.domElement.addEventListener("pointermove", (event) => {
       if (event.pointerType === "touch") return;
       applyPointerPaddle(event.clientX);
     });
-    this.renderer.domElement.addEventListener("pointerdown", (event) => {
+    this.sceneView.renderer.domElement.addEventListener("pointerdown", (event) => {
       applyPointerPaddle(event.clientX);
       if (event.pointerType === "touch") {
         event.preventDefault();
@@ -850,7 +475,7 @@ export class RicochetRushGame {
         event.preventDefault();
         this.keys.add(code);
         this.lastKeyboardAt = performance.now();
-        this.renderer.domElement.focus({ preventScroll: true });
+        this.sceneView.renderer.domElement.focus({ preventScroll: true });
       };
       const release = (event: Event) => {
         event.preventDefault();
@@ -866,12 +491,12 @@ export class RicochetRushGame {
     bindDirection("right", "ArrowRight");
     shell.querySelector<HTMLButtonElement>('[data-touch-action="primary"]')?.addEventListener("click", (event) => {
       event.preventDefault();
-      this.renderer.domElement.focus({ preventScroll: true });
+      this.sceneView.renderer.domElement.focus({ preventScroll: true });
       this.handlePrimaryAction();
     });
     shell.querySelector<HTMLButtonElement>('[data-touch-action="pause"]')?.addEventListener("click", (event) => {
       event.preventDefault();
-      this.renderer.domElement.focus({ preventScroll: true });
+      this.sceneView.renderer.domElement.focus({ preventScroll: true });
       this.togglePause();
     });
   }
@@ -904,7 +529,7 @@ export class RicochetRushGame {
         this.refreshHud("Settings updated.");
       },
       updateCosmetics: (cosmetics) => {
-        this.cosmetics = this.clampCosmetics(normalizeCosmetics(cosmetics));
+        this.cosmetics = clampCosmetics(normalizeCosmetics(cosmetics), this.hudSnapshot());
         writeJson(COSMETICS_KEY, this.cosmetics);
         this.applyBoardTheme();
         this.refreshHud("Cosmetics updated.");
@@ -1105,7 +730,7 @@ export class RicochetRushGame {
       return;
     }
     if (!this.canPlayPack(packId)) return;
-    const packName = this.packNameFor(packId);
+    const packName = packNameFor(packId);
     this.startPack(packId, `${packName} loaded.`);
   }
 
@@ -1265,7 +890,7 @@ export class RicochetRushGame {
     canvas.height = 540;
     const context = canvas.getContext("2d");
     if (!context) return { ok: false, message: "Score card unavailable in this browser." };
-    const stats = this.summaryStats(this.phase === "levelComplete" ? "clear" : "gameOver");
+    const stats = buildRunSummaryStats(this.phase === "levelComplete" ? "clear" : "gameOver", this.score, this.bestScore, this.runStats);
     const previewRows = previewRowsFromLevel(this.levelBlueprint);
     const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
     gradient.addColorStop(0, "#09121e");
@@ -1983,7 +1608,7 @@ export class RicochetRushGame {
     this.triggerHaptic([18, 24, 18]);
     this.shakeBoard(0.28, 2.6);
     this.saveCheckpoint("Level checkpoint saved.", false, "technical");
-    const nextStep = this.nextLevelCompleteStep(completedContext);
+    const nextStep = nextLevelCompleteStep(completedContext, this.level, this.packProgress, this.savedBoards.length);
     const actions: SummaryAction[] = [
       { label: nextStep.actionLabel, primary: true, action: () => void this.continueToNextLevel() },
       { label: "Retry Run", action: () => void this.restartRun() },
@@ -2008,7 +1633,7 @@ export class RicochetRushGame {
       const nextIndex = boardIndex + 1;
       const total = boardCountForPack(packId, this.savedBoards.length);
       if (nextIndex < total) {
-        this.loadPackBoard(packId, nextIndex, `${this.packNameFor(packId)} board ${nextIndex + 1} loaded.`);
+        this.loadPackBoard(packId, nextIndex, `${packNameFor(packId)} board ${nextIndex + 1} loaded.`);
         return;
       }
       const nextPack = getNextBuiltInPack(packId);
@@ -2038,7 +1663,7 @@ export class RicochetRushGame {
       return;
     }
     if (activePackId && this.canPlayPack(activePackId)) {
-      this.startPack(activePackId, `New run. Replaying ${this.packNameFor(activePackId)}.`);
+      this.startPack(activePackId, `New run. Replaying ${packNameFor(activePackId)}.`);
       return;
     }
     await this.fetchLevel("New run. Rebuilding Level 1.");
@@ -2155,111 +1780,9 @@ export class RicochetRushGame {
     };
   }
 
-  private nextLevelCompleteStep(context: BoardContext): { body: string; actionLabel: string; status: string } {
-    if (context.source === "pack") {
-      const total = boardCountForPack(context.packId, this.savedBoards.length);
-      if (context.boardIndex + 1 < total) {
-        return {
-          body: `Continue to board ${context.boardIndex + 2} in ${this.packNameFor(context.packId)}.`,
-          actionLabel: "Next Board",
-          status: "Level cleared. Next pack board is ready."
-        };
-      }
-      const nextPack = getNextBuiltInPack(context.packId);
-      if (nextPack && this.packProgress[nextPack.id]?.unlocked) {
-        return {
-          body: `${this.packNameFor(context.packId)} complete. Continue into ${nextPack.name}.`,
-          actionLabel: "Next Pack",
-          status: `${nextPack.name} unlocked.`
-        };
-      }
-      return {
-        body: `${this.packNameFor(context.packId)} complete. Continue to a generated board.`,
-        actionLabel: "Generate Board",
-        status: `${this.packNameFor(context.packId)} complete.`
-      };
-    }
-    return {
-      body: `The board is frozen. Continue when you want the Board Designer to generate Level ${this.level + 1}.`,
-      actionLabel: "Continue",
-      status: "Level cleared. Continue when ready."
-    };
-  }
-
-  private packNameFor(packId: string): string {
-    if (packId === DAILY_PACK_ID) return "Today's Board";
-    if (packId === SAVED_DESIGNS_PACK_ID) return "Saved Designs";
-    return getBuiltInPack(packId)?.name ?? "Board Pack";
-  }
-
-  private collectPackItems(): HudPackItem[] {
-    const todayKey = localDateKey();
-    const dailyLevel = materializeDailyBoard(todayKey);
-    const todayProgress = this.dailyProgress[todayKey] ?? { bestScore: 0, completed: false };
-    const dailyItem: HudPackItem = {
-      id: DAILY_PACK_ID,
-      name: "Today's Board",
-      description: `Local-only daily challenge for ${todayKey}. Same date, same app version, same board; no remote service needed.`,
-      progressLabel: todayProgress.completed ? "completed today" : "open today",
-      bestScore: todayProgress.bestScore,
-      unlocked: true,
-      active: this.boardContext.source === "pack" && this.boardContext.packId === DAILY_PACK_ID,
-      empty: false,
-      previewRows: previewRowsFromLevel(dailyLevel),
-      kind: "pack",
-      actionLabel: "Play daily"
-    };
-    const builtInItems = BUILT_IN_PACKS.map((pack) => {
-      const progress = this.packProgress[pack.id] ?? { cleared: 0, bestScore: 0, unlocked: pack.id === "starter" };
-      const previewIndex = progress.cleared >= pack.boards.length ? 0 : clamp(progress.cleared, 0, pack.boards.length - 1);
-      return {
-        id: pack.id,
-        name: pack.name,
-        description: pack.description,
-        progressLabel: progress.unlocked ? `${progress.cleared}/${pack.boards.length} cleared` : "locked",
-        bestScore: progress.bestScore,
-        unlocked: progress.unlocked,
-        active: this.boardContext.source === "pack" && this.boardContext.packId === pack.id,
-        empty: false,
-        previewRows: [...pack.boards[previewIndex].pattern],
-        kind: "pack" as const
-      };
-    });
-    const savedProgress = this.packProgress[SAVED_DESIGNS_PACK_ID] ?? { cleared: 0, bestScore: 0, unlocked: this.savedBoards.length > 0 };
-    const savedPreview = this.savedBoards[0] ? previewRowsFromLevel(this.savedBoards[0].levelBlueprint) : [];
-    const savedCollection: HudPackItem = {
-      id: SAVED_DESIGNS_PACK_ID,
-      name: "Saved Designs Gallery",
-      description: "Replay boards you kept from the Designer. New saves appear as cards below.",
-      progressLabel: this.savedBoards.length > 0 ? `${savedProgress.cleared}/${this.savedBoards.length} cleared` : "empty",
-      bestScore: savedProgress.bestScore,
-      unlocked: this.savedBoards.length > 0,
-      active: this.boardContext.source === "pack" && this.boardContext.packId === SAVED_DESIGNS_PACK_ID,
-      empty: this.savedBoards.length === 0,
-      previewRows: savedPreview,
-      kind: "pack",
-      actionLabel: "Browse"
-    };
-    const savedItems: HudPackItem[] = this.savedBoards.map((board, index) => ({
-      id: savedBoardPackId(index),
-      name: board.levelName,
-      description: "Saved generated board. Replay this layout, remix from its prompt, or discard later by keeping stronger designs.",
-      progressLabel: "saved design",
-      bestScore: board.bestScore,
-      unlocked: true,
-      active: this.boardContext.source === "pack" && this.boardContext.packId === SAVED_DESIGNS_PACK_ID && this.boardContext.boardIndex === index,
-      empty: false,
-      previewRows: previewRowsFromLevel(board.levelBlueprint),
-      kind: "saved-board",
-      sourcePrompt: board.sourcePrompt,
-      createdAt: board.createdAt,
-      actionLabel: "Replay saved board"
-    }));
-    return [dailyItem, ...builtInItems, savedCollection, ...savedItems];
-  }
 
   private refreshHud(status?: string) {
-    const signature = this.buildHudUpdateSignature(status);
+    const signature = buildHudUpdateSignature(this.hudSnapshot(status));
     if (!status && signature === this.hudUpdateSignature) return;
     this.hudUpdateSignature = signature;
     this.updateCanvasLabel();
@@ -2280,10 +1803,10 @@ export class RicochetRushGame {
       sidebarCollapsed: this.sidebarCollapsed,
       settings: this.settings,
       cosmetics: this.cosmetics,
-      cosmeticOptions: this.collectCosmeticOptions(),
-      activePowers: this.collectActivePowers(),
+      cosmeticOptions: collectCosmeticOptions(this.hudSnapshot()),
+      activePowers: collectActivePowers(this.hudSnapshot()),
       powerupPrimerDismissed: this.powerupPrimerDismissed,
-      packs: this.collectPackItems(),
+      packs: collectPackItems(this.packHudSnapshot()),
       canSaveBoard: this.boardContext.source === "generated" && this.bricks.length > 0,
       boardSource: this.boardContext.source,
       designer: {
@@ -2295,100 +1818,8 @@ export class RicochetRushGame {
     });
   }
 
-  private buildHudUpdateSignature(status?: string): string {
-    const ballFire = Math.max(0, ...this.balls.map((ball) => ball.fireTimer));
-    const ballThru = Math.max(0, ...this.balls.map((ball) => ball.thruTimer));
-    const ballMega = Math.max(0, ...this.balls.map((ball) => ball.megaTimer));
-    return [
-      status ?? "",
-      this.phase,
-      this.score,
-      this.bestScore,
-      this.lives,
-      this.level,
-      this.bricks.length,
-      this.combo.toFixed(2),
-      this.recentEvents.map((entry) => `${entry.audience}:${entry.text}`).join("|"),
-      this.announcement,
-      this.loadingLevel,
-      this.hasSave,
-      this.sidebarCollapsed,
-      Math.ceil(this.laserTimer),
-      Math.ceil(this.grabTimer),
-      Math.ceil(ballFire),
-      Math.ceil(ballThru),
-      Math.ceil(ballMega),
-      this.paddleWidth,
-      this.boardContext.source,
-      this.boardContext.packId ?? "",
-      this.designerIntent.brief,
-      this.latestGenerationSummary?.title ?? "",
-      this.powerupPrimerDismissed,
-      this.settings.sfxVolume,
-      this.settings.musicVolume,
-      this.settings.particles,
-      this.settings.reducedMotion,
-      this.settings.highContrast
-    ].join("§");
-  }
 
-  private updateCanvasLabel() {
-    this.renderer.domElement.setAttribute(
-      "aria-label",
-      `Ricochet Rush. ${this.phase}. Level ${this.level}. ${this.lives} lives. ${this.bricks.length} bricks remain.`
-    );
-    this.renderer.domElement.setAttribute(
-      "aria-keyshortcuts",
-      "ArrowLeft move left, ArrowRight move right, Space launch or continue, P pause, N design board, Escape close panels"
-    );
-  }
 
-  private collectCosmeticOptions() {
-    const anyPackComplete = BUILT_IN_PACKS.some((pack) => (this.packProgress[pack.id]?.cleared ?? 0) >= pack.boards.length);
-    const dailyComplete = Object.values(this.dailyProgress).some((progress) => progress.completed);
-    const sharedOrSaved = this.savedBoards.length > 0 || this.bestScore >= 5000;
-    return {
-      paddleSkins: [
-        { id: "classic" as const, label: "Classic Chrome", unlocked: true },
-        { id: "neon" as const, label: "Neon Circuit - clear a pack or daily", unlocked: anyPackComplete || dailyComplete },
-        { id: "gold" as const, label: "Gold Medal - keep a board or 5k best", unlocked: sharedOrSaved }
-      ],
-      ballTrails: [
-        { id: "classic" as const, label: "Classic Spark", unlocked: true },
-        { id: "comet" as const, label: "Comet - clear a pack or daily", unlocked: anyPackComplete || dailyComplete },
-        { id: "aurora" as const, label: "Aurora - keep a board or 5k best", unlocked: sharedOrSaved }
-      ],
-      boardBackplates: [
-        { id: "default" as const, label: "Default Arena", unlocked: true },
-        { id: "midnight" as const, label: "Midnight Grid - clear a pack or daily", unlocked: anyPackComplete || dailyComplete },
-        { id: "sunrise" as const, label: "Sunrise Vault - keep a board or 5k best", unlocked: sharedOrSaved }
-      ]
-    };
-  }
-
-  private clampCosmetics(cosmetics: GameCosmetics): GameCosmetics {
-    const options = this.collectCosmeticOptions();
-    return {
-      paddleSkin: options.paddleSkins.some((option) => option.id === cosmetics.paddleSkin && option.unlocked) ? cosmetics.paddleSkin : "classic",
-      ballTrail: options.ballTrails.some((option) => option.id === cosmetics.ballTrail && option.unlocked) ? cosmetics.ballTrail : "classic",
-      boardBackplate: options.boardBackplates.some((option) => option.id === cosmetics.boardBackplate && option.unlocked) ? cosmetics.boardBackplate : "default"
-    };
-  }
-
-  private collectActivePowers(): { label: string; seconds: number; maxSeconds: number; tone: PowerupTone }[] {
-    const rows: { label: string; seconds: number; maxSeconds: number; tone: PowerupTone }[] = [];
-    if (this.laserTimer > 0) rows.push({ label: "Laser", seconds: Math.ceil(this.laserTimer), maxSeconds: POWER_DURATIONS.Laser, tone: powerupToneFor("shootingPaddle") });
-    if (this.grabTimer > 0) rows.push({ label: "Grab", seconds: Math.ceil(this.grabTimer), maxSeconds: POWER_DURATIONS.Grab, tone: powerupToneFor("grabPaddle") });
-    if (this.balls.length > 0) {
-      const fire = Math.max(0, ...this.balls.map((ball) => ball.fireTimer));
-      const thru = Math.max(0, ...this.balls.map((ball) => ball.thruTimer));
-      const mega = Math.max(0, ...this.balls.map((ball) => ball.megaTimer));
-      if (fire > 0) rows.push({ label: "Fire", seconds: Math.ceil(fire), maxSeconds: POWER_DURATIONS.Fire, tone: powerupToneFor("fireball") });
-      if (thru > 0) rows.push({ label: "Thru", seconds: Math.ceil(thru), maxSeconds: POWER_DURATIONS.Thru, tone: powerupToneFor("thruBrick") });
-      if (mega > 0) rows.push({ label: "Mega", seconds: Math.ceil(mega), maxSeconds: POWER_DURATIONS.Mega, tone: powerupToneFor("megaBall") });
-    }
-    return rows.slice(0, 5);
-  }
 
   private pushEvent(event: string, audience: GameEventAudience = "player") {
     this.recentEvents.unshift(gameEvent(event, audience));
@@ -2453,23 +1884,6 @@ export class RicochetRushGame {
     shell?.classList.toggle("is-reduced-motion", this.settings.reducedMotion);
   }
 
-  private applyBoardTheme() {
-    const theme = boardThemeFor(this.boardContext);
-    const backplate = boardBackplateCosmetic(this.cosmetics.boardBackplate, theme, this.settings.highContrast);
-    this.scene.background = new THREE.Color(backplate.scene);
-    this.floorMaterial.color.set(backplate.floor);
-    this.wallMaterial.color.set(theme.wall);
-    this.wallMaterial.emissive.set(backplate.wallGlow);
-    this.backdropMaterial.color.set(backplate.floor);
-    this.backdropFogMaterial.color.set(backplate.wallGlow);
-    this.backdropGridMaterial.color.set(backplate.rim);
-    this.backdropStarMaterial.color.set(backplate.rim);
-    this.rimLight.color.set(backplate.rim);
-    const stage = this.mount.closest<HTMLElement>(".stage");
-    stage?.style.setProperty("--stage-border-color", `${theme.wallGlow}66`);
-    stage?.style.setProperty("--stage-glow-color", `${theme.wallGlow}2f`);
-  }
-
   private setSidebarCollapsed(collapsed: boolean) {
     this.sidebarCollapsed = collapsed;
     this.applySidebarClass();
@@ -2483,365 +1897,6 @@ export class RicochetRushGame {
     shell.classList.toggle("is-sidebar-collapsed", this.sidebarCollapsed);
   }
 
-  private render() {
-    this.syncBricks();
-    this.syncPaddle();
-    this.syncBalls();
-    this.syncPowerups();
-    this.syncLasers();
-    this.syncSparks();
-    this.syncFloatingTexts();
-    const now = performance.now();
-    const shake = this.boardShakeTimer > 0 && !this.settings.reducedMotion ? (Math.random() - 0.5) * this.boardShakeStrength : 0;
-    this.board.rotation.z = this.settings.reducedMotion ? 0 : Math.sin(now / 3600) * 0.006 + shake * 0.002;
-    this.board.position.x = shake;
-    this.board.position.y = this.levelClearFlashTimer > 0 && !this.settings.reducedMotion ? Math.sin(now / 38) * 1.2 : 0;
-    this.backgroundGroup.rotation.z = this.settings.reducedMotion ? 0 : Math.sin(now / 12000) * 0.004;
-    this.backgroundGroup.position.x = this.settings.reducedMotion ? 0 : Math.sin(now / 9000) * 3.2;
-    this.backgroundGroup.position.y = this.settings.reducedMotion ? 0 : Math.cos(now / 11000) * 2.2;
-    this.renderer.render(this.scene, this.camera);
-  }
-
-  private syncBricks() {
-    for (const [brick, mesh] of this.brickMeshes) {
-      if (!this.bricks.includes(brick)) {
-        this.bricksGroup.remove(mesh);
-        mesh.material.dispose();
-        this.brickMeshes.delete(brick);
-        this.removeBrickAccents(brick);
-      }
-    }
-    const now = performance.now();
-    for (const brick of this.bricks) {
-      const visual = BRICK_VISUALS[brick.kind];
-      let mesh = this.brickMeshes.get(brick);
-      let rim = this.brickRims.get(brick);
-      let shadow = this.brickShadows.get(brick);
-      if (!mesh) {
-        const template = this.brickMaterials.get(brick.kind) ?? this.brickMaterials.get("basic");
-        if (!template) continue;
-        const material = template.clone();
-        mesh = new THREE.Mesh(this.brickGeometry, material);
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        mesh.renderOrder = 2;
-        rim = new THREE.LineSegments(
-          this.brickRimGeometry,
-          new THREE.LineBasicMaterial({ color: visual.rim, transparent: true, opacity: visual.rimOpacity, depthWrite: false })
-        );
-        rim.renderOrder = 3;
-        shadow = new THREE.Mesh(
-          this.brickShadowGeometry,
-          new THREE.MeshBasicMaterial({ color: visual.shadow, transparent: true, opacity: 0.22, depthWrite: false })
-        );
-        shadow.renderOrder = 1;
-        this.brickMeshes.set(brick, mesh);
-        this.brickRims.set(brick, rim);
-        this.brickShadows.set(brick, shadow);
-        this.bricksGroup.add(shadow, mesh, rim);
-      }
-      if (!rim || !shadow) continue;
-      const material = mesh.material;
-      const hpRatio = brick.maxHp > 0 ? brick.hp / brick.maxHp : 1;
-      const damageRatio = 1 - hpRatio;
-      const impact = clamp((this.brickImpactTimers.get(brick) ?? 0) / 0.16, 0, 1);
-      material.emissiveIntensity = visual.emissiveIntensity * (0.42 + 0.58 * hpRatio) + impact * visual.impactGlow;
-      material.metalness = visual.metalness;
-      material.roughness = visual.roughness + damageRatio * 0.08;
-      const centerX = brick.x + brick.width / 2;
-      const centerY = brick.y + brick.height / 2;
-      const z = 12 + visual.depthScale * 6 + hpRatio * visual.hpDepthBoost * 12;
-      mesh.position.copy(toWorld(centerX, centerY, z));
-      const punch = this.settings.reducedMotion ? 0 : impact * 0.07;
-      const wobble = this.settings.reducedMotion ? 0 : Math.sin(now / 170 + centerX * 0.03) * visual.wobble;
-      const zScale = visual.depthScale + hpRatio * visual.hpDepthBoost + punch;
-      const widthScale = brick.width / BRICK_WIDTH;
-      const heightScale = brick.height / BRICK_HEIGHT;
-      mesh.scale.set((1 + punch) * widthScale, (1 + punch * 0.7) * heightScale, zScale);
-      mesh.rotation.z = brick.kind === "bomb" && !this.settings.reducedMotion ? Math.sin(now / 180) * 0.04 : wobble;
-
-      rim.position.copy(mesh.position);
-      rim.scale.copy(mesh.scale);
-      rim.rotation.copy(mesh.rotation);
-      rim.material.color.set(visual.rim);
-      rim.material.opacity = clamp(visual.rimOpacity + impact * 0.22 + (brick.kind === "boss" ? 0.08 : 0), 0, 1);
-
-      shadow.position.copy(toWorld(centerX + 5, centerY + 7, -5));
-      shadow.scale.set(1 + damageRatio * 0.06 + impact * 0.04, 1.06 + visual.depthScale * 0.05, 1);
-      shadow.rotation.z = mesh.rotation.z;
-      shadow.material.color.set(visual.shadow);
-      shadow.material.opacity = clamp(0.16 + visual.depthScale * 0.05 + impact * 0.06, 0, 0.4);
-    }
-  }
-
-  private removeBrickAccents(brick: Brick) {
-    const rim = this.brickRims.get(brick);
-    if (rim) {
-      this.bricksGroup.remove(rim);
-      rim.material.dispose();
-      this.brickRims.delete(brick);
-    }
-    const shadow = this.brickShadows.get(brick);
-    if (shadow) {
-      this.bricksGroup.remove(shadow);
-      shadow.material.dispose();
-      this.brickShadows.delete(brick);
-    }
-  }
-
-  private syncPaddle() {
-    const flash = clamp(this.paddleFlashTimer / 0.2, 0, 1);
-    const now = performance.now();
-    const width = this.paddleWidth + flash * 24;
-    const height = Math.max(11, 15 - flash * 3);
-    const depth = this.laserTimer > 0 ? 32 : 21 + flash * 16;
-    const cosmetic = paddleCosmetic(this.cosmetics.paddleSkin, this.settings.highContrast);
-    this.paddleMesh.scale.set(width, height, depth);
-    this.paddleMesh.position.copy(toWorld(this.paddleX, PADDLE_Y + 7 + flash * 0.8, 37));
-    this.paddleMesh.material.color.set(cosmetic.color);
-    this.paddleMesh.material.emissive.set(cosmetic.emissive);
-    this.paddleMesh.material.emissiveIntensity = cosmetic.emissiveIntensity + flash * 1.05 + (this.lifeFlashTimer > 0 ? 0.35 : 0);
-
-    this.paddleGlowMaterial.color.set(cosmetic.glow);
-    this.paddleSpecularMaterial.color.set(cosmetic.specular);
-    this.paddleGlowMesh.position.copy(toWorld(this.paddleX, PADDLE_Y + 9, 30));
-    this.paddleGlowMesh.scale.set(width * 1.16, 27 + flash * 12, 1);
-    this.paddleGlowMaterial.opacity = this.settings.reducedMotion ? 0.22 + flash * 0.08 : 0.3 + flash * 0.18;
-
-    const sweep = this.settings.reducedMotion ? 0 : Math.sin(now / 520) * this.paddleWidth * 0.34;
-    this.paddleSpecularMesh.position.copy(toWorld(this.paddleX + sweep, PADDLE_Y + 1, 56));
-    this.paddleSpecularMesh.scale.set(Math.max(38, this.paddleWidth * 0.24), 3 + flash * 2.4, 1);
-    this.paddleSpecularMaterial.opacity = this.settings.reducedMotion ? 0.16 + flash * 0.1 : 0.26 + flash * 0.24;
-  }
-
-  private syncBalls() {
-    for (const [ball, mesh] of this.ballMeshes) {
-      if (!this.balls.includes(ball)) {
-        this.ballsGroup.remove(mesh);
-        mesh.material.dispose();
-        this.ballMeshes.delete(ball);
-        this.removeBallVisual(ball);
-      }
-    }
-    for (const ball of this.balls) {
-      let mesh = this.ballMeshes.get(ball);
-      if (!mesh) {
-        const material = new THREE.MeshStandardMaterial({
-          color: "#fff7cc",
-          emissive: ball.fireTimer > 0 ? "#ff5c5c" : "#ffe066",
-          emissiveIntensity: 0.55,
-          metalness: 0.92,
-          roughness: 0.12
-        });
-        mesh = new THREE.Mesh(this.ballGeometry, material);
-        mesh.castShadow = true;
-        mesh.renderOrder = 5;
-        this.ballMeshes.set(ball, mesh);
-        this.ballsGroup.add(mesh);
-      }
-      const visual = this.ballVisuals.get(ball) ?? this.createBallVisual(ball);
-      const head = toWorld(ball.x, ball.y, 56);
-      mesh.position.copy(head);
-      mesh.scale.setScalar(ball.radius);
-      if (!this.settings.reducedMotion) {
-        mesh.rotation.x += 0.08;
-        mesh.rotation.y += 0.055;
-      }
-      const material = mesh.material;
-      const ballColor = ball.fireTimer > 0 ? "#ff5c5c" : ball.thruTimer > 0 ? "#d6ff4d" : ballCosmeticColor(this.cosmetics.ballTrail, this.settings.highContrast);
-      material.color.set(ballColor);
-      material.emissive.set(ballColor);
-      material.emissiveIntensity = ball.megaTimer > 0 ? 0.92 : 0.62;
-      this.syncBallVisual(ball, visual, ballColor, head);
-    }
-  }
-
-  private createBallVisual(ball: Ball): BallVisual {
-    const glow = new THREE.Mesh(
-      this.ballGlowGeometry,
-      new THREE.MeshBasicMaterial({ color: "#ffe066", transparent: true, opacity: 0.26, depthWrite: false, blending: THREE.AdditiveBlending })
-    );
-    glow.renderOrder = 4;
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(6), 3));
-    const trail = new THREE.Line(
-      geometry,
-      new THREE.LineBasicMaterial({ color: "#ffe066", transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending })
-    );
-    trail.renderOrder = 3;
-    const visual = { glow, trail };
-    this.ballVisuals.set(ball, visual);
-    this.ballsGroup.add(trail, glow);
-    return visual;
-  }
-
-  private syncBallVisual(ball: Ball, visual: BallVisual, color: string, head: THREE.Vector3) {
-    const speed = Math.hypot(ball.vx, ball.vy);
-    const trailMaterial = visual.trail.material;
-    const glowMaterial = visual.glow.material;
-    visual.glow.position.copy(head);
-    visual.glow.scale.setScalar(ball.radius * (this.settings.reducedMotion ? 1.65 : 2.2));
-    glowMaterial.color.set(color);
-    glowMaterial.opacity = this.settings.reducedMotion ? 0.18 : ball.megaTimer > 0 ? 0.36 : 0.28;
-
-    const trailPositions = visual.trail.geometry.getAttribute("position");
-    const hasTrail = speed > BALL_TRAIL_MIN_SPEED && !ball.stuck;
-    const trailLength = hasTrail ? (this.settings.reducedMotion ? 18 : clamp(speed * 0.08, 34, 86)) : 0;
-    const normalizedX = speed > 0 ? ball.vx / speed : 0;
-    const normalizedY = speed > 0 ? ball.vy / speed : 0;
-    const tail = toWorld(ball.x - normalizedX * trailLength, ball.y - normalizedY * trailLength, 49);
-    trailPositions.setXYZ(0, tail.x, tail.y, tail.z);
-    trailPositions.setXYZ(1, head.x, head.y, head.z);
-    trailPositions.needsUpdate = true;
-    visual.trail.geometry.computeBoundingSphere();
-    trailMaterial.color.set(color);
-    trailMaterial.opacity = hasTrail ? (this.settings.reducedMotion ? 0.18 : clamp(speed / MAX_BALL_SPEED, 0.28, 0.68)) : 0;
-  }
-
-  private removeBallVisual(ball: Ball) {
-    const visual = this.ballVisuals.get(ball);
-    if (!visual) return;
-    this.ballsGroup.remove(visual.trail, visual.glow);
-    visual.trail.geometry.dispose();
-    visual.trail.material.dispose();
-    visual.glow.material.dispose();
-    this.ballVisuals.delete(ball);
-  }
-
-  private syncPowerups() {
-    for (const [powerup, object] of this.powerupObjects) {
-      if (!this.powerups.includes(powerup)) {
-        this.powerupsGroup.remove(object);
-        this.powerupObjects.delete(powerup);
-      }
-    }
-    for (const powerup of this.powerups) {
-      let object = this.powerupObjects.get(powerup);
-      if (!object) {
-        const material = this.powerupMaterials.get(powerup.kind);
-        object = material ? new THREE.Sprite(material) : new THREE.Mesh(this.fallbackPowerupGeometry, this.fallbackMaterialForPowerup(powerup.kind));
-        object.userData.label = POWERUP_NAMES[powerup.kind];
-        this.powerupObjects.set(powerup, object);
-        this.powerupsGroup.add(object);
-      }
-      const tone = powerupToneFor(powerup.kind);
-      const pulse = this.settings.reducedMotion ? 0 : Math.sin(performance.now() / 150 + powerup.x) * 0.07;
-      object.position.copy(toWorld(powerup.x, powerup.y, 62));
-      const spriteWidth = tone === "volatile" ? 50 : 44;
-      const spriteHeight = tone === "hazard" ? 36 : 30;
-      object.scale.set(object instanceof THREE.Sprite ? spriteWidth * (1 + pulse) : 1, object instanceof THREE.Sprite ? spriteHeight * (1 + pulse) : 1, 1);
-      object.rotation.z = this.settings.reducedMotion
-        ? 0
-        : Math.sin(performance.now() / (tone === "hazard" ? 130 : 200) + powerup.x) * (tone === "hazard" ? 0.18 : 0.08);
-    }
-  }
-
-  private fallbackMaterialForPowerup(kind: PowerupKind): THREE.MeshStandardMaterial {
-    const tone = powerupToneFor(kind);
-    const existing = this.fallbackPowerupMaterials.get(tone);
-    if (existing) return existing;
-    const visual = POWERUP_VISUALS[tone];
-    const material = new THREE.MeshStandardMaterial({
-      color: visual.tint,
-      emissive: visual.emissive,
-      emissiveIntensity: tone === "hazard" ? 0.72 : 0.52,
-      metalness: 0.5,
-      roughness: 0.25
-    });
-    this.fallbackPowerupMaterials.set(tone, material);
-    return material;
-  }
-
-  private syncLasers() {
-    for (const [beam, line] of this.laserObjects) {
-      if (!this.laserBeams.includes(beam)) {
-        line.geometry.dispose();
-        this.lasersGroup.remove(line);
-        this.laserObjects.delete(beam);
-      }
-    }
-    for (const beam of this.laserBeams) {
-      let line = this.laserObjects.get(beam);
-      if (!line) {
-        const start = toWorld(beam.x, PADDLE_Y, 72);
-        const end = toWorld(beam.x, WALL + 6, 72);
-        const geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
-        line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: "#ff5c5c", transparent: true, opacity: 0.9 }));
-        this.laserObjects.set(beam, line);
-        this.lasersGroup.add(line);
-      }
-      line.material.opacity = clamp(beam.life * 10, 0, 1);
-    }
-  }
-
-  private syncSparks() {
-    if (this.sparks.length === 0) {
-      this.sparksPoints?.geometry.setDrawRange(0, 0);
-      return;
-    }
-    const count = Math.min(this.sparks.length, RicochetRushGame.MAX_SPARKS);
-    if (!this.sparksPoints || !this.sparksPositionBuffer || !this.sparksColorBuffer) {
-      this.sparksPositionBuffer = new Float32Array(RicochetRushGame.MAX_SPARKS * 3);
-      this.sparksColorBuffer = new Float32Array(RicochetRushGame.MAX_SPARKS * 3);
-      const geometry = new THREE.BufferGeometry();
-      const positionAttr = new THREE.BufferAttribute(this.sparksPositionBuffer, 3);
-      positionAttr.setUsage(THREE.DynamicDrawUsage);
-      const colorAttr = new THREE.BufferAttribute(this.sparksColorBuffer, 3);
-      colorAttr.setUsage(THREE.DynamicDrawUsage);
-      geometry.setAttribute("position", positionAttr);
-      geometry.setAttribute("color", colorAttr);
-      this.sparksPoints = new THREE.Points(
-        geometry,
-        new THREE.PointsMaterial({ size: 4, vertexColors: true, transparent: true, opacity: 0.92 })
-      );
-      this.sparksGroup.add(this.sparksPoints);
-    }
-    const positions = this.sparksPositionBuffer;
-    const colors = this.sparksColorBuffer;
-    for (let index = 0; index < count; index += 1) {
-      const spark = this.sparks[index];
-      const position = toWorld(spark.x, spark.y, 78);
-      positions[index * 3] = position.x;
-      positions[index * 3 + 1] = position.y;
-      positions[index * 3 + 2] = position.z;
-      const color = new THREE.Color(spark.color);
-      colors[index * 3] = color.r;
-      colors[index * 3 + 1] = color.g;
-      colors[index * 3 + 2] = color.b;
-    }
-    const geometry = this.sparksPoints.geometry;
-    geometry.setDrawRange(0, count);
-    geometry.attributes.position.needsUpdate = true;
-    geometry.attributes.color.needsUpdate = true;
-    const size = this.sparks.slice(0, count).reduce((largest, spark) => Math.max(largest, spark.size), 4);
-    this.sparksPoints.material.size = size;
-  }
-
-  private syncFloatingTexts() {
-    for (const [id, node] of this.floatingTextNodes) {
-      if (!this.floatingTexts.some((text) => text.id === id)) {
-        node.remove();
-        this.floatingTextNodes.delete(id);
-      }
-    }
-    for (const text of this.floatingTexts) {
-      let node = this.floatingTextNodes.get(text.id);
-      if (!node) {
-        node = document.createElement("div");
-        node.className = `floating-text is-${text.kind}`;
-        node.textContent = text.text;
-        this.floatingTextNodes.set(text.id, node);
-        this.effectsLayer.append(node);
-      }
-      const progress = 1 - text.life / text.duration;
-      const lift = this.settings.reducedMotion ? 0 : progress * 34;
-      node.style.left = `${(text.x / WIDTH) * 100}%`;
-      node.style.top = `${((text.y - lift) / HEIGHT) * 100}%`;
-      node.style.opacity = String(clamp(text.life / text.duration, 0, 1));
-      const baseScale = text.kind === "combo" ? 1.16 : text.kind.startsWith("powerup") ? 1.08 : 1;
-      node.style.transform = `translate(-50%, -50%) scale(${this.settings.reducedMotion ? baseScale : baseScale + (1 - progress) * 0.12})`;
-    }
-  }
 
   private emitSparks(x: number, y: number, color: string, count: number, options: Partial<SparkBurstOptions> = {}) {
     if (!this.settings.particles || this.settings.reducedMotion) return;
@@ -2934,374 +1989,125 @@ export class RicochetRushGame {
     this.hitBrick(target);
   }
 
-  private summaryStats(mode: "clear" | "gameOver" | "debug"): SummaryStat[] {
-    const bestDelta = Math.max(0, this.bestScore - this.runStats.bestScoreAtRunStart);
-    const now = Date.now();
-    const elapsed = mode === "clear" ? now - this.runStats.levelStartedAt : now - this.runStats.runStartedAt;
-    return [
-      { label: "Score", value: this.score.toLocaleString(), tone: "reward" },
-      { label: "Best Delta", value: bestDelta > 0 ? `+${bestDelta.toLocaleString()}` : "Even", tone: bestDelta > 0 ? "reward" : "neutral" },
-      { label: "Bricks Broken", value: this.runStats.bricksBroken.toLocaleString(), tone: "neutral" },
-      { label: "Longest Streak", value: `x${this.runStats.longestCombo.toFixed(1)}`, tone: this.runStats.longestCombo >= 2 ? "reward" : "neutral" },
-      { label: "Power-Ups Caught", value: this.runStats.powerupsCaught.toLocaleString(), tone: "neutral" },
-      { label: "Boards Cleared", value: this.runStats.boardsCleared.toLocaleString(), tone: this.runStats.boardsCleared > 0 ? "reward" : "neutral" },
-      { label: mode === "clear" ? "Clear Time" : "Survival Time", value: formatRunDuration(elapsed), tone: "neutral" }
-    ];
+  private packHudSnapshot() {
+    return {
+      boardContext: this.boardContext,
+      dailyProgress: this.dailyProgress,
+      packProgress: this.packProgress,
+      savedBoards: this.savedBoards
+    };
   }
 
-  private showRunSummaryOverlay(mode: "clear" | "gameOver", content: { title: string; body: string; actions: SummaryAction[] }) {
-    this.hud.closeToolPanel();
-    this.previouslyFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const stage = this.mount.closest<HTMLElement>(".stage");
-    stage?.classList.add("has-visible-overlay", "has-priority-overlay");
-    this.overlay.classList.add("is-visible");
-    const stats = this.summaryStats(mode);
-    this.overlay.innerHTML = `
-      <div class="overlay-card run-summary" role="dialog" aria-modal="true" aria-label="${escapeAttribute(content.title)}" data-run-summary="${mode}">
-        <div class="overlay-kicker">${mode === "clear" ? "Board Clear" : "Run Summary"}</div>
-        <h1>${escapeHtml(content.title)}</h1>
-        <p>${escapeHtml(content.body)}</p>
-        <dl class="summary-grid" aria-label="Run stats">
-          ${stats
-            .map(
-              (stat) => `<div class="summary-stat is-${stat.tone ?? "neutral"}"><dt>${escapeHtml(stat.label)}</dt><dd>${escapeHtml(stat.value)}</dd></div>`
-            )
-            .join("")}
-        </dl>
-        <div class="overlay-actions summary-actions">
-          ${content.actions
-            .map(
-              (action, index) =>
-                `<button type="button" class="${action.primary ? "" : "secondary"}" data-summary-action="${index}"${action.disabled ? " disabled aria-disabled=\"true\"" : ""}>${escapeHtml(action.label)}</button>`
-            )
-            .join("")}
-        </div>
-      </div>
-    `;
-    for (const [index, action] of content.actions.entries()) {
-      const button = this.overlay.querySelector<HTMLButtonElement>(`[data-summary-action="${index}"]`);
-      if (button && !action.disabled) button.addEventListener("click", action.action, { once: true });
-    }
-    this.overlay.querySelector<HTMLButtonElement>("[data-summary-action]:not([disabled])")?.focus({ preventScroll: true });
-    const card = this.overlay.querySelector<HTMLElement>(".run-summary");
-    if (card) {
-      this.releaseOverlayFocusTrap?.();
-      // Run summary intentionally ignores Escape so dismissal stays button-driven (pause overlays wire Escape to dismiss).
-      this.releaseOverlayFocusTrap = trapFocus(card, () => undefined);
-    }
+  private hudSnapshot(status?: string) {
+    return {
+      status,
+      phase: this.phase,
+      score: this.score,
+      bestScore: this.bestScore,
+      lives: this.lives,
+      level: this.level,
+      brickCount: this.bricks.length,
+      combo: this.combo,
+      recentEvents: this.recentEvents,
+      announcement: this.announcement,
+      loadingLevel: this.loadingLevel,
+      hasSave: this.hasSave,
+      sidebarCollapsed: this.sidebarCollapsed,
+      laserTimer: this.laserTimer,
+      grabTimer: this.grabTimer,
+      balls: this.balls,
+      paddleWidth: this.paddleWidth,
+      boardContext: this.boardContext,
+      designerIntent: this.designerIntent,
+      latestGenerationSummary: this.latestGenerationSummary,
+      powerupPrimerDismissed: this.powerupPrimerDismissed,
+      settings: this.settings,
+      dailyProgress: this.dailyProgress,
+      packProgress: this.packProgress,
+      savedBoards: this.savedBoards
+    };
   }
 
-  private openBoardPicker() {
-    this.hideOverlay();
-    const packsButton = this.mount.closest<HTMLElement>(".shell")?.querySelector<HTMLButtonElement>('[data-tool-panel="packs"]');
-    packsButton?.click();
-    this.refreshHud("Choose a board pack.");
+  private sceneFrame(): SceneFrame {
+    return {
+      bricks: this.bricks,
+      balls: this.balls,
+      powerups: this.powerups,
+      laserBeams: this.laserBeams,
+      sparks: this.sparks,
+      floatingTexts: this.floatingTexts,
+      paddleX: this.paddleX,
+      paddleWidth: this.paddleWidth,
+      paddleFlashTimer: this.paddleFlashTimer,
+      lifeFlashTimer: this.lifeFlashTimer,
+      laserTimer: this.laserTimer,
+      boardContext: this.boardContext,
+      cosmetics: this.cosmetics,
+      settings: this.settings,
+      brickImpactTimers: this.brickImpactTimers,
+      boardShakeTimer: this.boardShakeTimer,
+      boardShakeStrength: this.boardShakeStrength,
+      levelClearFlashTimer: this.levelClearFlashTimer,
+      phaseLabel: this.phase,
+      level: this.level,
+      lives: this.lives
+    };
+  }
+
+  private render() {
+    this.sceneView.render(this.sceneFrame(), this.effectsLayer);
+  }
+
+  private updateCanvasLabel() {
+    this.sceneView.updateCanvasLabel(this.sceneFrame());
+  }
+
+  private applyBoardTheme() {
+    this.sceneView.applyBoardTheme(this.sceneFrame());
+  }
+
+  private showOverlay(
+    title: string,
+    body: string,
+    actionLabel?: string,
+    action?: () => void,
+    busy = false,
+    secondaryLabel?: string,
+    secondaryAction?: () => void
+  ) {
+    this.gameOverlay.show(title, body, actionLabel, action, busy, secondaryLabel, secondaryAction);
+  }
+
+  private hideOverlay() {
+    this.gameOverlay.hide();
+  }
+
+  private showLoadingOverlay(title: string, body: string) {
+    this.gameOverlay.showLoading(title, body);
   }
 
   private showLevelReadyOverlay(event: string) {
-    this.showOverlay(
+    this.gameOverlay.showLevelReady(
       `Level ${this.level}: ${this.levelBlueprint.name}`,
       `${this.levelBlueprint.briefing} ${event.includes("backup") || event.includes("fallback") ? "Local backup handled this board; the wall is still playable." : ""}`,
-      "Launch",
       () => this.handlePrimaryAction()
     );
   }
 
-  private showLoadingOverlay(title: string, body: string) {
-    this.showOverlay(title, body, undefined, undefined, true);
+  private showRunSummaryOverlay(mode: "clear" | "gameOver", content: { title: string; body: string; actions: SummaryAction[] }) {
+    this.gameOverlay.showRunSummary(mode, content, buildRunSummaryStats(mode, this.score, this.bestScore, this.runStats));
   }
 
-  private showOverlay(title: string, body: string, actionLabel?: string, action?: () => void, busy = false, secondaryLabel?: string, secondaryAction?: () => void) {
-    if (secondaryLabel) this.hud.closeToolPanel();
-    this.previouslyFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const stage = this.mount.closest<HTMLElement>(".stage");
-    stage?.classList.add("has-visible-overlay");
-    stage?.classList.toggle("has-priority-overlay", busy || Boolean(secondaryLabel));
-    this.overlay.classList.add("is-visible");
-    this.overlay.innerHTML = `
-      <div class="overlay-card" role="dialog" aria-modal="true" aria-label="${escapeAttribute(title)}">
-        <div class="overlay-kicker">${busy ? "Generating" : "Ricochet Rush"}</div>
-        <h1>${escapeHtml(title)}</h1>
-        <p>${escapeHtml(body)}</p>
-        ${
-          actionLabel
-            ? `<div class="overlay-actions"><button type="button" data-overlay-action>${escapeHtml(actionLabel)}</button>${
-                secondaryLabel ? `<button type="button" class="secondary" data-overlay-secondary>${escapeHtml(secondaryLabel)}</button>` : ""
-              }</div>`
-            : `<div class="loader-bar"><span></span></div>`
-        }
-      </div>
-    `;
-    const button = this.overlay.querySelector<HTMLButtonElement>("[data-overlay-action]");
-    const secondaryButton = this.overlay.querySelector<HTMLButtonElement>("[data-overlay-secondary]");
-    if (button && action) button.addEventListener("click", action, { once: true });
-    if (secondaryButton && secondaryAction) secondaryButton.addEventListener("click", secondaryAction, { once: true });
-    button?.focus({ preventScroll: true });
-    const card = this.overlay.querySelector<HTMLElement>(".overlay-card");
-    if (card) {
-      this.releaseOverlayFocusTrap?.();
-      this.releaseOverlayFocusTrap = trapFocus(card, () => {
-        if (secondaryAction) secondaryAction();
-      });
-    }
-  }
-
-  private hideOverlay() {
-    this.releaseOverlayFocusTrap?.();
-    this.releaseOverlayFocusTrap = null;
-    this.overlay.classList.remove("is-visible");
-    this.mount.closest<HTMLElement>(".stage")?.classList.remove("has-visible-overlay", "has-priority-overlay");
-    this.overlay.innerHTML = "";
-    if (this.previouslyFocusedElement?.isConnected) this.previouslyFocusedElement.focus({ preventScroll: true });
-    this.previouslyFocusedElement = null;
+  private openBoardPicker() {
+    this.hideOverlay();
+    this.mount.closest<HTMLElement>(".shell")?.querySelector<HTMLButtonElement>('[data-tool-panel="packs"]')?.click();
+    this.refreshHud("Choose a board pack.");
   }
 
   private scrollStageIntoView() {
-    if (!window.matchMedia("(max-width: 860px)").matches) return;
-    this.mount.closest<HTMLElement>(".stage")?.scrollIntoView({ block: "start", inline: "nearest" });
+    this.gameOverlay.scrollStageIntoView();
   }
-}
 
-function pick<T>(items: readonly [T, ...T[]]): T;
-function pick<T>(items: readonly T[]): T;
-function pick<T>(items: readonly T[]): T {
-  if (items.length === 0) throw new Error("pick() requires at least one item.");
-  return items[Math.floor(Math.random() * items.length)]!;
-}
-
-function powerupVisualFor(kind: PowerupKind): (typeof POWERUP_VISUALS)[PowerupTone] {
-  return POWERUP_VISUALS[powerupToneFor(kind)];
-}
-
-function pickupLabelFor(kind: PowerupKind): string {
-  const tone = powerupToneFor(kind);
-  if (tone === "hazard") return `-${POWERUP_NAMES[kind]}`;
-  if (tone === "volatile") return `! ${POWERUP_NAMES[kind]}`;
-  return `+${POWERUP_NAMES[kind]}`;
-}
-
-function pseudoRandom(index: number, salt: number): number {
-  return fract(Math.sin(index * 12.9898 + salt * 78.233) * 43758.5453);
-}
-
-function fract(value: number): number {
-  return value - Math.floor(value);
-}
-
-function boardThemeFor(context: BoardContext): BoardTheme {
-  if (context.source === "generated") return BOARD_THEMES.generated;
-  return BOARD_THEMES[context.packId] ?? BOARD_THEMES.starter;
-}
-
-function createRunStats(scoreAtRunStart: number, bestScoreAtRunStart: number): RunStats {
-  const now = Date.now();
-  return {
-    runStartedAt: now,
-    levelStartedAt: now,
-    scoreAtRunStart,
-    bestScoreAtRunStart,
-    bricksBroken: 0,
-    longestCombo: 1,
-    powerupsCaught: 0,
-    boardsCleared: 0
-  };
-}
-
-function toSavedRunStats(stats: RunStats): SavedRunStats {
-  return { ...stats };
-}
-
-function fromSavedRunStats(stats: SavedRunStats, score: number, bestScore: number): RunStats {
-  return {
-    ...createRunStats(score, bestScore),
-    runStartedAt: stats.runStartedAt,
-    levelStartedAt: stats.levelStartedAt,
-    scoreAtRunStart: stats.scoreAtRunStart,
-    bestScoreAtRunStart: stats.bestScoreAtRunStart,
-    bricksBroken: stats.bricksBroken,
-    longestCombo: stats.longestCombo,
-    powerupsCaught: stats.powerupsCaught,
-    boardsCleared: stats.boardsCleared
-  };
-}
-
-function paddleCosmetic(skin: GameCosmetics["paddleSkin"], highContrast: boolean) {
-  if (highContrast) return { color: "#ffffff", emissive: "#ffe066", glow: "#ffe066", specular: "#ffffff", emissiveIntensity: 0.58 };
-  if (skin === "gold") return { color: "#fff0a6", emissive: "#ffb000", glow: "#ffe066", specular: "#ffffff", emissiveIntensity: 0.64 };
-  if (skin === "neon") return { color: "#dffcff", emissive: "#8e7dff", glow: "#b6fffa", specular: "#d6ff4d", emissiveIntensity: 0.56 };
-  return { color: "#e9ffff", emissive: "#35f3ff", glow: "#7ef1ff", specular: "#ffffff", emissiveIntensity: 0.48 };
-}
-
-function ballCosmeticColor(trail: GameCosmetics["ballTrail"], highContrast: boolean): string {
-  if (highContrast) return "#ffffff";
-  if (trail === "aurora") return "#b6fffa";
-  if (trail === "comet") return "#ff9f43";
-  return "#ffe066";
-}
-
-function boardBackplateCosmetic(backplate: GameCosmetics["boardBackplate"], theme: BoardTheme, highContrast: boolean): BoardTheme {
-  if (highContrast) return { scene: "#010307", floor: "#010307", wall: theme.wall, wallGlow: "#ffe066", rim: "#ffe066" };
-  if (backplate === "midnight") return { scene: "#040414", floor: "#070920", wall: theme.wall, wallGlow: "#8e7dff", rim: "#b6fffa" };
-  if (backplate === "sunrise") return { scene: "#160b10", floor: "#1b1013", wall: theme.wall, wallGlow: "#ff9f43", rim: "#ffe066" };
-  return theme;
-}
-
-function cloneLevelBlueprint(level: LevelBlueprint): LevelBlueprint {
-  return {
-    name: level.name,
-    briefing: level.briefing,
-    paddleHint: level.paddleHint,
-    speed: level.speed,
-    rows: level.rows.map((row) => row.map((cell) => (cell ? { ...cell } : null)))
-  };
-}
-
-function authoredBoardRequestForSaved(request: LevelRequest): LevelRequest {
-  return {
-    level: request.level,
-    score: request.score,
-    lives: request.lives,
-    clearedLevels: request.clearedLevels,
-    recentEvents: request.recentEvents
-  };
-}
-
-function formatRunDuration(ms: number): string {
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds % 60;
-  return minutes > 0 ? `${minutes}:${String(remainder).padStart(2, "0")}` : `${remainder}s`;
-}
-
-function savedBoardPackId(index: number): string {
-  return `${SAVED_DESIGNS_PACK_ID}:${index}`;
-}
-
-function savedBoardIndexFromPackId(packId: string): number | null {
-  if (!packId.startsWith(`${SAVED_DESIGNS_PACK_ID}:`)) return null;
-  const index = Number(packId.slice(SAVED_DESIGNS_PACK_ID.length + 1));
-  return Number.isInteger(index) && index >= 0 ? index : null;
-}
-
-function drawScoreCardPreview(context: CanvasRenderingContext2D, rows: string[], x: number, y: number, cell: number) {
-  const colors: Record<string, string> = {
-    ".": "rgba(255,255,255,0.05)",
-    b: "#4ecdc4",
-    h: "#7d8ca3",
-    o: "#ff5c5c",
-    p: "#7bf1a8",
-    x: "#b23a48",
-    l: "#ff4d8d",
-    f: "#ff7a2f",
-    g: "#b6fffa",
-    s: "#ffe066",
-    w: "#7bf1a8",
-    c: "#8e7dff",
-    t: "#d6ff4d",
-    B: "#ff9f43"
-  };
-  for (const [rowIndex, row] of rows.slice(0, 9).entries()) {
-    for (const [columnIndex, glyph] of row.slice(0, 14).padEnd(14, ".").split("").entries()) {
-      context.fillStyle = colors[glyph] ?? colors.b;
-      context.fillRect(x + columnIndex * (cell + 2), y + rowIndex * (cell + 2), cell, cell * 0.72);
-    }
-  }
-}
-
-function soundForBrickDestroy(kind: BrickKind): GameSoundKind {
-  if (kind === "boss") return "bossBrick";
-  if (kind === "hard") return "hardBrick";
-  if (kind === "basic") return "brickDestroy";
-  return "specialBrick";
-}
-
-function brickAudioOptions(brick: Brick, combo: number, destroyed: boolean): GameAudioPlayOptions {
-  const materialPitch: Record<BrickKind, number> = {
-    basic: 1,
-    hard: 0.72,
-    bomb: 0.82,
-    prize: 1.24,
-    penalty: 0.86,
-    laser: 1.36,
-    grab: 1.18,
-    fire: 0.98,
-    thru: 1.3,
-    split: 1.2,
-    wide: 1.12,
-    slow: 0.92,
-    boss: 0.58
-  };
-  const hpRatio = brick.maxHp > 0 ? clamp(brick.hp / brick.maxHp, 0, 1) : 0;
-  const comboLift = clamp((combo - 1) * 0.035, 0, 0.24);
-  return {
-    pitch: materialPitch[brick.kind] + comboLift + (destroyed ? 0.08 : 0),
-    intensity: clamp(0.82 + (1 - hpRatio) * 0.24 + (destroyed ? 0.18 : 0) + comboLift * 0.5, 0.72, 1.34),
-    rumble: brick.kind === "boss" ? 0.58 : brick.kind === "bomb" && destroyed ? 0.46 : brick.kind === "hard" ? 0.18 : 0
-  };
-}
-
-function soundForPowerup(kind: PowerupKind): GameSoundKind {
-  if (kind === "extraLife") return "extraLife";
-  if (kind === "levelWarp") return "levelWarp";
-  const tone = powerupToneFor(kind);
-  if (tone === "volatile") return "volatilePowerup";
-  if (tone === "hazard") return "badPowerup";
-  return "goodPowerup";
-}
-
-function powerupAudioOptions(kind: PowerupKind): GameAudioPlayOptions {
-  const tone = powerupToneFor(kind);
-  if (tone === "volatile") return { pitch: 0.96, intensity: 1.12, rumble: 0.44 };
-  if (tone === "hazard") return { pitch: 0.82, intensity: 1.04, rumble: 0.28 };
-  return { pitch: kind === "extraLife" ? 1.16 : 1.04, intensity: 0.94 };
-}
-
-function circleRect(ball: Ball, brick: Brick): boolean {
-  const nearestX = clamp(ball.x, brick.x, brick.x + brick.width);
-  const nearestY = clamp(ball.y, brick.y, brick.y + brick.height);
-  return (ball.x - nearestX) ** 2 + (ball.y - nearestY) ** 2 < ball.radius ** 2;
-}
-
-function toWorld(x: number, y: number, z = 0): THREE.Vector3 {
-  return new THREE.Vector3(x - WIDTH / 2, HEIGHT / 2 - y, z);
-}
-
-function materializeLevelBricks(level: LevelBlueprint, layout: LevelLayout): Brick[] {
-  const bricks: Brick[] = [];
-  for (let row = 0; row < layout.rows; row += 1) {
-    for (let column = 0; column < layout.columns; column += 1) {
-      const spec = level.rows[row]?.[column];
-      if (!spec) continue;
-      bricks.push({
-        x: WALL + column * (layout.brickWidth + BRICK_GAP),
-        y: BRICK_TOP + row * (layout.brickHeight + BRICK_GAP),
-        width: layout.brickWidth,
-        height: layout.brickHeight,
-        kind: spec.kind,
-        hp: spec.hp,
-        maxHp: spec.hp
-      });
-    }
-  }
-  return bricks;
-}
-
-function bricksFitLevel(savedBricks: readonly SavedBrick[], level: LevelBlueprint): boolean {
-  const expected = materializeLevelBricks(level, computeLevelLayout(level));
-  if (savedBricks.length > expected.length) return false;
-  return savedBricks.every((saved) =>
-    expected.some(
-      (brick) =>
-        Math.abs(brick.x - saved.x) < 0.001 &&
-        Math.abs(brick.y - saved.y) < 0.001 &&
-        Math.abs(brick.width - saved.width) < 0.001 &&
-        Math.abs(brick.height - saved.height) < 0.001 &&
-        brick.kind === saved.kind &&
-        brick.maxHp === saved.maxHp &&
-        saved.hp > 0 &&
-        saved.hp <= brick.maxHp
-    )
-  );
 }
 
 export { LAUNCH_LOSS_GRACE_SECONDS } from "./tuning";
@@ -3310,98 +2116,3 @@ export type { LoopRiskVelocity, LoopRiskVelocityInput, PaddleRebound, PaddleRebo
 export { penaltyPowerupPool, powerupToneFor, prizePowerupPool } from "./powerups";
 export type { PowerupKind, PowerupPoolInput, PowerupTone } from "./powerups";
 
-function toSavedBall(ball: Ball): SavedBallState {
-  return {
-    x: ball.x,
-    y: ball.y,
-    vx: ball.vx,
-    vy: ball.vy,
-    radius: ball.radius,
-    stuck: ball.stuck,
-    stuckOffset: ball.stuckOffset,
-    fireTimer: ball.fireTimer,
-    thruTimer: ball.thruTimer,
-    megaTimer: ball.megaTimer
-  };
-}
-
-function toSavedBrick(brick: Brick): SavedBrick {
-  return {
-    x: brick.x,
-    y: brick.y,
-    width: brick.width,
-    height: brick.height,
-    kind: brick.kind,
-    hp: brick.hp,
-    maxHp: brick.maxHp
-  };
-}
-
-function readSave(): GameSave | null {
-  return readJson(SAVE_KEY, normalizeSaveState);
-}
-
-function readSettings(): GameSettings {
-  const storedSettings = readJson(SETTINGS_KEY, normalizeSettingsObject);
-  return storedSettings ? normalizeSettings(storedSettings) : { ...DEFAULT_SETTINGS, reducedMotion: prefersReducedMotion() };
-}
-
-function normalizeSettingsObject(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
-
-function prefersReducedMotion(): boolean {
-  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
-}
-
-function normalizeBoolean(value: unknown): boolean | null {
-  return typeof value === "boolean" ? value : null;
-}
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable) return true;
-  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
-}
-
-function actionControlTarget(target: EventTarget | null): HTMLElement | null {
-  if (!(target instanceof HTMLElement)) return null;
-  return target.closest<HTMLElement>("button:not(:disabled), a[href], [role='button']:not([aria-disabled='true'])");
-}
-
-function isArenaPointerTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  return !target.closest("button, input, textarea, select, .panel, .tool-panel, .game-overlay, .touch-controls");
-}
-
-function readBestScore(): number {
-  const value = Number(localStorage.getItem(BEST_SCORE_KEY));
-  return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
-}
-
-function writeBestScore(score: number) {
-  writeJson(BEST_SCORE_KEY, Math.max(0, Math.round(score)));
-}
-
-function readJson<T>(key: string, normalize: (value: unknown) => T | null): T | null {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? normalize(JSON.parse(raw)) : null;
-  } catch (error) {
-    warnStorageFailure("read", key, error);
-    return null;
-  }
-}
-
-function writeJson(key: string, value: unknown) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (error) {
-    warnStorageFailure("write", key, error);
-  }
-}
-
-function warnStorageFailure(operation: "read" | "write", key: string, error: unknown) {
-  const reason = error instanceof DOMException || error instanceof Error ? error.name : "unknown error";
-  console.warn(`Ricochet Rush could not ${operation} local state ${key}: ${reason}.`);
-}

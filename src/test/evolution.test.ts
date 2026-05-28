@@ -48,12 +48,8 @@ import { createApiServer } from "../server/api";
 import { buildGenerationSummary, buildPrompt, parseWorkerOutput, requestEvolution, runCursorWorker, summarizeLevelError } from "../server/cursorAgent";
 import { parseLevelJsonFromCandidates } from "../server/levelJson";
 import { appendAssistantTextChunk } from "../server/streamText";
-import {
-  normalizeLoopRiskVelocity,
-  penaltyPowerupPool,
-  powerupToneFor,
-  prizePowerupPool
-} from "../client/game/RicochetRushGame";
+import { normalizeLoopRiskVelocity } from "../client/game/physics";
+import { penaltyPowerupPool, powerupToneFor, prizePowerupPool } from "../client/game/powerups";
 import { MUSIC_MASTER_GAIN, MUSIC_MELODY_PEAK, createGameAudio } from "../client/game/gameAudio";
 import {
   isLevelGenerationNetworkError,

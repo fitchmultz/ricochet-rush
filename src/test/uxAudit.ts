@@ -2,7 +2,7 @@ import { once } from "node:events";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { chromium, type ConsoleMessage, type Page } from "playwright";
-import { LAUNCH_LOSS_GRACE_SECONDS } from "../client/game/RicochetRushGame";
+import { LAUNCH_LOSS_GRACE_SECONDS } from "../client/game/tuning";
 import { createApiServer } from "../server/api";
 
 process.env.RICOCHET_RUSH_FORCE_FALLBACK = "1";
