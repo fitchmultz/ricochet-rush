@@ -14,6 +14,8 @@ The game includes curated board packs for repeatable runs, plus a prompt-first b
 
 ## Run
 
+Requires Node.js 22.19.0 or newer and npm 11.16.0 (pinned by `packageManager`).
+
 ```sh
 npm install
 npm run dev
@@ -56,7 +58,7 @@ The CI gate also runs the automated UX audit. It drives desktop and mobile play,
 
 After a Playwright package update, run `npx playwright install chromium` once if the smoke reports a missing browser executable.
 
-Set `CURSOR_API_KEY` in the shell or in local `.env` to enable live Cursor SDK level generation. Restart the dev or preview server after changing `.env`. Browser generation falls back locally if the request has not completed after 65 seconds or the compact draft fails validation. Set `RICOCHET_RUSH_FORCE_FALLBACK=1` when deterministic fallback generation is desired.
+Set `CURSOR_API_KEY` in the shell or in local `.env` to enable live Cursor SDK level generation. Restart the dev or preview server after changing `.env`. Browser generation falls back locally if the full server retry budget is exhausted or the compact draft fails validation. Set `RICOCHET_RUSH_FORCE_FALLBACK=1` when deterministic fallback generation is desired.
 
 To refresh the README demo clip after visual changes, run:
 
@@ -69,3 +71,4 @@ npm run capture:demo
 - [Playtest checklist](docs/PLAYTEST_CHECKLIST.md)
 - [Demo script](docs/DEMO_SCRIPT.md)
 - [Known limitations](docs/KNOWN_LIMITATIONS.md)
+- [Dependency policy](docs/DEPENDENCIES.md)

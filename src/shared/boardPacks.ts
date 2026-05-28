@@ -1,4 +1,5 @@
 import { BRICK_COLUMNS, BRICK_ROWS, fallbackLevel, type BrickCell, type BrickKind, type LevelBlueprint, type LevelRequest, normalizeLevel } from "./evolution";
+import { clamp, isRecord } from "./util";
 
 export const DAILY_PACK_ID = "daily";
 export const SAVED_DESIGNS_PACK_ID = "saved-designs";
@@ -472,9 +473,5 @@ function nonNegativeInteger(value: unknown): number {
 }
 
 function clampInteger(value: unknown, min: number, max: number): number {
-  return Math.max(min, Math.min(max, nonNegativeInteger(value)));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return clamp(nonNegativeInteger(value), min, max);
 }

@@ -2,6 +2,7 @@ import { once } from "node:events";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import { chromium, type ConsoleMessage, type Page } from "playwright";
+import { LAUNCH_LOSS_GRACE_SECONDS } from "../client/game/RicochetRushGame";
 import { createApiServer } from "../server/api";
 
 process.env.RICOCHET_RUSH_FORCE_FALLBACK = "1";
@@ -93,6 +94,7 @@ const address = server.address();
 if (!address || typeof address === "string") throw new Error("Preview server did not expose a TCP port.");
 
 const baseUrl = `http://127.0.0.1:${address.port}`;
+const appUrl = `${baseUrl}/?debugGame=1`;
 const browser = await chromium.launch({ headless: true });
 
 try {
@@ -135,6 +137,11 @@ async function runDesktopAudit(page: Page) {
   await assertLayoutHealth(page, "desktop ready", { failSmallTouchTargets: false });
   await assertDesktopStageSeparation(page);
   await capture(page, "desktop-ready");
+  await assertToolDrawerOwnsFocus(page, "desktop ready");
+  await bootFresh(page, DESKTOP_VIEWPORT);
+  await assertShellHealth(page, "desktop launch prep");
+  await assertReadyState(page, "desktop launch prep");
+  await assertLaunchSurvivalWindow(page, "desktop center launch");
 
   const launchBefore = await snapshot(page);
   await page.locator("[data-overlay-action]").click();
@@ -168,7 +175,8 @@ async function runDesktopAudit(page: Page) {
   });
   const generated = await snapshot(page);
   recordCheck(generated.designerIntent.brief === "radial gold maze with side lanes", "designer prompt applies", generated.designerIntent.brief);
-  recordCheck(generated.generationSummary?.title === "Local backup board", "fallback generation is explained in tools", generated.generationSummary?.title ?? "missing summary");
+  recordCheck(generated.generationSummary?.title.includes("Local backup") === true, "fallback generation is explained in tools", generated.generationSummary?.title ?? "missing summary");
+  recordCheck(generated.generationSummary?.detail.includes("radial gold maze") === true, "generation summary cites the designer prompt", generated.generationSummary?.detail ?? "missing detail");
   recordCheck(await page.locator("[data-generation-summary]").isVisible(), "full generation summary is visible", "Board Designer exposes the result summary.");
   recordCheck(await page.locator("[data-compact-generation-summary]").isHidden(), "generation diagnostics stay out of play rail", "Play Console remains player-facing after generation.");
   recordCheck(!(await page.locator(".console-status").innerText()).toLowerCase().includes("local backup"), "play rail hides fallback diagnostics", "Fallback details stay in tools/log surfaces.");
@@ -178,6 +186,7 @@ async function runDesktopAudit(page: Page) {
 
   await openToolPanel(page, "packs", "Board Select");
   recordCheck((await page.locator("[data-pack-id]").count()) >= 5, "board selector lists packs", "Expected at least the built-in pack set.");
+  await assertBoardSelectDrawer(page, "desktop board select");
   await assertLayoutHealth(page, "desktop board select", { failSmallTouchTargets: false });
   await capture(page, "desktop-boards");
 
@@ -196,11 +205,17 @@ async function runMobileAudit(page: Page) {
   await assertReadyState(page, "mobile ready");
   await assertCanvasClarity(page, "mobile ready");
   await assertLayoutHealth(page, "mobile ready", { failSmallTouchTargets: true });
+  await assertMobileToolDockReachable(page, "mobile ready");
   await capture(page, "mobile-ready");
 
   await openToolPanel(page, "designer", "Board Designer");
+  await assertMobileToolDrawerSizing(page, "mobile designer panel");
   await assertLayoutHealth(page, "mobile designer panel", { failSmallTouchTargets: true });
   await capture(page, "mobile-designer");
+  await page.locator('[data-action="close-tool-panel"]').click();
+  await page.waitForFunction(() => document.querySelector("[data-tool-surface]")?.hasAttribute("hidden") === true);
+  await openToolPanel(page, "options", "Options");
+  await assertMobileToolDrawerSizing(page, "mobile options panel");
   await page.locator('[data-action="close-tool-panel"]').click();
   await page.waitForFunction(() => document.querySelector("[data-tool-surface]")?.hasAttribute("hidden") === true);
 
@@ -239,7 +254,7 @@ async function runMobileAudit(page: Page) {
 
 async function bootFresh(page: Page, viewport: { width: number; height: number }) {
   await page.setViewportSize(viewport);
-  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await page.goto(appUrl, { waitUntil: "domcontentloaded" });
   await page.evaluate(() => localStorage.clear());
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
@@ -260,6 +275,94 @@ async function assertShellHealth(page: Page, label: string) {
     return Boolean(overlay) || bodyText.includes("Internal server error") || bodyText.includes("Failed to load module script");
   });
   recordCheck(!hasFrameworkOverlay, `${label}: no framework error overlay`, hasFrameworkOverlay ? "Framework error content found." : "No framework overlay detected.");
+}
+
+async function assertBoardSelectDrawer(page: Page, label: string) {
+  const layout = await page.evaluate(() => {
+    const shell = document.querySelector(".shell");
+    const toolBody = document.querySelector<HTMLElement>(".tool-body");
+    const savedCard = document.querySelector<HTMLElement>('[data-pack-id="saved-designs"]');
+    const compactLocked = document.querySelectorAll(".pack-card.is-compact").length;
+    const sections = document.querySelectorAll(".pack-section").length;
+    if (!toolBody || !savedCard) return null;
+    const bodyRect = toolBody.getBoundingClientRect();
+    const cardRect = savedCard.getBoundingClientRect();
+    return {
+      packPanelOpen: shell?.classList.contains("is-pack-panel-open") === true,
+      scrollable: toolBody.scrollHeight > toolBody.clientHeight + 4,
+      savedFullyVisible: cardRect.top >= bodyRect.top - 1 && cardRect.bottom <= bodyRect.bottom + 1,
+      savedTop: cardRect.top,
+      bodyBottom: bodyRect.bottom,
+      compactLocked,
+      sections
+    };
+  });
+  recordCheck(layout?.packPanelOpen === true, `${label}: pack drawer uses scroll layout`, "Shell marks the pack browser as open.");
+  recordCheck((layout?.sections ?? 0) >= 3, `${label}: pack list uses sections`, `${layout?.sections ?? 0} sections rendered.`);
+  recordCheck((layout?.compactLocked ?? 0) >= 3, `${label}: locked packs use compact cards`, `${layout?.compactLocked ?? 0} compact locked cards.`);
+  recordCheck(
+    layout?.scrollable === true || layout?.savedFullyVisible === true,
+    `${label}: saved designs card is not clipped at fold`,
+    layout?.savedFullyVisible
+      ? "Saved Designs card fits in the first viewport."
+      : layout?.scrollable
+        ? "Tool body scrolls so clipped cards can be reached."
+        : "Saved Designs card is clipped without scroll affordance."
+  );
+}
+
+async function assertToolDrawerOwnsFocus(page: Page, label: string) {
+  await page.locator('[data-tool-panel="designer"]').click();
+  await page.waitForFunction(() => document.querySelector(".shell")?.classList.contains("is-tool-panel-open"));
+  const overlayHidden = await page.evaluate(() => {
+    const overlay = document.querySelector<HTMLElement>(".game-overlay.is-visible");
+    if (!overlay) return false;
+    return getComputedStyle(overlay).visibility === "hidden";
+  });
+  recordCheck(
+    overlayHidden,
+    `${label}: tool drawer hides competing launch overlay`,
+    overlayHidden ? "Launch overlay is suppressed while Designer is open." : "Launch overlay still competes with the tool drawer."
+  );
+  const panelHeight = await page.evaluate(() => document.querySelector<HTMLElement>(".tool-panel")?.getBoundingClientRect().height ?? 0);
+  const bodyHeight = await page.evaluate(() => document.querySelector<HTMLElement>(".tool-body")?.getBoundingClientRect().height ?? 0);
+  recordCheck(
+    panelHeight > 0 && panelHeight < 720,
+    `${label}: tool drawer sizes to content`,
+    `Panel ${panelHeight.toFixed(0)}px tall with ${bodyHeight.toFixed(0)}px body.`
+  );
+  await page.locator('[data-action="close-tool-panel"]').click();
+  await page.waitForFunction(() => !document.querySelector(".shell")?.classList.contains("is-tool-panel-open"));
+  const overlayRestored = await page.evaluate(() => {
+    const overlay = document.querySelector<HTMLElement>(".game-overlay.is-visible");
+    return Boolean(overlay && getComputedStyle(overlay).visibility !== "hidden");
+  });
+  recordCheck(
+    overlayRestored,
+    `${label}: launch overlay returns after closing drawer`,
+    overlayRestored ? "Launch overlay is visible again after closing Designer." : "Launch overlay did not return."
+  );
+}
+
+async function assertLaunchSurvivalWindow(page: Page, label: string) {
+  const before = await snapshot(page);
+  if (await page.locator("[data-tool-backdrop]").isVisible()) {
+    await page.locator('[data-action="close-tool-panel"]').click();
+    await page.waitForFunction(() => !document.querySelector("[data-tool-backdrop]"));
+  }
+  await page.waitForSelector(".game-overlay.is-visible [data-overlay-action]");
+  await page.keyboard.press("Space");
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "playing");
+  const survivalMs = Math.round((LAUNCH_LOSS_GRACE_SECONDS - 0.25) * 1000);
+  await page.waitForTimeout(survivalMs);
+  const after = await snapshot(page);
+  recordCheck(
+    after.lives === before.lives,
+    `${label}: center launch keeps life during survival window`,
+    after.lives === before.lives
+      ? `No life lost in the first ${(survivalMs / 1000).toFixed(1)}s after launch.`
+      : `Lives dropped ${before.lives} -> ${after.lives}.`
+  );
 }
 
 async function assertReadyState(page: Page, label: string) {
@@ -495,6 +598,72 @@ async function assertStageCoverage(page: Page, label: string) {
   const viewportWidth = page.viewportSize()?.width ?? 999;
   const maxCoverage = viewportWidth <= 520 ? 0.38 : 0.22;
   recordCheck(coverage.coverageRatio < maxCoverage, `${label}: overlays leave the playfield readable`, `${Math.round(coverage.coverageRatio * 100)}% sampled overlay coverage`, "warn");
+}
+
+async function assertMobileToolDrawerSizing(page: Page, label: string) {
+  const metrics = await page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>(".tool-panel");
+    const body = document.querySelector<HTMLElement>(".tool-body");
+    const view = document.querySelector<HTMLElement>(".tool-view:not([hidden])");
+    if (!panel || !body || !view) return null;
+    const panelRect = panel.getBoundingClientRect();
+    const bodyRect = body.getBoundingClientRect();
+    const viewRect = view.getBoundingClientRect();
+    const emptySlab = bodyRect.height - viewRect.height;
+    return {
+      panelHeight: panelRect.height,
+      bodyHeight: bodyRect.height,
+      viewHeight: viewRect.height,
+      emptySlab,
+      overflowed: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
+    };
+  });
+  recordCheck(metrics?.overflowed === false, `${label}: no horizontal overflow`, metrics?.overflowed ? "Drawer caused horizontal scroll." : "No horizontal overflow.");
+  recordCheck(
+    (metrics?.emptySlab ?? 999) < 72,
+    `${label}: drawer body fits tool content`,
+    metrics
+      ? `Panel ${Math.round(metrics.panelHeight)}px, body ${Math.round(metrics.bodyHeight)}px, view ${Math.round(metrics.viewHeight)}px.`
+      : "Tool drawer metrics unavailable."
+  );
+}
+
+async function assertMobileToolDockReachable(page: Page, label: string) {
+  const metrics = await page.evaluate(() => {
+    const dock = document.querySelector<HTMLElement>(".tool-dock");
+    const boards = document.querySelector<HTMLButtonElement>('[data-tool-panel="packs"]');
+    const designer = document.querySelector<HTMLButtonElement>('[data-tool-panel="designer"]');
+    const consoleHead = document.querySelector<HTMLElement>(".console-head");
+    const boardCard = document.querySelector<HTMLElement>(".board-card");
+    if (!dock || !boards || !designer || !consoleHead || !boardCard) return null;
+    const dockRect = dock.getBoundingClientRect();
+    const boardsRect = boards.getBoundingClientRect();
+    const designerRect = designer.getBoundingClientRect();
+    const consoleHeadRect = consoleHead.getBoundingClientRect();
+    const boardCardRect = boardCard.getBoundingClientRect();
+    const overlapsConsoleHead =
+      dockRect.left < consoleHeadRect.right && dockRect.right > consoleHeadRect.left && dockRect.top < consoleHeadRect.bottom && dockRect.bottom > consoleHeadRect.top;
+    const overlapsBoardCard =
+      dockRect.left < boardCardRect.right && dockRect.right > boardCardRect.left && dockRect.top < boardCardRect.bottom && dockRect.bottom > boardCardRect.top;
+    return {
+      dockTop: dockRect.top,
+      dockBottom: dockRect.bottom,
+      boardsVisible: boardsRect.top >= 0 && boardsRect.bottom <= window.innerHeight + 1,
+      designerVisible: designerRect.top >= 0 && designerRect.bottom <= window.innerHeight + 1,
+      overlapsConsole: overlapsConsoleHead || overlapsBoardCard,
+      overflowed: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
+    };
+  });
+  recordCheck(metrics?.overflowed === false, `${label}: no horizontal overflow on load`, metrics?.overflowed ? "Page still scrolls horizontally." : "No horizontal overflow.");
+  recordCheck(
+    metrics !== null && metrics.dockTop >= 0 && metrics.dockBottom <= (page.viewportSize()?.height ?? 760) + 1,
+    `${label}: tool dock is visible without scrolling`,
+    metrics
+      ? `Tool dock sits ${Math.round(metrics.dockTop)}-${Math.round(metrics.dockBottom)}px in a ${page.viewportSize()?.height ?? 760}px viewport.`
+      : "Tool dock missing."
+  );
+  recordCheck(metrics?.overlapsConsole === false, `${label}: tool dock does not cover console content`, metrics?.overlapsConsole ? "Tool dock intersects the console title or board card." : "Tool dock is in flow with console content.");
+  recordCheck(metrics?.boardsVisible === true && metrics?.designerVisible === true, `${label}: core tool buttons are reachable`, metrics?.boardsVisible && metrics?.designerVisible ? "Boards and Designer are visible without scrolling." : "Tool buttons require scrolling on first paint.");
 }
 
 async function assertStageInViewport(page: Page, label: string) {

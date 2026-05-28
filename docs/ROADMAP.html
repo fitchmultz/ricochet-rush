@@ -303,51 +303,72 @@ references.</li>
 <li><code>git check-ignore -v .scratchpad.md</code> confirms private
 notes stay ignored.</li>
 <li><code>npm run ci</code> passes.</li>
-<li><code>npm audit --audit-level=moderate</code> passes. Remaining
-audit items are low-severity transitive
-<code>@cursor/sdk</code>/<code>sqlite3</code> chain findings with no
-available fix.</li>
+<li><code>npm audit --audit-level=moderate</code> passed at the time;
+the later dependency refresh resolved the tracked audit report cleanly.</li>
 </ul>
 <h3 id="done---dependency-and-cursor-sdk-runtime-refresh">Done -
 Dependency And Cursor SDK Runtime Refresh</h3>
-<p>Status: complete as of May 14, 2026.</p>
+<p>Status: refreshed as of May 27, 2026.</p>
 <p>Completed:</p>
 <ul>
-<li>Updated direct package pins to <code>@cursor/sdk@1.0.13</code>,
-<code>vite@8.0.13</code>, <code>vitest@4.1.6</code>,
-<code>playwright@1.60.0</code>, <code>tsx@4.22.0</code>, and
-<code>@types/node@25.8.0</code>.</li>
-<li>Kept the existing transitive refresh for
-<code>semver@7.8.0</code> and <code>socks@2.8.9</code> in the
-lockfile.</li>
+<li>Updated direct package pins to <code>@cursor/sdk@1.0.15</code>,
+<code>vite@8.0.14</code>, <code>vitest@4.1.7</code>,
+<code>playwright@1.60.0</code>, <code>tsx@4.22.3</code>,
+<code>typescript@6.0.3</code>, <code>three@0.184.0</code>,
+<code>@types/three@0.184.1</code>, and
+<code>@types/node@25.9.1</code>.</li>
+<li>Updated scoped, reviewed transitive security overrides to replace
+Cursor SDK's deprecated sqlite native-binary path with
+<code>@appthreat/sqlite3@8.0.2</code>, use <code>undici@8.3.0</code>,
+and keep <code>tar@7.5.15</code>; raised the Node engine floor to
+<code>&gt;=22.19.0</code> to match the latest <code>undici</code>
+requirements.</li>
+<li>Pinned <code>packageManager</code> to <code>npm@11.16.0</code>,
+added pinned <code>allowScripts</code> approvals for reviewed native
+install hooks used by <code>esbuild</code>, <code>fsevents</code>, and
+<code>@appthreat/sqlite3@8.0.2</code>, and documented override cleanup triggers in
+<code>docs/DEPENDENCIES.md</code>.</li>
+<li>Updated the Cursor SDK default model selection to the current
+catalog-backed <code>composer-2.5</code> fast parameter shape
+(<code>fast=true</code>), with bounded startup catalog discovery and an
+<code>auto</code> fallback only if the SDK no longer exposes composer
+2.5.</li>
 <li>Updated the Cursor SDK worker to consume <code>run.stream()</code>
-for assistant text, use <code>run.wait()</code> for terminal status, and
-await SDK async disposal.</li>
-<li>Changed the SDK handoff from large row-object JSON to a compact 14x9
-grid draft, then materialized and validated that draft locally. This keeps
-live SDK generation fast enough to finish while preserving the canonical
-brick-grid contract.</li>
-<li>Trimmed and passed <code>CURSOR_API_KEY</code> explicitly into the
-worker environment before starting SDK work.</li>
+for assistant text, use <code>run.wait()</code> for terminal status,
+force-clear stuck local runs, pass <code>CURSOR_API_KEY</code> and the
+resolved model explicitly into the worker environment, and await SDK async
+disposal.</li>
+<li>Changed the SDK handoff from large row-object JSON to a compact 20x12
+designer grid draft, then materialized and validated that draft locally.
+This keeps live SDK generation fast enough to finish while preserving the
+canonical brick-grid contract.</li>
+<li>Extracted brick-kind definitions, grid dimensions, the designer brief
+parser, canonical designer brief plan/fill policy, prompt rules, row
+validation, and constraint repair into dedicated shared modules;
+feature-only prompt handling is now an explicit constraint mode instead of
+a hidden brick-count exception.</li>
 <li>Mapped newer SDK failure shapes such as busy agents, stream-buffer
 overflow, unavailable models, empty assistant output, and invalid JSON
 back to public fallback warnings.</li>
-<li>Added a browser-side generation watchdog so interrupted or overlong
-Cursor SDK requests fall back locally instead of leaving the game stuck on
-the Generating overlay.</li>
-<li>Installed the matching Playwright Chromium browser for the updated
-smoke runner on this machine.</li>
+<li>Kept the browser-side generation watchdog aligned with the full server
+retry budget so interrupted or overlong Cursor SDK requests fall back
+locally instead of leaving the game stuck on the Generating overlay.</li>
+<li>Kept Playwright browser setup reproducible through the documented
+<code>npx playwright install chromium</code> command.</li>
 </ul>
 <p>Verified:</p>
 <ul>
 <li><code>npm outdated --json</code> returns no outdated direct
 packages.</li>
-<li><code>npm audit --audit-level=moderate</code> exits cleanly; the
-remaining report is low-severity transitive
-<code>@cursor/sdk</code>/<code>sqlite3</code> audit debt with no
-available fix.</li>
-<li><code>npm run build</code>, <code>npm run test</code>, and
-<code>npm run smoke</code> pass with the updated package set.</li>
+<li><code>npm run deps:verify</code> exercises the reviewed override
+surfaces for sqlite, Connect Node, and Cursor SDK.</li>
+<li><code>npm audit</code> exits cleanly with zero known
+vulnerabilities.</li>
+<li><code>npm approve-scripts --allow-scripts-pending</code> reports no
+unreviewed install scripts.</li>
+<li>May 27 verification: <code>npm run ci</code>,
+<code>npm run sdk:probe</code>, and <code>npm run sdk:reliability</code>
+passed with the updated package set and Cursor SDK model catalog.</li>
 </ul>
 <h3 id="done---product-foundation">Done - Product Foundation</h3>
 <p>Status: complete through May 15, 2026.</p>

@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import {
   BRICK_COLUMNS,
-  BRICK_ROWS,
   DEFAULT_DESIGNER_INTENT,
   type BoardDesignerIntent,
   type BrickKind,
@@ -39,6 +38,9 @@ import {
   trimSavedBoards
 } from "../../shared/boardPacks";
 import { createBoardExportPayload, encodeBoardExport, parseBoardExport } from "../../shared/shareState";
+import { gameEvent, gameEventsToStrings, type GameEventAudience, type GameEventRecord } from "../../shared/gameEvents";
+import { clamp, escapeAttribute, escapeHtml } from "../../shared/util";
+import { trapFocus } from "../ui/focusTrap";
 import {
   DEFAULT_COSMETICS,
   DEFAULT_SETTINGS,
@@ -54,8 +56,20 @@ import {
   normalizeSettings
 } from "../../shared/saveState";
 import type { HudApi, HudPackItem } from "../ui/hud";
+import { clearEffectLayerChildren, MAX_IMPACT_RINGS, MAX_SCREEN_FLASHES, trimEffectChildren } from "./effects";
+import { arenaPointToPercent } from "./scene";
 import { createGameAudio, type GameAudioPlayOptions, type GameSoundKind } from "./gameAudio";
 import { isLevelGenerationNetworkError, levelGenerationServerHint, requestGeneratedLevel } from "./levelApi";
+import {
+  calculatePaddleRebound,
+  computeStuckBallLaunch,
+  normalizeLoopRiskVelocity,
+  type LoopRiskVelocity,
+  type LoopRiskVelocityInput,
+  type PaddleRebound
+} from "./physics";
+import { penaltyPowerupPool, powerupToneFor, prizePowerupPool, type PowerupKind, type PowerupPoolInput, type PowerupTone } from "./powerups";
+import { LAUNCH_LOSS_GRACE_SECONDS } from "./tuning";
 
 interface Ball {
   x: number;
@@ -79,28 +93,6 @@ interface Brick {
   hp: number;
   maxHp: number;
 }
-
-type PowerupKind =
-  | "expandPaddle"
-  | "shrinkPaddle"
-  | "superShrink"
-  | "splitBall"
-  | "eightBall"
-  | "megaBall"
-  | "slowBall"
-  | "fastBall"
-  | "fireball"
-  | "thruBrick"
-  | "shootingPaddle"
-  | "grabPaddle"
-  | "extraLife"
-  | "levelWarp"
-  | "zapBricks"
-  | "fallingBricks"
-  | "setOffExploding"
-  | "expandExploding"
-  | "killPaddle"
-  | "shrinkBall";
 
 interface Powerup {
   x: number;
@@ -144,35 +136,6 @@ interface FloatingText {
 interface LaserBeam {
   x: number;
   life: number;
-}
-
-export interface PaddleReboundInput {
-  hitZone: number;
-  paddleVelocityX: number;
-  incomingVx: number;
-  incomingVy: number;
-}
-
-export interface PaddleRebound {
-  vx: number;
-  vy: number;
-  speed: number;
-}
-
-export interface LoopRiskVelocityInput {
-  vx: number;
-  vy: number;
-  minXRatio?: number;
-  minYRatio?: number;
-  fallbackXSign?: number;
-  fallbackYSign?: number;
-}
-
-export interface LoopRiskVelocity {
-  vx: number;
-  vy: number;
-  speed: number;
-  changed: boolean;
 }
 
 interface PaddleHitDebug extends PaddleRebound {
@@ -268,18 +231,7 @@ function computeLevelLayout(level: LevelBlueprint): LevelLayout {
 const PADDLE_Y = HEIGHT - 52;
 const PADDLE_SPEED = 620;
 const MAX_PADDLE_VELOCITY = 920;
-const PADDLE_ACCELERATION = 1.018;
-const PADDLE_EDGE_INFLUENCE = 0.74;
-const PADDLE_SPIN_INFLUENCE = 0.22;
-const LAUNCH_SIDE_SPEED = 190;
-const LAUNCH_OFFSET_INFLUENCE = 300;
-const LAUNCH_SPIN_INFLUENCE = 0.1;
-const LAUNCH_UPWARD_SPEED = 410;
-const MIN_BALL_SPEED = 420;
 const MAX_BALL_SPEED = 860;
-const MAX_LAUNCH_SPEED = 760;
-const MIN_REBOUND_X_RATIO = 0.18;
-const MAX_REBOUND_X_RATIO = 0.84;
 const MIN_COLLISION_X_RATIO = 0.16;
 const MIN_COLLISION_Y_RATIO = 0.16;
 const POWERUP_ATLAS_COLUMNS = 5;
@@ -417,40 +369,11 @@ const POWERUP_NAMES: Record<PowerupKind, string> = {
   shrinkBall: "Shrink ball"
 };
 
-type PowerupTone = "reward" | "hazard" | "volatile";
-
-const SAFE_REWARD_POWERUPS: PowerupKind[] = [
-  "expandPaddle",
-  "splitBall",
-  "slowBall",
-  "fireball",
-  "thruBrick",
-  "shootingPaddle",
-  "grabPaddle",
-  "extraLife"
-];
-const SKILL_REWARD_POWERUPS: PowerupKind[] = ["megaBall", "zapBricks"];
-const VOLATILE_REWARD_POWERUPS: PowerupKind[] = [
-  "eightBall",
-  "levelWarp",
-  "setOffExploding",
-  "expandExploding"
-];
-const MILD_HAZARD_POWERUPS: PowerupKind[] = ["shrinkPaddle", "fastBall", "shrinkBall"];
-const HARD_HAZARD_POWERUPS: PowerupKind[] = ["superShrink", "fallingBricks", "killPaddle"];
-const NEGATIVE_POWERUPS: PowerupKind[] = [...MILD_HAZARD_POWERUPS, ...HARD_HAZARD_POWERUPS];
-const VOLATILE_POWERUPS = new Set<PowerupKind>(VOLATILE_REWARD_POWERUPS);
 const POWERUP_VISUALS: Record<PowerupTone, { tint: string; emissive: string; spark: string; floatingKind: FloatingText["kind"] }> = {
   reward: { tint: "#7bf1a8", emissive: "#28e68a", spark: "#7bf1a8", floatingKind: "powerupReward" },
   hazard: { tint: "#ff5c7a", emissive: "#ff244c", spark: "#ff5c7a", floatingKind: "powerupHazard" },
   volatile: { tint: "#ffe066", emissive: "#ff9f43", spark: "#ffe066", floatingKind: "powerupVolatile" }
 };
-
-interface PowerupPoolInput {
-  level: number;
-  clearedLevels: number;
-  combo: number;
-}
 
 export class RicochetRushGame {
   private readonly mount: HTMLDivElement;
@@ -510,6 +433,9 @@ export class RicochetRushGame {
   private readonly paddleGlowMesh = new THREE.Mesh(this.paddleGlowGeometry, this.paddleGlowMaterial);
   private readonly paddleSpecularMesh = new THREE.Mesh(this.paddleSpecularGeometry, this.paddleSpecularMaterial);
   private sparksPoints: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial> | null = null;
+  private sparksPositionBuffer: Float32Array | null = null;
+  private sparksColorBuffer: Float32Array | null = null;
+  private static readonly MAX_SPARKS = 180;
   private bricks: Brick[] = [];
   private levelBlueprint: LevelBlueprint = fallbackLevel({ level: 1, score: 0, lives: 3, clearedLevels: 0, recentEvents: [] });
   private levelLayout: LevelLayout = computeLevelLayout(fallbackLevel({ level: 1, score: 0, lives: 3, clearedLevels: 0, recentEvents: [] }));
@@ -532,11 +458,17 @@ export class RicochetRushGame {
   private grabTimer = 0;
   private explosionScale = 1;
   private noBallTimer = 0;
+  private launchLossGraceTimer = 0;
+  private hudUpdateSignature = "";
+  private readonly fireExplodedThisTick = new Set<string>();
+  private readonly impactRingTimeouts: number[] = [];
+  private readonly screenFlashTimeouts: number[] = [];
+  private releaseOverlayFocusTrap: (() => void) | null = null;
   private loadingLevel = false;
   private hasSave = false;
   private autosaveSuppressed = false;
   private lastCheckpointAt = 0;
-  private recentEvents: string[] = ["Break the wall. Catch powerups. Clear the board."];
+  private recentEvents: GameEventRecord[] = [gameEvent("Break the wall. Catch powerups. Clear the board.")];
   private announcement = "Break the wall. Catch powerups. Clear the board.";
   private latestAgentTrace?: LevelResponse["trace"];
   private sidebarCollapsed = false;
@@ -602,7 +534,7 @@ export class RicochetRushGame {
     const save = readSave();
     if (save) {
       this.restoreSave(save);
-      this.pushEvent("Saved run restored.");
+      this.pushEvent("Saved run restored.", "technical");
       this.showLevelReadyOverlay("Saved run restored.");
     } else {
       this.startPack("starter", "Starter pack loaded.");
@@ -642,7 +574,7 @@ export class RicochetRushGame {
       packProgress: this.packProgress,
       dailyProgress: this.dailyProgress,
       todayKey: localDateKey(),
-      activeDailyKey: this.boardContext.source === "pack" && this.boardContext.packId === DAILY_PACK_ID ? this.boardContext.dailyDateKey ?? localDateKey() : null,
+      activeDailyKey: this.boardContext.source === "pack" && this.boardContext.packId === DAILY_PACK_ID ? this.resolvedDailyDateKey() : null,
       runStats: this.summaryStats("debug"),
       designerIntent: this.designerIntent,
       generationSummary: this.latestGenerationSummary,
@@ -656,7 +588,7 @@ export class RicochetRushGame {
         screenFlashes: this.effectsLayer.querySelectorAll(".screen-flash").length
       },
       powerupPrimerDismissed: this.powerupPrimerDismissed,
-      recentEvents: this.recentEvents,
+      recentEvents: gameEventsToStrings(this.recentEvents),
       announcement: this.announcement
     };
   }
@@ -812,10 +744,10 @@ export class RicochetRushGame {
           map.needsUpdate = true;
           this.powerupMaterials.set(kind, new THREE.SpriteMaterial({ map, color: visual.tint, transparent: true }));
         }
-        this.pushEvent("Power-up icons are ready.");
+        this.pushEvent("Power-up icons are ready.", "technical");
       },
       undefined,
-      () => this.pushEvent("Power-up icons switched to simple gems.")
+      () => this.pushEvent("Power-up icons switched to simple gems.", "technical")
     );
   }
 
@@ -995,6 +927,7 @@ export class RicochetRushGame {
   };
 
   private update(delta: number) {
+    this.fireExplodedThisTick.clear();
     this.updatePaddle(delta);
     this.updateFeedback(delta);
     if (this.phase !== "playing") {
@@ -1007,6 +940,7 @@ export class RicochetRushGame {
     this.laserTimer = Math.max(0, this.laserTimer - delta);
     this.laserCooldown = Math.max(0, this.laserCooldown - delta);
     this.grabTimer = Math.max(0, this.grabTimer - delta);
+    this.launchLossGraceTimer = Math.max(0, this.launchLossGraceTimer - delta);
     this.updateLaser(delta);
 
     for (const ball of this.balls) {
@@ -1032,7 +966,7 @@ export class RicochetRushGame {
     this.balls.splice(0, this.balls.length, ...this.balls.filter((ball) => ball.y < HEIGHT + 80));
     if (this.balls.length === 0) {
       this.noBallTimer += delta;
-      if (this.noBallTimer >= 0.22) this.loseLife();
+      if (this.noBallTimer >= 0.22 && this.launchLossGraceTimer <= 0) this.loseLife();
     } else {
       this.noBallTimer = 0;
     }
@@ -1214,22 +1148,25 @@ export class RicochetRushGame {
     });
   }
 
+  private resolvedDailyDateKey(): string {
+    if (this.boardContext.source === "pack" && this.boardContext.packId === DAILY_PACK_ID) {
+      return this.boardContext.dailyDateKey ?? localDateKey();
+    }
+    return localDateKey();
+  }
+
   private loadPackBoard(packId: string, boardIndex: number, event: string) {
     const level = this.materializePackBoard(packId, boardIndex);
     if (!level) return;
     this.level = boardIndex + 1;
     this.clearedLevels = boardIndex;
     this.latestAgentTrace = undefined;
-    const dailyDateKey = packId === DAILY_PACK_ID ? this.boardContext.source === "pack" && this.boardContext.packId === DAILY_PACK_ID ? this.boardContext.dailyDateKey ?? localDateKey() : localDateKey() : undefined;
+    const dailyDateKey = packId === DAILY_PACK_ID ? this.resolvedDailyDateKey() : undefined;
     this.loadLevel(level, event, undefined, undefined, { source: "pack", packId, boardIndex, dailyDateKey });
   }
 
   private materializePackBoard(packId: string, boardIndex: number): LevelBlueprint | null {
     const request = { ...this.levelRequest(), level: boardIndex + 1, clearedLevels: boardIndex };
-    if (packId === DAILY_PACK_ID) {
-      const dateKey = this.boardContext.source === "pack" && this.boardContext.packId === DAILY_PACK_ID ? this.boardContext.dailyDateKey ?? localDateKey() : localDateKey();
-      return materializeDailyBoard(dateKey);
-    }
     if (packId === SAVED_DESIGNS_PACK_ID) {
       const saved = this.savedBoards[boardIndex];
       return saved ? normalizeLevel(saved.levelBlueprint, authoredBoardRequestForSaved(request)) : null;
@@ -1391,6 +1328,9 @@ export class RicochetRushGame {
     this.laserTimer = 0;
     this.grabTimer = 0;
     this.noBallTimer = 0;
+    this.launchLossGraceTimer = 0;
+    this.hudUpdateSignature = "";
+    this.clearTransientEffects();
     this.explosionScale = 1;
     this.lastPaddleHit = null;
     this.lastLoopCorrection = null;
@@ -1455,7 +1395,7 @@ export class RicochetRushGame {
       this.resetBall();
     }
     if (!savedBricksFitLevel && this.bricks.length > 0) {
-      this.saveCheckpoint("Saved board rebuilt.", true);
+      this.saveCheckpoint("Saved board rebuilt.", true, "technical");
     }
     this.refreshHud("Saved run restored.");
   }
@@ -1476,19 +1416,23 @@ export class RicochetRushGame {
   }
 
   private launchBalls() {
+    let launched = false;
     for (const ball of this.balls) {
-      if (ball.stuck) {
-        const offset = clamp(ball.stuckOffset / (this.paddleWidth / 2), -1, 1);
-        const fallbackX = Math.abs(ball.vx) > 60 ? Math.sign(ball.vx) * LAUNCH_SIDE_SPEED : LAUNCH_SIDE_SPEED;
-        const launchSpeed = clamp(Math.hypot(fallbackX, LAUNCH_UPWARD_SPEED * this.levelBlueprint.speed), MIN_BALL_SPEED, MAX_LAUNCH_SPEED);
-        const desiredVx = (Math.abs(offset) > 0.08 ? LAUNCH_OFFSET_INFLUENCE * offset : fallbackX) + this.paddleVelocityX * LAUNCH_SPIN_INFLUENCE;
-        const launch = upwardVelocity(launchSpeed, desiredVx, Math.sign(desiredVx) || Math.sign(ball.vx) || 1);
-        ball.stuck = false;
-        ball.stuckOffset = 0;
-        ball.vx = launch.vx;
-        ball.vy = launch.vy;
-      }
+      if (!ball.stuck) continue;
+      const launch = computeStuckBallLaunch({
+        stuckOffset: ball.stuckOffset,
+        paddleWidth: this.paddleWidth,
+        paddleVelocityX: this.paddleVelocityX,
+        storedVx: ball.vx,
+        speedMultiplier: this.levelBlueprint.speed
+      });
+      ball.stuck = false;
+      ball.stuckOffset = 0;
+      ball.vx = launch.vx;
+      ball.vy = launch.vy;
+      launched = true;
     }
+    if (launched) this.launchLossGraceTimer = LAUNCH_LOSS_GRACE_SECONDS;
   }
 
   private collideWalls(ball: Ball) {
@@ -1539,6 +1483,7 @@ export class RicochetRushGame {
     ball.vy = rebound.vy;
     this.lastPaddleHit = { ...rebound, hitZone: hit, paddleVelocityX: this.paddleVelocityX };
     ball.y = PADDLE_Y - 10 - ball.radius;
+    this.launchLossGraceTimer = 0;
     this.audio.play(Math.abs(hit) > 0.72 ? "paddleEdge" : "paddle", this.settings.sfxVolume, {
       intensity: 0.88 + Math.min(0.36, Math.abs(this.paddleVelocityX) / MAX_PADDLE_VELOCITY),
       pitch: 0.94 + Math.abs(hit) * 0.16
@@ -1567,8 +1512,19 @@ export class RicochetRushGame {
         }
       }
       this.hitBrick(brick);
-      if (ball.fireTimer > 0) this.explode(brick);
+      if (ball.fireTimer > 0) {
+        const brickKey = `${brick.x}:${brick.y}`;
+        if (!this.fireExplodedThisTick.has(brickKey)) {
+          this.fireExplodedThisTick.add(brickKey);
+          this.explode(brick);
+        }
+      }
       if (!piercing) return;
+      if (overlapX < overlapY) {
+        ball.x = ball.vx >= 0 ? brick.x + brick.width + ball.radius + 0.5 : brick.x - ball.radius - 0.5;
+      } else {
+        ball.y = ball.vy >= 0 ? brick.y + brick.height + ball.radius + 0.5 : brick.y - ball.radius - 0.5;
+      }
     }
   }
 
@@ -1763,23 +1719,37 @@ export class RicochetRushGame {
 
   private emitImpactRing(x: number, y: number, color: string, kind: "brick" | "blast" | "boss" | "combo" | "powerup") {
     if (!this.settings.particles || this.settings.reducedMotion) return;
+    trimEffectChildren(this.effectsLayer, ".impact-ring", MAX_IMPACT_RINGS);
     const node = document.createElement("div");
     node.className = `impact-ring is-${kind}`;
     node.style.setProperty("--impact-color", color);
-    node.style.left = `${(x / WIDTH) * 100}%`;
-    node.style.top = `${(y / HEIGHT) * 100}%`;
+    const position = arenaPointToPercent(x, y);
+    node.style.left = position.left;
+    node.style.top = position.top;
     this.effectsLayer.append(node);
-    window.setTimeout(() => node.remove(), 720);
+    const timeout = window.setTimeout(() => node.remove(), 720);
+    this.impactRingTimeouts.push(timeout);
   }
 
   private emitScreenFlash(color: string, opacity: number) {
     if (!this.settings.particles || this.settings.reducedMotion) return;
+    trimEffectChildren(this.effectsLayer, ".screen-flash", MAX_SCREEN_FLASHES);
     const node = document.createElement("div");
     node.className = "screen-flash";
     node.style.setProperty("--flash-color", color);
     node.style.setProperty("--flash-opacity", String(opacity));
     this.effectsLayer.append(node);
-    window.setTimeout(() => node.remove(), 360);
+    const timeout = window.setTimeout(() => node.remove(), 360);
+    this.screenFlashTimeouts.push(timeout);
+  }
+
+  private clearTransientEffects() {
+    for (const timeout of this.impactRingTimeouts) window.clearTimeout(timeout);
+    for (const timeout of this.screenFlashTimeouts) window.clearTimeout(timeout);
+    this.impactRingTimeouts.splice(0);
+    this.screenFlashTimeouts.splice(0);
+    clearEffectLayerChildren(this.effectsLayer);
+    this.fireExplodedThisTick.clear();
   }
 
   private triggerHaptic(pattern: number | number[]) {
@@ -1880,21 +1850,31 @@ export class RicochetRushGame {
   }
 
   private updateSparks(delta: number) {
-    for (const spark of this.sparks) {
+    let write = 0;
+    for (let read = 0; read < this.sparks.length; read += 1) {
+      const spark = this.sparks[read];
       spark.x += spark.vx * delta;
       spark.y += spark.vy * delta;
       spark.vx *= Math.max(0.72, 1 - delta * 0.7);
       spark.vy += spark.gravity * delta;
       spark.life -= delta;
+      if (spark.life <= 0) continue;
+      if (write !== read) this.sparks[write] = spark;
+      write += 1;
     }
-    this.sparks.splice(0, this.sparks.length, ...this.sparks.filter((spark) => spark.life > 0));
+    this.sparks.length = write;
   }
 
   private updateFloatingTexts(delta: number) {
-    for (const text of this.floatingTexts) {
+    let write = 0;
+    for (let read = 0; read < this.floatingTexts.length; read += 1) {
+      const text = this.floatingTexts[read];
       text.life -= delta;
+      if (text.life <= 0) continue;
+      if (write !== read) this.floatingTexts[write] = text;
+      write += 1;
     }
-    this.floatingTexts.splice(0, this.floatingTexts.length, ...this.floatingTexts.filter((text) => text.life > 0));
+    this.floatingTexts.length = write;
   }
 
   private updateFeedback(delta: number) {
@@ -1912,6 +1892,9 @@ export class RicochetRushGame {
 
   private addFloatingText(x: number, y: number, text: string, kind: FloatingText["kind"]) {
     const duration = kind === "combo" ? 0.95 : kind.startsWith("powerup") ? 0.9 : 0.75;
+    if (this.floatingTexts.length >= 24) {
+      this.floatingTexts.splice(0, this.floatingTexts.length - 23);
+    }
     this.floatingTexts.push({
       id: this.nextFloatingTextId,
       x,
@@ -1935,6 +1918,7 @@ export class RicochetRushGame {
     this.lives -= 1;
     this.combo = 1;
     this.noBallTimer = 0;
+    this.launchLossGraceTimer = 0;
     this.audio.play("loseLife", this.settings.sfxVolume);
     this.lifeFlashTimer = 0.45;
     this.shakeBoard(0.18, 3.2);
@@ -1998,7 +1982,7 @@ export class RicochetRushGame {
     this.audio.play("levelClear", this.settings.sfxVolume);
     this.triggerHaptic([18, 24, 18]);
     this.shakeBoard(0.28, 2.6);
-    this.saveCheckpoint("Level checkpoint saved.");
+    this.saveCheckpoint("Level checkpoint saved.", false, "technical");
     const nextStep = this.nextLevelCompleteStep(completedContext);
     const actions: SummaryAction[] = [
       { label: nextStep.actionLabel, primary: true, action: () => void this.continueToNextLevel() },
@@ -2039,7 +2023,7 @@ export class RicochetRushGame {
 
   private async restartRun() {
     const activePackId = this.boardContext.source === "pack" ? this.boardContext.packId : null;
-    const activeDailyDateKey = this.boardContext.source === "pack" && this.boardContext.packId === DAILY_PACK_ID ? this.boardContext.dailyDateKey ?? localDateKey() : null;
+    const activeDailyDateKey = this.boardContext.source === "pack" && this.boardContext.packId === DAILY_PACK_ID ? this.resolvedDailyDateKey() : null;
     this.level = 1;
     this.clearedLevels = 0;
     this.score = 0;
@@ -2079,25 +2063,25 @@ export class RicochetRushGame {
           const result = await requestGeneratedLevel(request);
           if (result.source === "fallback" && attempt < maxAttempts) {
             lastError = result.warning ?? "Board designer used local backup instead of Cursor SDK.";
-            this.pushEvent(`${lastError} Retrying with a fresh seed.`);
+            this.pushEvent(`${lastError} Retrying with a fresh seed.`, "technical");
             continue;
           }
           const fingerprint = blueprintFingerprint(result.level);
           if (fingerprint === previousFingerprint && attempt < maxAttempts) {
             lastError = "Designer returned the same wall layout; retrying with a fresh seed.";
-            this.pushEvent(lastError);
+            this.pushEvent(lastError, "technical");
             continue;
           }
           const sourceEvent = `${result.level.name} is ready.`;
           if (result.source === "fallback" && result.warning) {
-            this.pushEvent(result.warning);
+            this.pushEvent(result.warning, "technical");
           }
           this.loadLevel(result.level, sourceEvent, result.trace, result.summary, { source: "generated", packId: null, boardIndex: 0 }, sourcePrompt);
           return;
         } catch (error) {
           lastError = error instanceof Error ? error.message : "unknown error";
           if (attempt < maxAttempts && !isLevelGenerationNetworkError(error)) {
-            this.pushEvent(`Generation attempt ${attempt} failed. Retrying.`);
+            this.pushEvent(`Generation attempt ${attempt} failed. Retrying.`, "technical");
             continue;
           }
           const fallback = fallbackLevel(request);
@@ -2140,7 +2124,7 @@ export class RicochetRushGame {
       score: this.score,
       lives: this.lives,
       clearedLevels: this.clearedLevels,
-      recentEvents: this.recentEvents.slice(0, 5),
+      recentEvents: gameEventsToStrings(this.recentEvents.filter((event) => event.audience === "player")).slice(0, 5),
       designer: resolveDesignerIntentForGeneration({
         ...this.designerIntent,
         seed: this.designerIntent.seed
@@ -2152,14 +2136,17 @@ export class RicochetRushGame {
     const brickCount = level.rows.flat().filter(Boolean).length;
     const targets = designerTargets(designer, this.level);
     const serverOffline = reason.includes("npm run dev") || reason.includes("/api/level");
+    const promptLabel = designer.brief.trim()
+      ? `your prompt: "${designer.brief.trim().slice(0, 88)}${designer.brief.trim().length > 88 ? "…" : ""}"`
+      : "the default arcade brief";
     return {
       source: "fallback",
-      title: serverOffline ? "Local backup (server offline)" : "Local backup board",
+      title: serverOffline ? `Local backup · ${level.name}` : `Local backup · ${level.name}`,
       detail: serverOffline
-        ? `${reason} Local backup built ${level.name} so you can keep playing offline. Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; final wall has ${brickCount} playable bricks.`
-        : `Local backup built ${level.name} from the current board prompt. Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; final wall has ${brickCount} playable bricks.`,
+        ? `${reason} Local backup built "${level.name}" for ${promptLabel} so you can keep playing offline. Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; final wall has ${brickCount} playable bricks.`
+        : `Local backup built "${level.name}" for ${promptLabel}. Target was ${targets.brickTarget} bricks with about ${targets.specialTarget} specials; final wall has ${brickCount} playable bricks.`,
       chips: [
-        designer.brief ? "prompt" : "default prompt",
+        designer.brief ? `prompt: ${designer.brief.trim().slice(0, 56)}${designer.brief.trim().length > 56 ? "…" : ""}` : "default prompt",
         `difficulty ${designer.difficulty}/5`,
         `${Math.round(designer.density * 100)}% density`,
         `${Math.round(designer.specialBias * 100)}% specials`
@@ -2243,7 +2230,7 @@ export class RicochetRushGame {
     const savedCollection: HudPackItem = {
       id: SAVED_DESIGNS_PACK_ID,
       name: "Saved Designs Gallery",
-      description: "Generated boards you kept. Individual cards below can be replayed; remix by copying their prompt into the Designer or discard by replacing them with better saves.",
+      description: "Replay boards you kept from the Designer. New saves appear as cards below.",
       progressLabel: this.savedBoards.length > 0 ? `${savedProgress.cleared}/${this.savedBoards.length} cleared` : "empty",
       bestScore: savedProgress.bestScore,
       unlocked: this.savedBoards.length > 0,
@@ -2272,6 +2259,9 @@ export class RicochetRushGame {
   }
 
   private refreshHud(status?: string) {
+    const signature = this.buildHudUpdateSignature(status);
+    if (!status && signature === this.hudUpdateSignature) return;
+    this.hudUpdateSignature = signature;
     this.updateCanvasLabel();
     this.hud.update({
       score: this.score,
@@ -2280,7 +2270,7 @@ export class RicochetRushGame {
       level: this.level,
       bricks: this.bricks.length,
       combo: this.combo,
-      status: status ?? this.recentEvents[0] ?? "",
+      status: status ?? this.recentEvents[0]?.text ?? "",
       levelName: this.levelBlueprint.name,
       hint: this.levelBlueprint.paddleHint,
       pending: this.loadingLevel,
@@ -2305,10 +2295,51 @@ export class RicochetRushGame {
     });
   }
 
+  private buildHudUpdateSignature(status?: string): string {
+    const ballFire = Math.max(0, ...this.balls.map((ball) => ball.fireTimer));
+    const ballThru = Math.max(0, ...this.balls.map((ball) => ball.thruTimer));
+    const ballMega = Math.max(0, ...this.balls.map((ball) => ball.megaTimer));
+    return [
+      status ?? "",
+      this.phase,
+      this.score,
+      this.bestScore,
+      this.lives,
+      this.level,
+      this.bricks.length,
+      this.combo.toFixed(2),
+      this.recentEvents.map((entry) => `${entry.audience}:${entry.text}`).join("|"),
+      this.announcement,
+      this.loadingLevel,
+      this.hasSave,
+      this.sidebarCollapsed,
+      Math.ceil(this.laserTimer),
+      Math.ceil(this.grabTimer),
+      Math.ceil(ballFire),
+      Math.ceil(ballThru),
+      Math.ceil(ballMega),
+      this.paddleWidth,
+      this.boardContext.source,
+      this.boardContext.packId ?? "",
+      this.designerIntent.brief,
+      this.latestGenerationSummary?.title ?? "",
+      this.powerupPrimerDismissed,
+      this.settings.sfxVolume,
+      this.settings.musicVolume,
+      this.settings.particles,
+      this.settings.reducedMotion,
+      this.settings.highContrast
+    ].join("§");
+  }
+
   private updateCanvasLabel() {
     this.renderer.domElement.setAttribute(
       "aria-label",
       `Ricochet Rush. ${this.phase}. Level ${this.level}. ${this.lives} lives. ${this.bricks.length} bricks remain.`
+    );
+    this.renderer.domElement.setAttribute(
+      "aria-keyshortcuts",
+      "ArrowLeft move left, ArrowRight move right, Space launch or continue, P pause, N design board, Escape close panels"
     );
   }
 
@@ -2359,8 +2390,8 @@ export class RicochetRushGame {
     return rows.slice(0, 5);
   }
 
-  private pushEvent(event: string) {
-    this.recentEvents.unshift(event);
+  private pushEvent(event: string, audience: GameEventAudience = "player") {
+    this.recentEvents.unshift(gameEvent(event, audience));
     this.recentEvents.splice(6);
   }
 
@@ -2375,7 +2406,7 @@ export class RicochetRushGame {
     this.announcement = message;
   }
 
-  private saveCheckpoint(event?: string, force = false) {
+  private saveCheckpoint(event?: string, force = false, audience: GameEventAudience = "player") {
     const now = performance.now();
     if (!force && !event && now - this.lastCheckpointAt < 1000) return;
     this.lastCheckpointAt = now;
@@ -2384,7 +2415,7 @@ export class RicochetRushGame {
     if (this.bricks.length === 0 || this.autosaveSuppressed) {
       localStorage.removeItem(SAVE_KEY);
       this.hasSave = false;
-      if (event) this.pushEvent(event);
+      if (event) this.pushEvent(event, audience);
       return;
     }
     const save: GameSave = {
@@ -2395,7 +2426,7 @@ export class RicochetRushGame {
       boardSource: this.boardContext.source,
       packId: this.boardContext.packId,
       packBoardIndex: this.boardContext.boardIndex,
-      dailyDateKey: this.boardContext.source === "pack" && this.boardContext.packId === DAILY_PACK_ID ? this.boardContext.dailyDateKey ?? localDateKey() : null,
+      dailyDateKey: this.boardContext.source === "pack" && this.boardContext.packId === DAILY_PACK_ID ? this.resolvedDailyDateKey() : null,
       score: this.score,
       bestScore: this.bestScore,
       lives: this.lives,
@@ -2404,7 +2435,7 @@ export class RicochetRushGame {
       levelBlueprint: this.levelBlueprint,
       levelSourcePrompt: this.levelSourcePrompt,
       bricks: this.bricks.map(toSavedBrick),
-      recentEvents: event ? [event, ...this.recentEvents].slice(0, 6) : this.recentEvents,
+      recentEvents: event ? [gameEvent(event, audience), ...this.recentEvents].slice(0, 6) : this.recentEvents,
       laserTimer: this.laserTimer,
       grabTimer: this.grabTimer,
       explosionScale: this.explosionScale,
@@ -2413,7 +2444,7 @@ export class RicochetRushGame {
     };
     writeJson(SAVE_KEY, save);
     this.hasSave = true;
-    if (event) this.pushEvent(event);
+    if (event) this.pushEvent(event, audience);
   }
 
   private applySettingsClass() {
@@ -2744,15 +2775,31 @@ export class RicochetRushGame {
   }
 
   private syncSparks() {
-    if (this.sparksPoints) {
-      this.sparksPoints.geometry.dispose();
-      this.sparksGroup.remove(this.sparksPoints);
-      this.sparksPoints = null;
+    if (this.sparks.length === 0) {
+      this.sparksPoints?.geometry.setDrawRange(0, 0);
+      return;
     }
-    if (this.sparks.length === 0) return;
-    const positions = new Float32Array(this.sparks.length * 3);
-    const colors = new Float32Array(this.sparks.length * 3);
-    for (const [index, spark] of this.sparks.entries()) {
+    const count = Math.min(this.sparks.length, RicochetRushGame.MAX_SPARKS);
+    if (!this.sparksPoints || !this.sparksPositionBuffer || !this.sparksColorBuffer) {
+      this.sparksPositionBuffer = new Float32Array(RicochetRushGame.MAX_SPARKS * 3);
+      this.sparksColorBuffer = new Float32Array(RicochetRushGame.MAX_SPARKS * 3);
+      const geometry = new THREE.BufferGeometry();
+      const positionAttr = new THREE.BufferAttribute(this.sparksPositionBuffer, 3);
+      positionAttr.setUsage(THREE.DynamicDrawUsage);
+      const colorAttr = new THREE.BufferAttribute(this.sparksColorBuffer, 3);
+      colorAttr.setUsage(THREE.DynamicDrawUsage);
+      geometry.setAttribute("position", positionAttr);
+      geometry.setAttribute("color", colorAttr);
+      this.sparksPoints = new THREE.Points(
+        geometry,
+        new THREE.PointsMaterial({ size: 4, vertexColors: true, transparent: true, opacity: 0.92 })
+      );
+      this.sparksGroup.add(this.sparksPoints);
+    }
+    const positions = this.sparksPositionBuffer;
+    const colors = this.sparksColorBuffer;
+    for (let index = 0; index < count; index += 1) {
+      const spark = this.sparks[index];
       const position = toWorld(spark.x, spark.y, 78);
       positions[index * 3] = position.x;
       positions[index * 3 + 1] = position.y;
@@ -2762,12 +2809,12 @@ export class RicochetRushGame {
       colors[index * 3 + 1] = color.g;
       colors[index * 3 + 2] = color.b;
     }
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-    const size = this.sparks.reduce((largest, spark) => Math.max(largest, spark.size), 4);
-    this.sparksPoints = new THREE.Points(geometry, new THREE.PointsMaterial({ size, vertexColors: true, transparent: true, opacity: 0.92 }));
-    this.sparksGroup.add(this.sparksPoints);
+    const geometry = this.sparksPoints.geometry;
+    geometry.setDrawRange(0, count);
+    geometry.attributes.position.needsUpdate = true;
+    geometry.attributes.color.needsUpdate = true;
+    const size = this.sparks.slice(0, count).reduce((largest, spark) => Math.max(largest, spark.size), 4);
+    this.sparksPoints.material.size = size;
   }
 
   private syncFloatingTexts() {
@@ -2903,6 +2950,7 @@ export class RicochetRushGame {
   }
 
   private showRunSummaryOverlay(mode: "clear" | "gameOver", content: { title: string; body: string; actions: SummaryAction[] }) {
+    this.hud.closeToolPanel();
     this.previouslyFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const stage = this.mount.closest<HTMLElement>(".stage");
     stage?.classList.add("has-visible-overlay", "has-priority-overlay");
@@ -2935,6 +2983,12 @@ export class RicochetRushGame {
       if (button && !action.disabled) button.addEventListener("click", action.action, { once: true });
     }
     this.overlay.querySelector<HTMLButtonElement>("[data-summary-action]:not([disabled])")?.focus({ preventScroll: true });
+    const card = this.overlay.querySelector<HTMLElement>(".run-summary");
+    if (card) {
+      this.releaseOverlayFocusTrap?.();
+      // Run summary intentionally ignores Escape so dismissal stays button-driven (pause overlays wire Escape to dismiss).
+      this.releaseOverlayFocusTrap = trapFocus(card, () => undefined);
+    }
   }
 
   private openBoardPicker() {
@@ -2958,6 +3012,7 @@ export class RicochetRushGame {
   }
 
   private showOverlay(title: string, body: string, actionLabel?: string, action?: () => void, busy = false, secondaryLabel?: string, secondaryAction?: () => void) {
+    if (secondaryLabel) this.hud.closeToolPanel();
     this.previouslyFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const stage = this.mount.closest<HTMLElement>(".stage");
     stage?.classList.add("has-visible-overlay");
@@ -2982,9 +3037,18 @@ export class RicochetRushGame {
     if (button && action) button.addEventListener("click", action, { once: true });
     if (secondaryButton && secondaryAction) secondaryButton.addEventListener("click", secondaryAction, { once: true });
     button?.focus({ preventScroll: true });
+    const card = this.overlay.querySelector<HTMLElement>(".overlay-card");
+    if (card) {
+      this.releaseOverlayFocusTrap?.();
+      this.releaseOverlayFocusTrap = trapFocus(card, () => {
+        if (secondaryAction) secondaryAction();
+      });
+    }
   }
 
   private hideOverlay() {
+    this.releaseOverlayFocusTrap?.();
+    this.releaseOverlayFocusTrap = null;
     this.overlay.classList.remove("is-visible");
     this.mount.closest<HTMLElement>(".stage")?.classList.remove("has-visible-overlay", "has-priority-overlay");
     this.overlay.innerHTML = "";
@@ -2998,27 +3062,11 @@ export class RicochetRushGame {
   }
 }
 
+function pick<T>(items: readonly [T, ...T[]]): T;
+function pick<T>(items: readonly T[]): T;
 function pick<T>(items: readonly T[]): T {
-  return items[Math.floor(Math.random() * items.length)] ?? items[0];
-}
-
-export function prizePowerupPool(input: PowerupPoolInput): readonly PowerupKind[] {
-  const progress = powerupPressure(input);
-  if (input.combo >= 3 && progress >= 0.55) return [...SAFE_REWARD_POWERUPS, ...SKILL_REWARD_POWERUPS, ...VOLATILE_REWARD_POWERUPS];
-  if (input.combo >= 3) return [...SAFE_REWARD_POWERUPS, ...SKILL_REWARD_POWERUPS];
-  if (progress >= 0.55) return [...SAFE_REWARD_POWERUPS, ...VOLATILE_REWARD_POWERUPS];
-  return SAFE_REWARD_POWERUPS;
-}
-
-export function penaltyPowerupPool(input: PowerupPoolInput): readonly PowerupKind[] {
-  if (powerupPressure(input) >= 0.45) return [...MILD_HAZARD_POWERUPS, ...HARD_HAZARD_POWERUPS];
-  return MILD_HAZARD_POWERUPS;
-}
-
-export function powerupToneFor(kind: PowerupKind): PowerupTone {
-  if (NEGATIVE_POWERUPS.includes(kind)) return "hazard";
-  if (VOLATILE_POWERUPS.has(kind)) return "volatile";
-  return "reward";
+  if (items.length === 0) throw new Error("pick() requires at least one item.");
+  return items[Math.floor(Math.random() * items.length)]!;
 }
 
 function powerupVisualFor(kind: PowerupKind): (typeof POWERUP_VISUALS)[PowerupTone] {
@@ -3030,10 +3078,6 @@ function pickupLabelFor(kind: PowerupKind): string {
   if (tone === "hazard") return `-${POWERUP_NAMES[kind]}`;
   if (tone === "volatile") return `! ${POWERUP_NAMES[kind]}`;
   return `+${POWERUP_NAMES[kind]}`;
-}
-
-function powerupPressure(input: PowerupPoolInput): number {
-  return clamp((input.level + input.clearedLevels - 1) / 10, 0, 1);
 }
 
 function pseudoRandom(index: number, salt: number): number {
@@ -3199,8 +3243,9 @@ function brickAudioOptions(brick: Brick, combo: number, destroyed: boolean): Gam
 function soundForPowerup(kind: PowerupKind): GameSoundKind {
   if (kind === "extraLife") return "extraLife";
   if (kind === "levelWarp") return "levelWarp";
-  if (VOLATILE_POWERUPS.has(kind)) return "volatilePowerup";
-  if (NEGATIVE_POWERUPS.includes(kind)) return "badPowerup";
+  const tone = powerupToneFor(kind);
+  if (tone === "volatile") return "volatilePowerup";
+  if (tone === "hazard") return "badPowerup";
   return "goodPowerup";
 }
 
@@ -3259,68 +3304,11 @@ function bricksFitLevel(savedBricks: readonly SavedBrick[], level: LevelBlueprin
   );
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-export function calculatePaddleRebound(input: PaddleReboundInput): PaddleRebound {
-  const speed = clamp(Math.hypot(input.incomingVx, input.incomingVy) * PADDLE_ACCELERATION, MIN_BALL_SPEED, MAX_BALL_SPEED);
-  const hitZone = clamp(input.hitZone, -1, 1);
-  const paddleVelocityX = clamp(input.paddleVelocityX, -MAX_PADDLE_VELOCITY, MAX_PADDLE_VELOCITY);
-  const desiredVx = hitZone * speed * PADDLE_EDGE_INFLUENCE + paddleVelocityX * PADDLE_SPIN_INFLUENCE;
-  const fallbackSign = Math.sign(desiredVx) || Math.sign(input.incomingVx) || 1;
-  return upwardVelocity(speed, desiredVx, fallbackSign);
-}
-
-function upwardVelocity(speed: number, desiredVx: number, fallbackSign: number): PaddleRebound {
-  const maxVx = speed * MAX_REBOUND_X_RATIO;
-  const minVx = Math.min(speed * MIN_REBOUND_X_RATIO, maxVx);
-  const sign = Math.sign(desiredVx) || Math.sign(fallbackSign) || 1;
-  const vx = sign * clamp(Math.abs(desiredVx), minVx, maxVx);
-  const vy = -Math.sqrt(Math.max(0, speed * speed - vx * vx));
-  return { vx, vy, speed };
-}
-
-export function normalizeLoopRiskVelocity(input: LoopRiskVelocityInput): LoopRiskVelocity {
-  const speed = Math.hypot(input.vx, input.vy);
-  if (speed <= 0) return { vx: input.vx, vy: input.vy, speed, changed: false };
-
-  let vx = input.vx;
-  let vy = input.vy;
-  let changed = false;
-
-  if (input.minXRatio !== undefined) {
-    const minAbsX = speed * input.minXRatio;
-    if (Math.abs(vx) < minAbsX) {
-      const sign = Math.sign(vx) || Math.sign(input.fallbackXSign ?? 0) || 1;
-      vx = sign * minAbsX;
-      const ySign = Math.sign(vy) || Math.sign(input.fallbackYSign ?? 0) || 1;
-      vy = ySign * Math.sqrt(Math.max(0, speed * speed - vx * vx));
-      changed = true;
-    }
-  }
-
-  if (input.minYRatio !== undefined) {
-    const minAbsY = speed * input.minYRatio;
-    if (Math.abs(vy) < minAbsY) {
-      const sign = Math.sign(vy) || Math.sign(input.fallbackYSign ?? 0) || 1;
-      vy = sign * minAbsY;
-      const xSign = Math.sign(vx) || Math.sign(input.fallbackXSign ?? 0) || 1;
-      vx = xSign * Math.sqrt(Math.max(0, speed * speed - vy * vy));
-      changed = true;
-    }
-  }
-
-  return { vx, vy, speed, changed };
-}
-
-function escapeHtml(value: string): string {
-  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
-
-function escapeAttribute(value: string): string {
-  return escapeHtml(value).replaceAll('"', "&quot;");
-}
+export { LAUNCH_LOSS_GRACE_SECONDS } from "./tuning";
+export { calculatePaddleRebound, computeStuckBallLaunch, normalizeLoopRiskVelocity } from "./physics";
+export type { LoopRiskVelocity, LoopRiskVelocityInput, PaddleRebound, PaddleReboundInput, StuckBallLaunchInput } from "./physics";
+export { penaltyPowerupPool, powerupToneFor, prizePowerupPool } from "./powerups";
+export type { PowerupKind, PowerupPoolInput, PowerupTone } from "./powerups";
 
 function toSavedBall(ball: Ball): SavedBallState {
   return {

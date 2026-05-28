@@ -7,3 +7,4 @@
 - Cursor SDK generation is a core gameplay pillar, not decorative demo plumbing.
 - Generated bitmap assets live in `public/assets/`.
 - Canonical roadmap: `docs/ROADMAP.html`.
+- Playwright smoke and UX audits mount `window.__ricochetRushGame` for debug snapshots; production builds do not mount this hook unless explicitly enabled.

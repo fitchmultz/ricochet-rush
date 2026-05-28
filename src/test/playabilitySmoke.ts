@@ -1,6 +1,7 @@
 import { once } from "node:events";
 import { resolve } from "node:path";
 import { chromium, type Page } from "playwright";
+import { LAUNCH_LOSS_GRACE_SECONDS } from "../client/game/RicochetRushGame";
 import { createApiServer } from "../server/api";
 
 process.env.RICOCHET_RUSH_FORCE_FALLBACK = "1";
@@ -90,16 +91,26 @@ const address = server.address();
 if (!address || typeof address === "string") throw new Error("Preview server did not expose a TCP port.");
 
 const baseUrl = `http://127.0.0.1:${address.port}`;
+const appUrl = `${baseUrl}/?debugGame=1`;
 const browser = await chromium.launch({ headless: true });
 
 try {
+  const productionPage = await browser.newPage({ viewport: { width: 800, height: 600 } });
+  await productionPage.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await productionPage.waitForSelector('[data-testid="ricochet-rush-canvas"]');
+  assert(
+    (await productionPage.evaluate(() => "__ricochetRushGame" in window)) === false,
+    "Expected production preview to omit the debug game surface unless explicitly enabled."
+  );
+  await productionPage.close();
+
   const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
   const browserFailures: string[] = [];
   page.on("pageerror", (error) => browserFailures.push(`pageerror: ${error.message}`));
   page.on("console", (message) => {
     if (message.type() === "error") browserFailures.push(`console: ${message.text()}`);
   });
-  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await page.goto(appUrl, { waitUntil: "domcontentloaded" });
   await page.evaluate((save) => {
     localStorage.clear();
     localStorage.setItem("ricochet-rush-save", JSON.stringify(save));
@@ -261,7 +272,8 @@ try {
   const designed = await snapshot(page);
   assert(designed.designerIntent.brief === generatedPrompt, `Expected designer brief to apply, got ${designed.designerIntent.brief}.`);
   assert(designed.boardTheme.wallGlow === "#7ef1ff", `Expected generated board theme, got ${designed.boardTheme.wallGlow}.`);
-  assert(designed.generationSummary?.title === "Local backup board", "Expected public generation summary for forced fallback.");
+  assert(designed.generationSummary?.title.includes("Local backup") === true, "Expected public generation summary for forced fallback.");
+  assert(designed.generationSummary?.detail.includes(generatedPrompt.slice(0, 40)) === true, "Expected generation summary to reference the designer prompt.");
   assert(await page.locator("[data-generation-summary]").isVisible(), "Expected visible public generation summary in the Designer panel.");
   assert(await page.locator("[data-compact-generation-summary]").isHidden(), "Expected generation diagnostics to stay out of the default play rail.");
   assert(!(await page.locator(".console-status").innerText()).toLowerCase().includes("local backup"), "Expected fallback wording to stay out of the default play rail.");
@@ -271,6 +283,7 @@ try {
   await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().boardSource === "generated");
   assert(await page.locator('[data-action="save-board"]').isEnabled(), "Expected restored generated board to stay keepable.");
+  await assertLaunchSurvivalWindow(page, "generated center launch");
   await page.locator('[data-action="save-board"]').click();
   assert(await hasLocalStorageKey(page, "ricochet-rush-saved-boards"), "Expected kept generated board to persist in Saved Designs.");
   assert(!(await page.locator('[data-pack-id="saved-designs"]').isDisabled()), "Expected Saved Designs to unlock after keeping a board.");
@@ -315,6 +328,11 @@ try {
   await page.locator('[data-pack-id="starter"]').click();
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().currentPackId === "starter");
   assert(await page.locator('[data-action="save-board"]').isDisabled(), "Expected authored boards not to be keepable.");
+  await assertLaunchSurvivalWindow(page, "starter center launch", { reloadAfter: true });
+  await assertLaunchGraceExpiresAfterWindow(page, "starter launch grace expiry");
+  await page.locator('[data-tool-panel="packs"]').click();
+  await page.locator('[data-pack-id="starter"]').click();
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().currentPackId === "starter");
 
   await page.locator("[data-overlay-action]").click();
   await page.keyboard.down("ArrowRight");
@@ -343,7 +361,11 @@ try {
   const pauseText = await page.locator(".overlay-card").innerText();
   assert(pauseText.includes("Paused"), "Expected Escape to pause into an overlay.");
   assert(await hasFocusedOverlayAction(page), "Expected pause overlay to focus its primary action.");
+  await page.keyboard.press("Escape");
+  assert((await snapshot(page)).phase === "ready", "Expected Escape on pause overlay to keep the game paused.");
+  assert(await page.locator(".overlay-card").isVisible(), "Expected Escape on a primary-only overlay not to hide it without resuming.");
   await injectPowerupClarityState(page);
+  await page.waitForFunction(() => document.querySelectorAll(".floating-text.is-powerupReward").length === 1);
   const powerupClarity = await snapshot(page);
   assert(powerupClarity.powerups.map((powerup) => powerup.tone).join(",") === "reward,hazard,volatile", "Expected reward, hazard, and volatile power-up tones.");
   assert((await page.locator(".floating-text.is-powerupReward").count()) === 1, "Expected reward pickup label.");
@@ -378,6 +400,13 @@ try {
   assert(/continue|next board|generate board/i.test(await page.locator('[data-summary-action="0"]').innerText()), "Expected level-clear summary primary action to continue the loop.");
   assert((await page.locator('[data-summary-action]:has-text("Retry Run")').count()) === 1, "Expected level-clear summary to expose a retry action.");
   assert((await page.locator('[data-summary-action]:has-text("Choose Board")').count()) === 1, "Expected level-clear summary to expose a board chooser action.");
+  assert((await focusedSummaryActionIndex(page)) === "0", "Expected run summary to focus the primary action.");
+  await page.keyboard.press("Tab");
+  assert((await focusedSummaryActionIndex(page)) === "1", "Expected Tab to move to the Retry Run summary action.");
+  await page.keyboard.press("Tab");
+  assert((await focusedSummaryActionIndex(page)) === "2", "Expected Tab to move to the Choose Board summary action.");
+  await page.keyboard.press("Tab");
+  assert((await focusedSummaryActionIndex(page)) === "0", "Expected run summary focus trap to wrap back to the primary action.");
   await page.locator('[data-summary-action]:has-text("Choose Board")').press("Enter");
   await page.waitForFunction(() => document.querySelector("[data-tool-title]")?.textContent === "Board Select");
   assert((await page.locator('[data-tool-title]').innerText()) === "Board Select", "Expected keyboard-activated summary secondary action to open board picker.");
@@ -471,6 +500,7 @@ try {
     game.handlePrimaryAction();
   });
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "playing");
+  await page.locator('[data-tool-panel="options"]').click();
   await page.locator('.settings-panel [data-action="reset"]').click();
   await page.locator("[data-overlay-action]").click();
   await page.waitForTimeout(1200);
@@ -533,6 +563,87 @@ try {
       else resolveClose();
     });
   });
+}
+
+async function assertLaunchSurvivalWindow(
+  page: Page,
+  label: string,
+  options?: { survivalMs?: number; reloadAfter?: boolean }
+): Promise<void> {
+  const before = await snapshot(page);
+  assert(before.phase === "ready", `${label}: expected ready before launch survival check, got ${before.phase}.`);
+  if (await page.locator("[data-tool-backdrop]").isVisible()) {
+    await page.locator('[data-action="close-tool-panel"]').click();
+    await page.waitForFunction(() => !document.querySelector("[data-tool-backdrop]"));
+  }
+  await page.waitForSelector(".game-overlay.is-visible [data-overlay-action]");
+  await page.keyboard.press("Space");
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "playing");
+  const survivalMs = options?.survivalMs ?? Math.round((LAUNCH_LOSS_GRACE_SECONDS - 0.25) * 1000);
+  await page.waitForTimeout(survivalMs);
+  const after = await snapshot(page);
+  assert(after.lives === before.lives, `${label}: expected no life lost during post-launch survival window.`);
+  if (options?.reloadAfter) {
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
+    await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
+  }
+}
+
+async function assertLaunchGraceExpiresAfterWindow(page: Page, label: string): Promise<void> {
+  const before = await snapshot(page);
+  assert(before.phase === "ready", `${label}: expected ready before launch grace expiry check, got ${before.phase}.`);
+  await page.waitForSelector(".game-overlay.is-visible [data-overlay-action]");
+  await page.keyboard.press("Space");
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "playing");
+  await page.evaluate(() => {
+    const game = window.__ricochetRushGame as unknown as {
+      balls: Array<{
+        x: number;
+        y: number;
+        vx: number;
+        vy: number;
+        radius: number;
+        stuck: boolean;
+        stuckOffset: number;
+        fireTimer: number;
+        thruTimer: number;
+        megaTimer: number;
+      }>;
+    };
+    game.balls.splice(0, game.balls.length, {
+      x: 400,
+      y: 360,
+      vx: 0,
+      vy: 0,
+      radius: 8,
+      stuck: false,
+      stuckOffset: 0,
+      fireTimer: 0,
+      thruTimer: 0,
+      megaTimer: 0
+    });
+  });
+  await page.waitForTimeout(Math.round((LAUNCH_LOSS_GRACE_SECONDS + 0.25) * 1000));
+  const beforeRemoval = await snapshot(page);
+  assert(beforeRemoval.phase === "playing", `${label}: expected stationary ball to keep playing while grace expires, got ${beforeRemoval.phase}.`);
+  assert(beforeRemoval.lives === before.lives, `${label}: expected no life lost while a ball still exists.`);
+  await page.evaluate(() => {
+    const game = window.__ricochetRushGame as unknown as { balls: unknown[] };
+    game.balls.splice(0);
+  });
+  await page.waitForFunction(
+    (expectedLives) => {
+      const snapshot = window.__ricochetRushGame?.debugSnapshot();
+      return snapshot?.phase === "ready" && snapshot.lives === expectedLives - 1;
+    },
+    before.lives,
+    { timeout: 1500 }
+  );
+}
+
+async function focusedSummaryActionIndex(page: Page): Promise<string | null> {
+  return page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute("data-summary-action") ?? null);
 }
 
 async function snapshot(page: { evaluate: <T>(callback: () => T) => Promise<T> }): Promise<DebugSnapshot> {

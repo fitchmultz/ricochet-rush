@@ -4,7 +4,10 @@ import {
   type ComposerAgentTrace,
   type GenerationSummary
 } from "../../shared/evolution";
+import { type GameEventRecord, gameEventAudience, gameEventText } from "../../shared/gameEvents";
 import type { GameCosmetics } from "../../shared/saveState";
+import { escapeAttribute, escapeHtml } from "../../shared/util";
+import { trapFocus } from "./focusTrap";
 
 export interface HudPackItem {
   id: string;
@@ -57,7 +60,7 @@ export interface HudState {
     generationSummary?: GenerationSummary;
     previewRows?: string[];
   };
-  events: string[];
+  events: GameEventRecord[];
   announcement: string;
   sidebarCollapsed?: boolean;
   agentTrace?: ComposerAgentTrace;
@@ -81,6 +84,7 @@ export interface HudActions {
 export interface HudApi {
   update(state: HudState): void;
   setActions(actions: HudActions): void;
+  closeToolPanel(): void;
 }
 
 type HudToolPanel = "designer" | "packs" | "share" | "options" | "diagnostics";
@@ -123,10 +127,10 @@ export function createHud(root: HTMLDivElement | null): HudApi {
         </div>
         <div data-combo class="combo-badge" hidden></div>
         <div class="touch-controls" aria-label="Touch controls">
-          <button type="button" data-touch-action="left" aria-label="Move paddle left">←</button>
-          <button type="button" data-touch-action="primary" class="touch-primary">Launch</button>
-          <button type="button" data-touch-action="right" aria-label="Move paddle right">→</button>
-          <button type="button" data-touch-action="pause">Pause</button>
+          <button type="button" data-touch-action="left" aria-label="Move paddle left" aria-keyshortcuts="ArrowLeft">←</button>
+          <button type="button" data-touch-action="primary" class="touch-primary" aria-keyshortcuts="Space Enter">Launch</button>
+          <button type="button" data-touch-action="right" aria-label="Move paddle right" aria-keyshortcuts="ArrowRight">→</button>
+          <button type="button" data-touch-action="pause" aria-keyshortcuts="KeyP Escape">Pause</button>
         </div>
         <div class="hint">A/D or arrows move - Space/Enter launch or continue - P/Escape pause - N design or reroll</div>
         <div data-live-announcement class="sr-only" aria-live="polite" aria-atomic="true"></div>
@@ -205,7 +209,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
             <div data-generation-summary class="generation-summary" hidden></div>
           </section>
           <section class="pack-browser tool-view" data-tool-view="packs" aria-label="Board packs" hidden>
-            <div class="panel-heading">Board Select</div>
+            <p class="pack-browser-lead">Pick a daily board, curated pack, or a saved design. Locked packs unlock as you clear the previous pack.</p>
             <div data-pack-list class="pack-list"></div>
           </section>
           <section class="share-panel tool-view" data-tool-view="share" aria-label="Share" hidden>
@@ -380,6 +384,10 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   let activeToolPanel: HudToolPanel | null = null;
   let previousToolFocus: HTMLElement | null = null;
   let previousPackListMarkup = "";
+  let previousEventsMarkup = "";
+  let previousShareExport = "";
+  let previousActivePowersKey = "";
+  let releaseToolFocusTrap: (() => void) | null = null;
 
   const emitSettings = () => {
     actions?.updateSettings({
@@ -411,6 +419,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
     activeToolPanel = panel;
     const isOpen = panel !== null;
     shell.classList.toggle("is-tool-panel-open", isOpen);
+    shell.classList.toggle("is-pack-panel-open", panel === "packs");
     toolSurface.hidden = !isOpen;
     toolBackdrop.hidden = !isOpen;
 
@@ -425,6 +434,8 @@ export function createHud(root: HTMLDivElement | null): HudApi {
     }
 
     if (!panel) {
+      releaseToolFocusTrap?.();
+      releaseToolFocusTrap = null;
       if (previousToolFocus?.isConnected) previousToolFocus.focus({ preventScroll: true });
       previousToolFocus = null;
       return;
@@ -434,6 +445,13 @@ export function createHud(root: HTMLDivElement | null): HudApi {
     toolTitle.textContent = TOOL_PANEL_LABELS[panel];
     toolSurface.setAttribute("aria-label", `${TOOL_PANEL_LABELS[panel]} panel`);
     toolClose.focus({ preventScroll: true });
+    releaseToolFocusTrap?.();
+    releaseToolFocusTrap = trapFocus(toolSurface, () => setToolPanel(null));
+    if (panel === "share") {
+      const nextExport = actions?.exportBoard() ?? "";
+      shareExport.value = nextExport;
+      previousShareExport = nextExport;
+    }
   };
 
   const renderTrace = (trace?: ComposerAgentTrace) => {
@@ -540,6 +558,9 @@ export function createHud(root: HTMLDivElement | null): HudApi {
     setActions(nextActions) {
       actions = nextActions;
     },
+    closeToolPanel() {
+      setToolPanel(null);
+    },
     update(state) {
       const playerStatus = playerStatusFor(state);
       score.textContent = String(state.score);
@@ -573,7 +594,13 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       }
       renderSummary(generationSummary, state.designer.generationSummary, state.designer.previewRows);
       renderCompactSummary(compactGenerationSummary, state);
-      if (document.activeElement !== shareExport && document.activeElement !== shareImport) shareExport.value = actions?.exportBoard() ?? "";
+      if (activeToolPanel === "share" && document.activeElement !== shareExport && document.activeElement !== shareImport) {
+        const nextExport = actions?.exportBoard() ?? "";
+        if (nextExport !== previousShareExport) {
+          shareExport.value = nextExport;
+          previousShareExport = nextExport;
+        }
+      }
       powerupPrimer.hidden = state.powerupPrimerDismissed;
       sfxVolume.value = String(state.settings.sfxVolume);
       musicVolume.value = String(state.settings.musicVolume);
@@ -590,20 +617,28 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       combo.classList.toggle("is-pulsing", state.combo > previousCombo + 0.05);
       previousScore = state.score;
       previousCombo = state.combo;
-      if (state.activePowers.length > 0) {
-        activePowersEl.hidden = false;
-        activePowersEl.innerHTML = state.activePowers.map(renderPower).join("");
-      } else {
-        activePowersEl.hidden = true;
-        activePowersEl.innerHTML = "";
+      const activePowersKey = state.activePowers.map((power) => `${power.label}:${power.seconds}`).join("|");
+      if (activePowersKey !== previousActivePowersKey) {
+        previousActivePowersKey = activePowersKey;
+        if (state.activePowers.length > 0) {
+          activePowersEl.hidden = false;
+          activePowersEl.innerHTML = state.activePowers.map(renderPower).join("");
+        } else {
+          activePowersEl.hidden = true;
+          activePowersEl.innerHTML = "";
+        }
       }
       liveAnnouncement.textContent = state.announcement;
-      const packListMarkup = state.packs.map((pack) => renderPack(pack, state.pending)).join("");
+      const packListMarkup = renderPackListMarkup(state.packs, state.pending);
       if (packListMarkup !== previousPackListMarkup) {
         packList.innerHTML = packListMarkup;
         previousPackListMarkup = packListMarkup;
       }
-      events.innerHTML = state.events.map((event) => `<li>${escapeHtml(event)}</li>`).join("");
+      const eventsMarkup = state.events.map((event) => `<li>${escapeHtml(gameEventText(event))}</li>`).join("");
+      if (eventsMarkup !== previousEventsMarkup) {
+        events.innerHTML = eventsMarkup;
+        previousEventsMarkup = eventsMarkup;
+      }
       renderTrace(state.agentTrace);
     }
   };
@@ -651,14 +686,6 @@ function queryCode(root: ParentNode, selector: string): HTMLPreElement {
   return element;
 }
 
-function escapeHtml(value: string): string {
-  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
-
-function escapeAttribute(value: string): string {
-  return escapeHtml(value).replaceAll('"', "&quot;");
-}
-
 function normalizeToolPanel(value: string | undefined): HudToolPanel | null {
   if (value === "designer" || value === "packs" || value === "share" || value === "options" || value === "diagnostics") return value;
   return null;
@@ -676,28 +703,8 @@ function renderLives(lives: number): string {
 
 function playerStatusFor(state: HudState): string {
   if (state.pending) return "Designer is shaping a playable wall.";
-  const playerEvent = state.events.find((event) => !isTechnicalEvent(event));
-  const status = !isTechnicalEvent(state.status) ? state.status : "";
-  return playerEvent || status || state.hint || "Aim the rebound. Keep the streak alive.";
-}
-
-function isTechnicalEvent(event: string): boolean {
-  const normalized = event.toLowerCase();
-  return (
-    normalized.includes("generated power-up atlas") ||
-    normalized.includes("power-up icons are ready") ||
-    normalized.includes("power-up icons switched") ||
-    normalized.includes("power-up art failed") ||
-    normalized.includes("cursor sdk") ||
-    normalized.includes("api failure") ||
-    normalized.includes("parse") ||
-    normalized.includes("trace") ||
-    normalized.includes("fallback") ||
-    normalized.includes("local backup") ||
-    normalized.includes("checkpoint saved") ||
-    normalized.includes("saved board rebuilt") ||
-    normalized.startsWith("generated ")
-  );
+  const playerEvent = state.events.find((event) => gameEventAudience(event) === "player");
+  return (playerEvent ? gameEventText(playerEvent) : "") || state.status || state.hint || "Aim the rebound. Keep the streak alive.";
 }
 
 function renderBoardMeta(state: HudState): string {
@@ -759,24 +766,73 @@ function formatStreamStats(stats: ComposerAgentTrace["streamStats"]): string {
   return pieces.join(", ");
 }
 
-function renderPack(pack: HudPackItem, pending: boolean): string {
+function renderPackListMarkup(packs: HudPackItem[], pending: boolean): string {
+  const daily = packs.find((pack) => pack.id === "daily");
+  const builtIn = packs.filter((pack) => pack.kind !== "saved-board" && pack.id !== "daily" && pack.id !== "saved-designs");
+  const savedCollection = packs.find((pack) => pack.id === "saved-designs");
+  const savedBoards = packs.filter((pack) => pack.kind === "saved-board");
+  const unlockedBuiltIn = builtIn.filter((pack) => pack.unlocked);
+  const lockedBuiltIn = builtIn.filter((pack) => !pack.unlocked);
+
+  const sections: string[] = [];
+  if (daily) {
+    sections.push(renderPackSection("Today", [daily], pending));
+  }
+  if (unlockedBuiltIn.length > 0) {
+    sections.push(renderPackSection("Curated packs", unlockedBuiltIn, pending));
+  }
+  if (lockedBuiltIn.length > 0) {
+    sections.push(renderPackSection("Locked packs", lockedBuiltIn, pending, { compact: true }));
+  }
+  if (savedCollection) {
+    const savedHeading = savedBoards.length > 0 ? "Saved designs" : "Saved designs (empty)";
+    sections.push(renderPackSection(savedHeading, [savedCollection, ...savedBoards], pending));
+  }
+  return sections.join("");
+}
+
+function renderPackSection(
+  heading: string,
+  packs: HudPackItem[],
+  pending: boolean,
+  options?: { compact?: boolean }
+): string {
+  const cards = packs.map((pack) => renderPack(pack, pending, options?.compact === true && !pack.unlocked && pack.kind === "pack")).join("");
+  return `
+    <section class="pack-section" aria-label="${escapeAttribute(heading)}">
+      <h3 class="pack-section-heading">${escapeHtml(heading)}</h3>
+      <div class="pack-section-list">${cards}</div>
+    </section>
+  `;
+}
+
+function renderPack(pack: HudPackItem, pending: boolean, compact = false): string {
   const classes = ["pack-card"];
   if (pack.active) classes.push("is-active");
   if (pack.empty) classes.push("is-empty");
   if (pack.kind === "saved-board") classes.push("is-saved-board");
+  if (compact) classes.push("is-compact");
   const disabled = pending || !pack.unlocked || pack.empty;
   const previewRows = pack.previewRows.length > 0 ? pack.previewRows : ["..............", "..............", ".............."];
   const prompt = pack.sourcePrompt ? `<span class="pack-prompt">Prompt: ${escapeHtml(pack.sourcePrompt)}</span>` : "";
   const date = pack.createdAt ? ` · saved ${formatShortDate(pack.createdAt)}` : "";
   const actionLabel = pack.actionLabel ?? (pack.kind === "saved-board" ? "Replay" : "Play");
+  const description =
+    pack.empty && pack.id === "saved-designs"
+      ? "Keep a generated board from the Designer to unlock individual replays here."
+      : pack.description;
+  const meta = compact
+    ? `<em>${escapeHtml(pack.progressLabel)} · ${escapeHtml(actionLabel)}</em>`
+    : `<em>${escapeHtml(pack.progressLabel)} · best ${pack.bestScore}${escapeHtml(date)} · ${escapeHtml(actionLabel)}</em>`;
+  const preview = compact ? "" : `<span class="pack-preview" aria-hidden="true">${renderMiniPreview(previewRows)}</span>`;
   return `
     <button type="button" class="${classes.join(" ")}" data-pack-id="${escapeAttribute(pack.id)}" ${disabled ? "disabled" : ""}>
-      <span class="pack-preview" aria-hidden="true">${renderMiniPreview(previewRows)}</span>
+      ${preview}
       <span class="pack-copy">
         <strong>${escapeHtml(pack.name)}</strong>
-        <span>${escapeHtml(pack.description)}</span>
-        ${prompt}
-        <em>${escapeHtml(pack.progressLabel)} · best ${pack.bestScore}${escapeHtml(date)} · ${escapeHtml(actionLabel)}</em>
+        <span>${escapeHtml(description)}</span>
+        ${compact ? "" : prompt}
+        ${meta}
       </span>
     </button>
   `;

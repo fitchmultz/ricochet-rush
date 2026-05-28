@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { extname, join, normalize } from "node:path";
+import { extname, join, normalize, relative, resolve, sep } from "node:path";
 import { requestEvolution } from "./cursorAgent.js";
 import { normalizeLevelRequest } from "../shared/evolution.js";
 
@@ -26,6 +26,9 @@ class HttpError extends Error {
 
 export function createApiServer(options: { staticDir?: string; fallback?: FallbackHandler } = {}) {
   return createServer(async (request, response) => {
+    const started = performance.now();
+    const method = request.method ?? "GET";
+    let pathname = "/";
     try {
       if (!request.url) {
         sendJson(response, 400, { error: "Missing URL" });
@@ -33,6 +36,7 @@ export function createApiServer(options: { staticDir?: string; fallback?: Fallba
       }
 
       const url = new URL(request.url, "http://127.0.0.1");
+      pathname = url.pathname;
       if ((url.pathname === "/api/evolve" || url.pathname === "/api/level") && request.method === "POST") {
         await handleEvolution(request, response);
         return;
@@ -61,6 +65,14 @@ export function createApiServer(options: { staticDir?: string; fallback?: Fallba
         return;
       }
       sendJson(response, 500, { error: "Internal server error" });
+    } finally {
+      if (process.env.NODE_ENV !== "production") {
+        const elapsedMs = Math.round(performance.now() - started);
+        const status = response.statusCode || 0;
+        if (status >= 400 || elapsedMs > 750 || pathname.startsWith("/api/")) {
+          console.info(`[ricochet-api] ${method} ${pathname} ${status} ${elapsedMs}ms`);
+        }
+      }
     }
   });
 }
@@ -81,8 +93,32 @@ async function handleEvolution(request: IncomingMessage, response: ServerRespons
 
 async function serveStatic(staticDir: string, pathname: string, response: ServerResponse) {
   const requestedPath = pathname === "/" ? "/index.html" : pathname;
-  const safePath = normalize(requestedPath).replace(/^(\.\.(\/|\\|$))+/, "");
-  const filePath = join(staticDir, safePath);
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(requestedPath);
+  } catch {
+    throw new HttpError(404, "Not found");
+  }
+  if (/\p{Cc}/u.test(decodedPath)) {
+    throw new HttpError(404, "Not found");
+  }
+  const segments = decodedPath.split(/[/\\]/).filter(Boolean);
+  if (segments.some((segment) => segment === ".." || segment === ".")) {
+    throw new HttpError(404, "Not found");
+  }
+  const safePath = normalize(decodedPath)
+    .replace(/^(\.\.(\/|\\|$))+/, "")
+    .replace(/^[/\\]+/, "");
+  const staticRoot = resolve(staticDir);
+  const filePath = resolve(join(staticRoot, ...safePath.split(/[/\\]/).filter(Boolean)));
+  const relativePath = relative(staticRoot, filePath);
+  if (
+    relativePath.startsWith("..") ||
+    relativePath.includes(`..${sep}`) ||
+    (filePath !== staticRoot && !filePath.startsWith(`${staticRoot}${sep}`))
+  ) {
+    throw new HttpError(404, "Not found");
+  }
   let body: Buffer;
   try {
     body = await readFile(filePath);
@@ -126,7 +162,7 @@ function readBody(request: IncomingMessage): Promise<string> {
 }
 
 function isMissingFileError(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ENOENT";
+  return error instanceof Error && "code" in error && ["ENOENT", "ENOTDIR", "EISDIR"].includes(String(error.code));
 }
 
 function sendJson(response: ServerResponse, status: number, payload: unknown) {

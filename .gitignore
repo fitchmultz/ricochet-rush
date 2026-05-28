@@ -6,6 +6,7 @@
 dist/
 docs/media/.capture-tmp/
 dogfood-output/
+.dogfood/
 node_modules/
 
 # CueLoop local queue state

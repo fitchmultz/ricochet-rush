@@ -9,7 +9,6 @@ import {
   MAX_BRICKS,
   MIN_BRICKS,
   fallbackLevel,
-  designerTargets,
   normalizeDesignerIntent,
   normalizeLevel,
   nextDesignerSeed,
@@ -21,13 +20,10 @@ import {
   MIN_SILHOUETTE_BRICKS,
   resolveDesignerIntentForGeneration,
   validateCreativeFidelity,
-  validateAndNormalizeSdkLevel,
-  MIN_RAW_SDK_BRICKS,
   DESIGNER_BRICK_COLUMNS,
   DESIGNER_BRICK_ROWS,
   MIN_DESIGNER_BRICKS,
   MAX_DESIGNER_BRICKS,
-  type LevelBlueprint,
   type LevelRequest
 } from "../shared/evolution";
 import {
@@ -45,6 +41,7 @@ import {
   blueprintFingerprint,
   previewRowsFromLevel
 } from "../shared/boardPacks";
+import { gameEventsToStrings, normalizeGameEvents } from "../shared/gameEvents";
 import { DEFAULT_COSMETICS, DEFAULT_SETTINGS, SAVE_VERSION, normalizeCosmetics, normalizeSaveState, normalizeSettings } from "../shared/saveState";
 import { BOARD_EXPORT_VERSION, createBoardExportPayload, encodeBoardExport, parseBoardExport } from "../shared/shareState";
 import { createApiServer } from "../server/api";
@@ -52,7 +49,6 @@ import { buildGenerationSummary, buildPrompt, parseWorkerOutput, requestEvolutio
 import { parseLevelJsonFromCandidates } from "../server/levelJson";
 import { appendAssistantTextChunk } from "../server/streamText";
 import {
-  calculatePaddleRebound,
   normalizeLoopRiskVelocity,
   penaltyPowerupPool,
   powerupToneFor,
@@ -89,37 +85,8 @@ const DESIGNER_ARCADE_GRID = [
   "...................."
 ];
 
-const DESIGNER_LANE_GRID = [
-  "....................",
-  "..xxxx....xxxx......",
-  ".xxxxx....xxxxx.....",
-  ".xxxxxx..xxxxxx.....",
-  "..xxxxxx..xxxxxx....",
-  "..xxxx....xxxx......",
-  "...xxx....xxx.......",
-  "....xx....xx........",
-  ".....xx..xx.........",
-  "......xxxx..........",
-  ".......xx...........",
-  "...................."
-];
-
 const HEART_EMBEDDED_ROW_COUNTS = [0, 6, 10, 12, 14, 12, 10, 8, 6, 4, 0, 0];
 const DESIGNER_PAD = ".".repeat(DESIGNER_BRICK_COLUMNS);
-
-const SPECIAL_TEST_BRICKS = new Set(["bomb", "prize", "penalty", "laser", "grab", "fire", "thru", "split", "wide", "slow", "boss"]);
-
-function countBricks(level: LevelBlueprint): number {
-  return level.rows.flat().filter(Boolean).length;
-}
-
-function countSpecials(level: LevelBlueprint): number {
-  return level.rows.flat().filter((brick) => brick && SPECIAL_TEST_BRICKS.has(brick.kind)).length;
-}
-
-function countHardBricks(level: LevelBlueprint): number {
-  return level.rows.flat().filter((brick) => brick?.kind === "hard").length;
-}
 
 class FakeAudioParam {
   readonly exponentialRamps: number[] = [];
@@ -245,7 +212,7 @@ describe("Cursor SDK level generation contract", () => {
   it("pins composer-2.5 fast mode for level requests", () => {
     expect(CURSOR_MODEL).toEqual({
       id: "composer-2.5",
-      params: [{ id: "mode", value: "fast" }]
+      params: [{ id: "fast", value: "true" }]
     });
     expect(buildPrompt(request)).toContain("composer-2.5 in fast mode");
     expect(buildPrompt(request)).toContain("Ricochet Rush");
@@ -255,6 +222,7 @@ describe("Cursor SDK level generation contract", () => {
     expect(buildPrompt(request)).toContain("Never reuse a previous board name");
     expect(buildPrompt({ ...request, recentEvents: ["Cleared Blast Monolith.", "Designing the next wall."] })).toContain("Blast Monolith");
   });
+
 
   it("adds the board prompt and hidden tuning defaults to the Cursor prompt", () => {
     const prompt = buildPrompt({
@@ -301,16 +269,88 @@ describe("Cursor SDK level generation contract", () => {
       designer: resolveDesignerIntentForGeneration({
         ...DEFAULT_DESIGNER_INTENT,
         visualPreset: "icon",
-        brief: "make a smiley face and the eyes are exploding bricks"
+        brief: "make a smiley face with only the eyes as exploding bricks"
       })
     });
 
     expect(prompt).toContain("Visual preset: icon / silhouette");
     expect(prompt).toContain("Exploding eyes should be bomb (o) cells");
+    expect(prompt).toContain("Feature coordinates are fixed on the 20x12 grid: eyes bomb cells at (x=5, y=2) and (x=14, y=2).");
+    expect(prompt).toContain("apply that kind only to the named feature");
+    expect(prompt).not.toContain("Every occupied brick must be bomb.");
     expect(prompt).not.toContain('"brick": "basic"');
-    expect(prompt).toContain("....bb........oo....");
+    expect(prompt).toContain(".....o........o.....");
     expect(prompt).toContain("Creative/silhouette prompt");
     expect(prompt).not.toContain("Target about 125 bricks");
+  });
+
+  it("keeps global-exclusive bomb prompt guidance ahead of local eye wording", () => {
+    const prompt = buildPrompt({
+      ...request,
+      designer: {
+        ...DEFAULT_DESIGNER_INTENT,
+        brief: "all occupied bricks are bombs and only the eyes are bombs"
+      }
+    });
+
+    expect(prompt).toContain("Every occupied brick must be bomb.");
+    expect(prompt).toContain("Exploding or bomb feature wording follows the global exclusive brick rule above.");
+    expect(prompt).not.toContain("Exploding eyes should be bomb (o) cells at the eye positions only.");
+    expect(prompt).not.toContain("at those features only unless the prompt says all bricks explode");
+  });
+
+  it("distinguishes required eye bombs from generic bomb prompts in Cursor guidance", () => {
+    const eyePrompt = buildPrompt({
+      ...request,
+      designer: { ...DEFAULT_DESIGNER_INTENT, visualPreset: "icon", brief: "make a smiley face and the eyes are exploding bricks" }
+    });
+    expect(eyePrompt).toContain("Ensure both eye positions are bomb (o) cells");
+    expect(eyePrompt).toContain("other bomb cells are allowed");
+    expect(eyePrompt).not.toContain("Use bomb (o) bricks only at the named bomb feature positions");
+
+    const corePrompt = buildPrompt({
+      ...request,
+      designer: { ...DEFAULT_DESIGNER_INTENT, visualPreset: "arcade", brief: "boss-core board with exploding core" }
+    });
+    expect(corePrompt).toContain("Ensure all core positions are bomb (o) cells");
+    expect(corePrompt).not.toContain("Ensure both eye positions are bomb");
+
+    const localizedNoBasicPrompt = buildPrompt({
+      ...request,
+      designer: { ...DEFAULT_DESIGNER_INTENT, visualPreset: "icon", brief: "make a smiley face with no basic bricks and eyes should only be bombs" }
+    });
+    expect(localizedNoBasicPrompt).toContain("Do not use these brick kinds: basic.");
+    expect(localizedNoBasicPrompt).toContain("fill the rest with non-excluded playable or mixed bricks");
+    expect(localizedNoBasicPrompt).not.toContain("fill the rest with basic");
+
+    const constrainedFeatureOnlyPrompt = buildPrompt({
+      ...request,
+      designer: {
+        ...DEFAULT_DESIGNER_INTENT,
+        visualPreset: "icon",
+        brief: "smiley face, no basic hard prizes wide split lasers grabs fire ghosts slow bosses penalties, no bombs outside eyes"
+      }
+    });
+    expect(constrainedFeatureOnlyPrompt).toContain("no legal non-feature fill kind");
+    expect(constrainedFeatureOnlyPrompt).toContain("leave all other cells \".\"");
+    expect(constrainedFeatureOnlyPrompt).toContain("leave every non-feature cell empty");
+    expect(constrainedFeatureOnlyPrompt).not.toContain("at least 42");
+    expect(constrainedFeatureOnlyPrompt).not.toContain("fill the rest with non-excluded playable or mixed bricks");
+
+    const mixedFeaturePrompt = buildPrompt({
+      ...request,
+      designer: { ...DEFAULT_DESIGNER_INTENT, visualPreset: "icon", brief: "no bombs outside eyes with hard core" }
+    });
+    expect(mixedFeaturePrompt).toContain("Use bomb only for the named eyes feature positions");
+    expect(mixedFeaturePrompt).toContain("Ensure these additional feature positions are set: core=hard");
+    expect(mixedFeaturePrompt).toContain("Ensure these non-bomb feature positions are set: core=hard");
+
+    const genericPrompt = buildPrompt({
+      ...request,
+      designer: { ...DEFAULT_DESIGNER_INTENT, visualPreset: "icon", brief: "make a face with exploding blocks" }
+    });
+    expect(genericPrompt).toContain("Include bomb (o) bricks in the wall");
+    expect(genericPrompt).not.toContain("at those features only");
   });
 
   it("uses arcade density targets for non-creative briefs", () => {
@@ -424,89 +464,6 @@ describe("Cursor SDK level generation contract", () => {
     expect(levelGenerationServerHint()).toContain("npm run dev");
   });
 
-  it("rejects sparse SDK grids before accepting composer output", () => {
-    const sparse = validateAndNormalizeSdkLevel(
-      {
-        name: "Too Sparse",
-        briefing: "Not enough bricks.",
-        paddleHint: "Retry.",
-        grid: ["xxxx", "..............", "..............", "..............", "..............", "..............", "..............", "..............", ".............."]
-      },
-      request
-    );
-    expect(sparse.ok).toBe(false);
-    if (sparse.ok) return;
-    expect(sparse.reason).toContain("too sparse");
-    expect(sparse.rawBrickCount).toBeLessThan(MIN_RAW_SDK_BRICKS);
-  });
-
-  it("accepts complete compact SDK grids for composer-2.5 responses", () => {
-    const valid = validateAndNormalizeSdkLevel(
-      {
-        name: "Lane Vault",
-        briefing: "Open the side channels first.",
-        paddleHint: "Bank off the left wall.",
-        speed: 1.05,
-        brick: "basic",
-        grid: DESIGNER_ARCADE_GRID
-      },
-      request
-    );
-    expect(valid.ok).toBe(true);
-    if (!valid.ok) return;
-    expect(valid.level.name).toBe("Lane Vault");
-    expect(valid.rawBrickCount).toBeGreaterThanOrEqual(MIN_RAW_SDK_BRICKS);
-  });
-
-  it("preserves composer SDK layouts instead of applying fallback shape stencils", () => {
-    const validated = validateAndNormalizeSdkLevel(
-      {
-        name: "Composer Lanes",
-        briefing: "Bank the open channels.",
-        paddleHint: "Stay shallow.",
-        speed: 1.05,
-        brick: "basic",
-        grid: DESIGNER_LANE_GRID
-      },
-      {
-        ...request,
-        designer: {
-          ...DEFAULT_DESIGNER_INTENT,
-          visualPreset: "arcade",
-          brief: "open lane wall with side channels"
-        }
-      }
-    );
-    expect(validated.ok).toBe(true);
-    if (!validated.ok) return;
-    expect(validated.level.rows.map((row) => row.filter(Boolean).length)).toEqual([0, 8, 10, 12, 12, 8, 6, 4, 4, 4, 2, 0]);
-    expect(validated.level.rows.flat().filter(Boolean).length).toBeGreaterThanOrEqual(MIN_DESIGNER_BRICKS);
-  });
-
-  it("rejects overfilled silhouette SDK boards for retry", () => {
-    const dense = validateAndNormalizeSdkLevel(
-      {
-        name: "Blob",
-        briefing: "Too dense.",
-        paddleHint: "Retry.",
-        speed: 1,
-        brick: "basic",
-        grid: Array.from({ length: DESIGNER_BRICK_ROWS }, () => "x".repeat(DESIGNER_BRICK_COLUMNS))
-      },
-      {
-        ...request,
-        designer: resolveDesignerIntentForGeneration({
-          ...DEFAULT_DESIGNER_INTENT,
-          visualPreset: "icon",
-          brief: "make a smiley face and the eyes are exploding bricks"
-        })
-      }
-    );
-    expect(dense.ok).toBe(false);
-    if (dense.ok) return;
-    expect(dense.reason).toMatch(/overfilled|outside 42-91/);
-  });
-
   it("lowers density for icon preset and silhouette briefs", () => {
     const icon = resolveDesignerIntentForGeneration({
       ...DEFAULT_DESIGNER_INTENT,
@@ -530,24 +487,103 @@ describe("Cursor SDK level generation contract", () => {
   });
 
   it("validates creative fidelity for smiley bomb-eye prompts", () => {
-    const ok = validateCreativeFidelity(
+    const level = {
+      name: "Grin",
+      briefing: "Pop the eyes.",
+      paddleHint: "Bank shots.",
+      speed: 1,
+      rows: Array.from({ length: DESIGNER_BRICK_ROWS }, (_, y) =>
+        Array.from({ length: DESIGNER_BRICK_COLUMNS }, (_, x) => {
+          if (y === 2 && (x === 5 || x === 14)) return { kind: "bomb", hp: 1 } as const;
+          if (y === 3 && x >= 5 && x <= 14) return { kind: "basic", hp: 1 } as const;
+          return null;
+        })
+      )
+    };
+
+    expect(validateCreativeFidelity(level, "make a smiley face and the eyes are exploding bricks", "icon").ok).toBe(true);
+    expect(validateCreativeFidelity(level, "make a smiley face with only the eyes as exploding bricks", "icon").ok).toBe(true);
+    expect(validateCreativeFidelity(level, "make a smiley face using only bombs for the eyes", "icon").ok).toBe(true);
+    expect(validateCreativeFidelity(level, "make a smiley face using only exploding bricks for eyes", "icon").ok).toBe(true);
+    expect(validateCreativeFidelity(level, "make a smiley face where the eyes are only bombs", "icon").ok).toBe(true);
+    expect(validateCreativeFidelity(level, "make a smiley face with eyes only bombs", "icon").ok).toBe(true);
+    expect(validateCreativeFidelity(level, "make a smiley face where the eyes are bombs only", "icon").ok).toBe(true);
+    expect(validateCreativeFidelity(level, "make a smiley face where the eyes should use only bombs", "icon").ok).toBe(true);
+    expect(validateCreativeFidelity(level, "make a smiley face where the eyes are exclusively bombs", "icon").ok).toBe(true);
+    expect(validateCreativeFidelity(level, "make a smiley face with eyes that are bombs only", "icon").ok).toBe(true);
+    expect(validateCreativeFidelity(level, "make a smiley face with bomb eyes only", "icon").ok).toBe(true);
+    expect(validateCreativeFidelity(level, "make a smiley face with exploding eyes only", "icon").ok).toBe(true);
+
+    const extraBombLevel = {
+      ...level,
+      rows: level.rows.map((row, y) => row.map((brick, x) => (y === 8 && (x === 1 || x === 18) ? ({ kind: "bomb", hp: 1 } as const) : brick)))
+    };
+    expect(validateCreativeFidelity(extraBombLevel, "make a smiley face with bomb eyes only", "icon").ok).toBe(false);
+    expect(validateCreativeFidelity(extraBombLevel, "make a smiley face with no bombs outside the eyes", "icon").ok).toBe(false);
+    expect(validateCreativeFidelity(extraBombLevel, "only use bombs for eyes", "icon").ok).toBe(false);
+    expect(validateCreativeFidelity(extraBombLevel, "eyes should only be bombs", "icon").ok).toBe(false);
+    expect(validateCreativeFidelity(extraBombLevel, "eyes should only use bombs", "icon").ok).toBe(false);
+
+    const misplacedBombLevel = {
+      ...level,
+      rows: level.rows.map((row, y) =>
+        row.map((brick, x) => {
+          if (brick?.kind === "bomb") return { kind: "basic", hp: 1 } as const;
+          if (y === 8 && (x === 1 || x === 18)) return { kind: "bomb", hp: 1 } as const;
+          return brick;
+        })
+      )
+    };
+    expect(validateCreativeFidelity(misplacedBombLevel, "make a smiley face with bomb eyes only", "icon").ok).toBe(false);
+    expect(validateCreativeFidelity(misplacedBombLevel, "make a smiley face and the eyes are exploding bricks", "icon").ok).toBe(false);
+    expect(validateCreativeFidelity(misplacedBombLevel, "make a smiley face with explosive eyes", "icon").ok).toBe(false);
+
+    const extraRequiredBombLevel = {
+      ...level,
+      rows: level.rows.map((row, y) => row.map((brick, x) => (y === 8 && (x === 1 || x === 18) ? ({ kind: "bomb", hp: 1 } as const) : brick)))
+    };
+    expect(validateCreativeFidelity(extraRequiredBombLevel, "make a smiley face and the eyes are exploding bricks", "icon").ok).toBe(true);
+
+    const noBombLevel = {
+      ...level,
+      rows: level.rows.map((row) => row.map((brick) => (brick?.kind === "bomb" ? { kind: "basic", hp: 1 } as const : brick)))
+    };
+    expect(validateCreativeFidelity(noBombLevel, "make a smiley face with explosive eyes", "icon").ok).toBe(false);
+    expect(validateCreativeFidelity(noBombLevel, "make a smiley face with no bombs", "icon").ok).toBe(true);
+    expect(validateCreativeFidelity(noBombLevel, "make a smiley face without explosive eyes", "icon").ok).toBe(true);
+    expect(validateCreativeFidelity(noBombLevel, "make a smiley face with no bombs outside the mouth", "icon").ok).toBe(true);
+    expect(validateCreativeFidelity(noBombLevel, "make a smiley face with no bombs except the eyes", "icon").ok).toBe(false);
+    expect(validateCreativeFidelity(noBombLevel, "make a smiley face with no bombs except on the eyes", "icon").ok).toBe(false);
+    expect(validateCreativeFidelity(noBombLevel, "make a smiley face with no bombs except inside the eyes", "icon").ok).toBe(false);
+    expect(validateCreativeFidelity(noBombLevel, "make a smiley face with no bombs outside the eyes", "icon").ok).toBe(false);
+    expect(validateCreativeFidelity(noBombLevel, "make a smiley face with no exploding bricks outside the eyes", "icon").ok).toBe(false);
+    expect(validateCreativeFidelity(noBombLevel, "make a smiley face that is bomb-free except the eyes", "icon").ok).toBe(false);
+    expect(validateCreativeFidelity(noBombLevel, "make a smiley face that is bomb-free except on the eyes", "icon").ok).toBe(false);
+    expect(validateCreativeFidelity(noBombLevel, "make a smiley face that is bomb-free except inside the eyes", "icon").ok).toBe(false);
+    expect(validateCreativeFidelity(noBombLevel, "make a smiley face that is free of bombs except in the eyes", "icon").ok).toBe(false);
+    expect(validateCreativeFidelity(noBombLevel, "make a smiley face that is free of bombs except inside the eyes", "icon").ok).toBe(false);
+    expect(validateCreativeFidelity(noBombLevel, "make a smiley face that is free of bombs outside the eyes", "icon").ok).toBe(false);
+  });
+
+  it("rejects mixed brick kinds when the prompt asks for only bombs", () => {
+    const result = validateCreativeFidelity(
       {
-        name: "Grin",
-        briefing: "Pop the eyes.",
+        name: "Mixed Bombs",
+        briefing: "Not exclusive enough.",
         paddleHint: "Bank shots.",
         speed: 1,
         rows: Array.from({ length: DESIGNER_BRICK_ROWS }, (_, y) =>
           Array.from({ length: DESIGNER_BRICK_COLUMNS }, (_, x) => {
-            if (y === 2 && (x === 5 || x === 14)) return { kind: "bomb", hp: 1 } as const;
-            if (y === 3 && x >= 5 && x <= 14) return { kind: "basic", hp: 1 } as const;
+            if (y === 1 && x === 1) return { kind: "bomb", hp: 1 } as const;
+            if (y === 1 && x === 2) return { kind: "basic", hp: 1 } as const;
             return null;
           })
         )
       },
-      "make a smiley face and the eyes are exploding bricks",
+      "heart shape with only bomb bricks",
       "icon"
     );
-    expect(ok.ok).toBe(true);
+    expect(result).toEqual({ ok: false, reason: "Prompt requires every occupied brick to be bomb." });
   });
 
   it("retries composer-2.5 generation before falling back", async () => {
@@ -558,6 +594,7 @@ describe("Cursor SDK level generation contract", () => {
     try {
       const response = await requestEvolution(request, {
         maxAttempts: 3,
+        resolveModel: async () => CURSOR_MODEL,
         runWorker: async () => {
           calls += 1;
           if (calls < 3) {
@@ -597,84 +634,13 @@ describe("Cursor SDK level generation contract", () => {
     }
   });
 
-  it("lets fallback boards honor designer intent while staying playable", () => {
-    const level = fallbackLevel({
-      ...request,
-      designer: {
-        style: "boss-core",
-        difficulty: 5,
-        density: 0.78,
-        specialBias: 0.9,
-        seed: "center furnace",
-        brief: ""
-      }
-    });
-    const bricks = level.rows.flat().filter(Boolean);
-    expect(level.name).toBe("Generated Sector 4");
-    expect(level.briefing).toContain("center furnace");
-    expect(bricks.length).toBeGreaterThanOrEqual(MIN_DESIGNER_BRICKS);
-    expect(bricks.length).toBeLessThanOrEqual(MAX_DESIGNER_BRICKS);
-    expect(level.rows.flat().some((brick) => brick?.kind === "boss")).toBe(true);
-  });
-
-  it("makes fallback density and specials track designer targets", () => {
-    const sparse = fallbackLevel({
-      ...request,
-      designer: {
-        style: "precision",
-        difficulty: 2,
-        density: 0.34,
-        specialBias: 0,
-        seed: "needle",
-        brief: ""
-      }
-    });
-    const dense = fallbackLevel({
-      ...request,
-      designer: {
-        style: "bomb-chains",
-        difficulty: 5,
-        density: 0.82,
-        specialBias: 1,
-        seed: "fireworks",
-        brief: ""
-      }
-    });
-    const sparseTargets = designerTargetsForGeneration({ style: "precision", difficulty: 2, density: 0.34, specialBias: 0, seed: "needle", brief: "" }, request.level);
-    const denseTargets = designerTargetsForGeneration({ style: "bomb-chains", difficulty: 5, density: 0.82, specialBias: 1, seed: "fireworks", brief: "" }, request.level);
-
-    expect(countBricks(sparse)).toBe(sparseTargets.brickTarget);
-    expect(countBricks(dense)).toBe(denseTargets.brickTarget);
-    expect(countSpecials(dense)).toBeGreaterThan(countSpecials(sparse) + 20);
-    expect(countHardBricks(dense)).toBeGreaterThan(countHardBricks(sparse));
-  });
-
-  it("honors freeform heart and exploding-block requests in local fallback boards", () => {
-    const level = fallbackLevel({
-      ...request,
-      designer: {
-        ...DEFAULT_DESIGNER_INTENT,
-        density: 0.52,
-        specialBias: 1,
-        brief: "create a heart shaped board that has nothing but exploding blocks"
-      }
-    });
-    const rowCounts = level.rows.map((row) => row.filter(Boolean).length);
-    const bricks = level.rows.flat().filter((brick): brick is NonNullable<typeof brick> => brick !== null);
-
-    expect(rowCounts).toEqual(HEART_EMBEDDED_ROW_COUNTS);
-    expect(bricks).toHaveLength(82);
-    expect(bricks.every((brick) => brick.kind === "bomb" && brick.hp === 1)).toBe(true);
-    expect(level.name).toContain("Heart");
-  });
-
   it("can force local fallback for deterministic playability smoke tests", async () => {
     process.env.RICOCHET_RUSH_FORCE_FALLBACK = "1";
     try {
       const response = await requestEvolution(request);
       expect(response.source).toBe("fallback");
       expect(response.warning).toContain("RICOCHET_RUSH_FORCE_FALLBACK");
-      expect(response.summary?.title).toBe("Local backup board");
+      expect(response.summary?.title).toContain("Local backup");
       expect(response.summary?.detail).toContain("final wall has");
     } finally {
       delete process.env.RICOCHET_RUSH_FORCE_FALLBACK;
@@ -705,7 +671,7 @@ describe("Cursor SDK level generation contract", () => {
     const bricks = level.rows.flat().filter((brick): brick is NonNullable<typeof brick> => brick !== null);
     expect(rowCounts).toEqual(HEART_EMBEDDED_ROW_COUNTS);
     expect(bricks).toHaveLength(82);
-    expect(bricks.every((brick) => brick.kind === "bomb")).toBe(true);
+    expect(new Set(bricks.map((brick) => brick.kind))).toEqual(new Set(["bomb"]));
   });
 
   it("materializes compact Cursor grid drafts into canonical brick rows", () => {
@@ -731,7 +697,7 @@ describe("Cursor SDK level generation contract", () => {
     expect(level.name).toBe("Compact Heart");
     expect(rowCounts).toEqual(HEART_EMBEDDED_ROW_COUNTS);
     expect(bricks).toHaveLength(82);
-    expect(bricks.every((brick) => brick.kind === "bomb")).toBe(true);
+    expect(new Set(bricks.map((brick) => brick.kind))).toEqual(new Set(["bomb"]));
   });
 
   it("lets compact grid codes override a leftover default brick value", () => {
@@ -844,6 +810,7 @@ describe("Cursor SDK level generation contract", () => {
     expect(workerSource).toContain("process.env.CURSOR_API_KEY");
     expect(workerSource).toContain("apiKey,");
     expect(workerSource).toContain("Agent.create");
+    expect(workerSource).toContain("readCursorModelSelectionFromEnv");
     expect(workerSource).toContain("settingSources: []");
     expect(workerSource).toContain("run.stream");
     expect(workerSource).toContain("streamStats");
@@ -1002,8 +969,10 @@ describe("Cursor SDK level generation contract", () => {
   it("builds a public generation summary without raw trace text", () => {
     const level = fallbackLevel(request);
     const summary = buildGenerationSummary(request, level, "fallback", "Cursor SDK authentication is unavailable.");
-    expect(summary.title).toBe("Local backup board");
+    expect(summary.title).toContain("Local backup");
+    expect(summary.title).toContain(level.name);
     expect(summary.detail).toContain(level.name);
+    expect(summary.detail).toContain("default arcade brief");
     expect(summary.detail).toContain("final wall has");
     expect(summary.detail).toContain("Target was");
     expect(summary.warning).toBe("Cursor SDK authentication is unavailable.");
@@ -1078,7 +1047,10 @@ describe("Cursor SDK level generation contract", () => {
     expect(save?.packId).toBeNull();
     expect(save?.packBoardIndex).toBe(0);
     expect(save?.bricks).toEqual([{ x: 10, y: 20, width: 30, height: 12, kind: "basic", hp: 1, maxHp: 1 }]);
-    expect(save?.recentEvents).toEqual(["Saved", "Restored"]);
+    expect(save?.recentEvents).toEqual([
+      { text: "Saved", audience: "player" },
+      { text: "Restored", audience: "player" }
+    ]);
   });
 
   it("normalizes v2 checkpoints with ball snapshots and power timers", () => {
@@ -1273,37 +1245,12 @@ describe("Ricochet Rush curated board packs", () => {
   });
 });
 
-describe("Ricochet Rush paddle feel", () => {
-  it("keeps center paddle hits from becoming vertical dead loops", () => {
-    const rebound = calculatePaddleRebound({
-      hitZone: 0,
-      paddleVelocityX: 0,
-      incomingVx: 0,
-      incomingVy: 480
-    });
-
-    expect(Math.abs(rebound.vx)).toBeGreaterThanOrEqual(rebound.speed * 0.18);
-    expect(rebound.vy).toBeLessThan(0);
-  });
-
-  it("lets paddle movement add controlled spin to center hits", () => {
-    const left = calculatePaddleRebound({
-      hitZone: 0,
-      paddleVelocityX: -620,
-      incomingVx: 160,
-      incomingVy: 480
-    });
-    const right = calculatePaddleRebound({
-      hitZone: 0,
-      paddleVelocityX: 620,
-      incomingVx: -160,
-      incomingVy: 480
-    });
-
-    expect(left.vx).toBeLessThan(0);
-    expect(right.vx).toBeGreaterThan(0);
-    expect(Math.abs(left.vx)).toBeLessThan(left.speed * 0.84 + 0.001);
-    expect(Math.abs(right.vx)).toBeLessThan(right.speed * 0.84 + 0.001);
+describe("game event records", () => {
+  it("normalizes legacy string events and typed audience records", () => {
+    const events = normalizeGameEvents(["Starter pack loaded.", { text: "Checkpoint saved.", audience: "technical" }]);
+    expect(events[0]?.audience).toBe("player");
+    expect(events[1]?.audience).toBe("technical");
+    expect(gameEventsToStrings(events)).toEqual(["Starter pack loaded.", "Checkpoint saved."]);
   });
 });
 

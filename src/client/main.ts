@@ -17,5 +17,17 @@ if (!mount) {
 
 const { RicochetRushGame } = await import("./game/RicochetRushGame");
 const game = new RicochetRushGame(mount, hud);
-window.__ricochetRushGame = game;
+if (isDebugSurfaceEnabled()) {
+  window.__ricochetRushGame = game;
+}
 game.start();
+
+function isDebugSurfaceEnabled(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  if (params.has("debugGame")) return true;
+  try {
+    return window.localStorage.getItem("ricochet-rush-debug") === "1";
+  } catch {
+    return false;
+  }
+}
