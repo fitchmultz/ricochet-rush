@@ -2986,6 +2986,7 @@ export class RicochetRushGame {
     const card = this.overlay.querySelector<HTMLElement>(".run-summary");
     if (card) {
       this.releaseOverlayFocusTrap?.();
+      // Run summary intentionally ignores Escape so dismissal stays button-driven (pause overlays wire Escape to dismiss).
       this.releaseOverlayFocusTrap = trapFocus(card, () => undefined);
     }
   }

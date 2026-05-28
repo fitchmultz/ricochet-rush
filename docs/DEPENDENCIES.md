@@ -21,6 +21,8 @@ npm run sdk:probe
 npm run sdk:reliability
 ```
 
+Before merging changes that affect Cursor generation behavior, maintainers should run `npm run sdk:probe` with `CURSOR_API_KEY` set. GitHub Actions PR CI does not run the live SDK probe.
+
 ## Reviewed Overrides
 
 Reviewed on May 27, 2026 by the project maintainer. Overrides are scoped to the dependency branch that needs them.
