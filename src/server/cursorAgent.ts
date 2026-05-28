@@ -1,35 +1,31 @@
 import { spawn } from "node:child_process";
+import type { ModelSelection } from "@cursor/sdk";
 import {
-  BRICK_COLUMNS,
-  BRICK_ROWS,
   CURSOR_MODEL,
-  MAX_BRICKS,
-  MIN_BRICKS,
   type ComposerAgentTrace,
   type ComposerStreamStats,
   type GenerationSummary,
   type LevelBlueprint,
   type LevelRequest,
   type LevelResponse,
-  analyzeDesignerBrief,
   classifyDesignerBrief,
+  createDesignerBriefPlan,
+  createDesignerBriefPlanForDesigner,
+  describeDesignerBriefGuidance,
   describeDesignerIntent,
-  designerTargets,
+  designerBriefPromptRules,
   designerTargetsForGeneration,
   fallbackLevel,
   generationBrickBounds,
   nextDesignerSeed,
-  normalizeDesignerIntent,
-  normalizeLevel,
-  normalizeLevelRequest,
   resolveDesignerIntentForGeneration,
   validateAndNormalizeSdkLevel,
   CURSOR_EVOLUTION_MAX_ATTEMPTS,
-  CURSOR_GENERATION_BUDGET_MS,
   CURSOR_WORKER_TIMEOUT_MS,
   DESIGNER_BRICK_COLUMNS,
   DESIGNER_BRICK_ROWS
 } from "../shared/evolution.js";
+import { resolveCursorModelSelection } from "./cursorModel.js";
 import { isRecord } from "../shared/util.js";
 
 export interface WorkerInvocationResult {
@@ -62,6 +58,7 @@ const MAX_EVOLUTION_ATTEMPTS = CURSOR_EVOLUTION_MAX_ATTEMPTS;
 export interface RequestEvolutionOptions {
   maxAttempts?: number;
   runWorker?: typeof runCursorWorker;
+  resolveModel?: typeof resolveCursorModelSelection;
 }
 
 interface CursorWorkerProcess {
@@ -76,12 +73,14 @@ interface CursorWorkerProcess {
 interface RunCursorWorkerOptions {
   timeoutMs?: number;
   sigkillGraceMs?: number;
+  model?: ModelSelection;
   spawnWorker?: () => CursorWorkerProcess;
 }
 
 export async function requestEvolution(request: LevelRequest, options: RequestEvolutionOptions = {}): Promise<LevelResponse> {
   const maxAttempts = clampAttempts(options.maxAttempts ?? MAX_EVOLUTION_ATTEMPTS);
   const invokeWorker = options.runWorker ?? runCursorWorker;
+  const resolveModel = options.resolveModel ?? resolveCursorModelSelection;
   const resolvedRequest: LevelRequest = {
     ...request,
     designer: resolveDesignerIntentForGeneration(request.designer)
@@ -125,6 +124,7 @@ export async function requestEvolution(request: LevelRequest, options: RequestEv
     };
   }
 
+  const modelSelection = await resolveModel(apiKey);
   const attemptFailures: string[] = [];
   let lastTrace: ComposerAgentTrace | undefined;
 
@@ -134,7 +134,7 @@ export async function requestEvolution(request: LevelRequest, options: RequestEv
     const attemptPrompt = buildPrompt(attemptRequest);
 
     try {
-      const workerResult = await invokeWorker(attemptJson, apiKey);
+      const workerResult = await invokeWorker(attemptJson, apiKey, { model: modelSelection });
       lastTrace = toTrace(attemptRequest, attemptJson, attemptPrompt, workerResult);
 
       if (workerResult.parseStatus !== "success") {
@@ -152,7 +152,7 @@ export async function requestEvolution(request: LevelRequest, options: RequestEv
       return {
         level: validated.level,
         source: "cursor-sdk",
-        model: CURSOR_MODEL,
+        model: modelSelection,
         summary: buildGenerationSummary(attemptRequest, validated.level, "cursor-sdk", undefined, lastTrace),
         trace: lastTrace
       };
@@ -167,7 +167,7 @@ export async function requestEvolution(request: LevelRequest, options: RequestEv
   return {
     level,
     source: "fallback",
-    model: CURSOR_MODEL,
+    model: modelSelection,
     summary: buildGenerationSummary(resolvedRequest, level, "fallback", warning, lastTrace),
     warning,
     trace: lastTrace
@@ -179,6 +179,8 @@ export function buildPrompt(request: LevelRequest): string {
   const targets = designerTargetsForGeneration(designer, request.level);
   const bounds = generationBrickBounds(designer);
   const classification = classifyDesignerBrief(designer.brief, designer.visualPreset);
+  const briefPlan = createDesignerBriefPlanForDesigner(designer, { columns: DESIGNER_BRICK_COLUMNS, rows: DESIGNER_BRICK_ROWS });
+  const promptRules = designerBriefPromptRules(briefPlan, { columns: DESIGNER_BRICK_COLUMNS, rows: DESIGNER_BRICK_ROWS });
   const playerPrompt = designer.brief || "None.";
   const requestContext = {
     level: request.level,
@@ -191,16 +193,21 @@ export function buildPrompt(request: LevelRequest): string {
   const avoidNames = previousBoardNames.length > 0 ? previousBoardNames.join(", ") : "none";
   const silhouetteMode = classification.mode === "silhouette";
   const exampleGrid = silhouetteMode ? SILHOUETTE_EXAMPLE_GRID : ARCADE_EXAMPLE_GRID;
-  const brickRules = silhouetteMode
+  const brickRules = briefPlan.featureOnlyMinimum
     ? [
-        `- Creative/silhouette prompt: prefer ${bounds.min}-${bounds.max} bricks so the player prompt motif stays readable.`,
-        `- Hard limits: at least ${bounds.min} and at most ${bounds.max} bricks. Do not pad into a solid mass.`,
-        "- Match the player brief shape literally (face, logo, letter, object). Empty cells are part of the design."
+        `- This constrained prompt has no legal non-feature fill kind; use only the named protected feature cells (${briefPlan.featureOnlyMinimum} occupied cells) and leave all other cells ".".`,
+        `- Hard limits for this constrained prompt: at least ${briefPlan.featureOnlyMinimum} and at most ${bounds.max} bricks. Do not fill the rest.`
       ]
-    : [
-        `- Use at least ${bounds.min} bricks and at most ${bounds.max} bricks.`,
-        `- Target about ${targets.brickTarget} bricks when that fits the prompt.`
-      ];
+    : silhouetteMode
+      ? [
+          `- Creative/silhouette prompt: prefer ${bounds.min}-${bounds.max} bricks so the player prompt motif stays readable.`,
+          `- Hard limits: at least ${bounds.min} and at most ${bounds.max} bricks. Do not pad into a solid mass.`,
+          "- Match the player brief shape literally (face, logo, letter, object). Empty cells are part of the design."
+        ]
+      : [
+          `- Use at least ${bounds.min} bricks and at most ${bounds.max} bricks.`,
+          `- Target about ${targets.brickTarget} bricks when that fits the prompt.`
+        ];
   const gridModeRules = silhouetteMode
     ? [
         "- Silhouette mode: prioritize readable outline and negative space over brick count.",
@@ -245,8 +252,11 @@ Player board prompt:
 - ${JSON.stringify(playerPrompt)}
 - Brief guidance: ${describeBriefGuidance(designer.brief, designer.visualPreset)}.
 - Priority order: player brief layout and motif, readable silhouette, playable lanes, rough tuning.
-- If the prompt says "only", "all", "nothing but", or equivalent, every occupied brick must use that requested brick kind.
-- For "exploding blocks" or "exploding eyes", use bomb (o) bricks at those features only unless the prompt says all bricks explode.
+${promptRules.exclusivityRule}
+${promptRules.featureBombRule ?? ""}
+${promptRules.nonBombFeatureRule ?? ""}
+${promptRules.featurePositionRule ?? ""}
+${promptRules.bossCoreRule ?? ""}
 
 Tuning:
 - ${targets.difficultyLabel} difficulty, speed near ${targets.speedTarget.toFixed(2)}, seed "${designer.seed}".
@@ -284,8 +294,8 @@ const ARCADE_EXAMPLE_GRID = `"brick": "basic",
 
 const SILHOUETTE_EXAMPLE_GRID = `"grid": [
     "${DESIGNER_PAD}",
-    "....bb........oo....",
-    "....bb........oo....",
+    "....bb........bb....",
+    ".....o........o.....",
     "...bb..........bb...",
     "..bbbbbbbbbbbbbb....",
     "...bbbbbbbbbbbb.....",
@@ -356,6 +366,7 @@ export function runCursorWorker(requestJson: string, apiKey: string, options: Ru
   return new Promise((resolve) => {
     const timeoutMs = options.timeoutMs ?? CURSOR_WORKER_TIMEOUT_MS;
     const sigkillGraceMs = options.sigkillGraceMs ?? CURSOR_WORKER_SIGKILL_GRACE_MS;
+    const model = options.model ?? CURSOR_MODEL;
     const startedAt = Date.now();
     const worker: CursorWorkerProcess = options.spawnWorker
       ? options.spawnWorker()
@@ -364,7 +375,8 @@ export function runCursorWorker(requestJson: string, apiKey: string, options: Ru
           // Pass the resolved API key explicitly so the worker subprocess does not depend on shell-inherited env.
           env: {
             ...process.env,
-            CURSOR_API_KEY: apiKey
+            CURSOR_API_KEY: apiKey,
+            CURSOR_MODEL_SELECTION_JSON: JSON.stringify(model)
           },
           stdio: ["pipe", "pipe", "pipe"]
         });
@@ -562,22 +574,8 @@ function clearedBoardNamesFromEvents(events: string[]): string[] {
 function describeBriefGuidance(brief: string, visualPreset: "arcade" | "icon" = "arcade"): string {
   if (!brief.trim()) return "Follow the default arcade wall guidance.";
   const classification = classifyDesignerBrief(brief, visualPreset);
-  const analysis = analyzeDesignerBrief(brief);
-  const hints: string[] = [];
-  if (classification.mode === "silhouette") {
-    hints.push("Treat this as a silhouette or icon prompt with readable outline and negative space.");
-  }
-  if (analysis.exclusiveKind) {
-    hints.push(`Every occupied brick must be ${analysis.exclusiveKind}.`);
-  } else if (analysis.mentionedKinds.length > 1) {
-    hints.push(`Use mixed grid codes. Mentioned kinds: ${analysis.mentionedKinds.join(", ")}. Place specials only where the prompt implies.`);
-  } else if (analysis.preferredKind) {
-    hints.push(`Use ${analysis.preferredKind} only for the feature the prompt calls for; fill the rest with basic unless mixed grid is clearer.`);
-  }
-  if (/\b(eyes?)\b/i.test(brief) && analysis.mentionedKinds.includes("bomb")) {
-    hints.push("Exploding eyes should be bomb (o) cells at the eye positions only.");
-  }
-  return hints.length > 0 ? hints.join(" ") : "Follow the player brief literally for layout, motif, and brick placement.";
+  const plan = createDesignerBriefPlan(brief, { columns: DESIGNER_BRICK_COLUMNS, rows: DESIGNER_BRICK_ROWS });
+  return describeDesignerBriefGuidance(plan, { silhouette: classification.mode === "silhouette" });
 }
 
 function normalizeStreamStats(input: unknown): ComposerStreamStats | undefined {

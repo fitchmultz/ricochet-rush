@@ -1,17 +1,30 @@
 import { clamp, isRecord } from "./util";
+import { BRICK_COLUMNS, BRICK_ROWS, DESIGNER_BRICK_COLUMNS, DESIGNER_BRICK_ROWS } from "./gridDimensions";
+import { BRICK_KINDS, COMPACT_GRID_KINDS, brickForKind, type BrickCell, type BrickKind } from "./brickKinds";
+import { createDesignerBriefPlan, createDesignerBriefPlanForDesigner, designerFeatureCells, type DesignerBriefPlan } from "./designerBriefPlan";
+import { selectFallbackCells, shapeLabel } from "./designerShapes";
+import { applyDesignerBriefConstraints, repairConstrainedFallback, validateDesignerBriefRows } from "./designerBriefConstraints";
+import { cellKey, countBricks } from "./gridCells";
+import { brickKindsFromBrief, normalizeBriefText, shapeFromBrief, type DesignerBriefAnalysis } from "./designerBriefAnalysis";
+export { analyzeDesignerBrief, mergeFeatureConstraints, type DesignerBriefAnalysis, type DesignerBriefFeature, type DesignerBriefFeatureConstraint, type DesignerBriefShape } from "./designerBriefAnalysis";
+export { BRICK_COLUMNS, BRICK_ROWS, DESIGNER_BRICK_COLUMNS, DESIGNER_BRICK_ROWS } from "./gridDimensions";
+export { type BrickCell, type BrickKind, type BrickSpec } from "./brickKinds";
+export { createDesignerBriefPlan, createDesignerBriefPlanForDesigner, constrainedFeatureOnlyMinimum, describeDesignerBriefGuidance, designerBriefConstraintMode, designerBriefFillKind, designerBriefFillPolicy, designerBriefPromptRules, designerFeatureCells, requiresBossCoreForDesignerStyle, type DesignerBriefConstraintMode, type DesignerBriefFeatureCellRule, type DesignerBriefFillPolicy, type DesignerBriefPlan, type DesignerBriefPromptRules } from "./designerBriefPlan";
+
+export interface CursorModelParameter {
+  id: string;
+  value: string;
+}
+
+export interface CursorModelSelection {
+  id: string;
+  params?: CursorModelParameter[];
+}
 
 export const CURSOR_MODEL = {
   id: "composer-2.5",
-  params: [{ id: "mode", value: "fast" }]
-};
-
-/** Curated pack boards and legacy authored layouts. */
-export const BRICK_COLUMNS = 14;
-export const BRICK_ROWS = 9;
-
-/** Composer designer canvas — finer grid for icon/creative prompts. */
-export const DESIGNER_BRICK_COLUMNS = 20;
-export const DESIGNER_BRICK_ROWS = 12;
+  params: [{ id: "fast", value: "true" }]
+} satisfies CursorModelSelection;
 
 export const PACK_CELL_COUNT = BRICK_COLUMNS * BRICK_ROWS;
 export const DESIGNER_CELL_COUNT = DESIGNER_BRICK_COLUMNS * DESIGNER_BRICK_ROWS;
@@ -29,29 +42,7 @@ export const MAX_DESIGNER_BRICKS = scalePackCountToDesigner(MAX_BRICKS);
 
 export const DESIGNER_STYLES = ["balanced", "open-lanes", "bomb-chains", "precision", "boss-core"] as const;
 
-export type BrickKind =
-  | "basic"
-  | "hard"
-  | "bomb"
-  | "prize"
-  | "penalty"
-  | "laser"
-  | "grab"
-  | "fire"
-  | "thru"
-  | "split"
-  | "wide"
-  | "slow"
-  | "boss";
-
 export type DesignerStyle = (typeof DESIGNER_STYLES)[number];
-
-export interface BrickSpec {
-  kind: BrickKind;
-  hp: number;
-}
-
-export type BrickCell = BrickSpec | null;
 
 export interface LevelRequest {
   level: number;
@@ -93,7 +84,7 @@ export interface LevelBlueprint {
 export interface LevelResponse {
   level: LevelBlueprint;
   source: "cursor-sdk" | "fallback";
-  model: typeof CURSOR_MODEL;
+  model: CursorModelSelection;
   summary?: GenerationSummary;
   warning?: string;
   trace?: ComposerAgentTrace;
@@ -145,22 +136,6 @@ export interface DesignerTargets {
   styleGoal: string;
 }
 
-const BRICK_KINDS = new Set<BrickKind>([
-  "basic",
-  "hard",
-  "bomb",
-  "prize",
-  "penalty",
-  "laser",
-  "grab",
-  "fire",
-  "thru",
-  "split",
-  "wide",
-  "slow",
-  "boss"
-]);
-
 export const DEFAULT_DESIGNER_INTENT: BoardDesignerIntent = {
   style: "balanced",
   difficulty: 3,
@@ -189,14 +164,6 @@ export function levelGridDimensions(level: LevelBlueprint): { columns: number; r
   return { columns, rows };
 }
 
-const STYLE_LABELS: Record<DesignerStyle, string> = {
-  balanced: "Balanced",
-  "open-lanes": "Open lanes",
-  "bomb-chains": "Bomb chains",
-  precision: "Precision",
-  "boss-core": "Boss core"
-};
-
 const STYLE_GOALS: Record<DesignerStyle, string> = {
   balanced: "A readable mix of lanes, shields, rewards, and light risk.",
   "open-lanes": "Two or three clean bank lanes with rewards around the openings.",
@@ -211,22 +178,6 @@ const MAX_REQUEST_SCORE = 999_999_999;
 const MAX_REQUEST_LIVES = 99;
 const MAX_RECENT_EVENTS = 5;
 const MAX_DESIGNER_BRIEF_LENGTH = 180;
-const COMPACT_GRID_KINDS: Record<string, BrickKind> = {
-  b: "basic",
-  h: "hard",
-  o: "bomb",
-  p: "prize",
-  n: "penalty",
-  l: "laser",
-  g: "grab",
-  f: "fire",
-  t: "thru",
-  s: "split",
-  w: "wide",
-  m: "slow",
-  c: "boss"
-};
-
 export function normalizeLevelRequest(input: unknown): LevelRequest | null {
   if (!isRecord(input)) return null;
   const level = boundedInteger(input.level, 1, MAX_REQUEST_LEVEL);
@@ -275,12 +226,14 @@ export function normalizeLevel(input: unknown, request: LevelRequest): LevelBlue
   const normalizedRows = normalizeLevelRows(raw, request, dimensions);
   if (!normalizedRows) return fallbackLevel(request);
   const rows = repairBrickCount(normalizedRows, request.level);
+  const designer = normalizeDesignerIntent(request.designer);
+  const plan = createDesignerBriefPlanForDesigner(designer, { columns: rows[0]?.length ?? BRICK_COLUMNS, rows: rows.length });
   return {
     name: stringValue(raw.name, `Sector ${request.level}`),
     briefing: stringValue(raw.briefing, "Break the wall before it learns your rhythm."),
     paddleHint: stringValue(raw.paddleHint, "Keep the ball angled. Flat returns are a trap."),
     speed: clamp(numberValue(raw.speed, 1 + request.level * 0.04), 0.85, 1.85),
-    rows: applyDesignerBriefConstraints(rows, normalizeDesignerIntent(request.designer))
+    rows: applyDesignerBriefConstraints(rows, plan, designer, brickBoundsForGrid(rows[0]?.length ?? BRICK_COLUMNS, rows.length).max)
   };
 }
 
@@ -295,14 +248,17 @@ export function validateAndNormalizeSdkLevel(input: unknown, request: LevelReque
 
   const designer = resolveDesignerIntentForGeneration(request.designer);
   const bounds = generationBrickBounds(designer);
+  const briefPlan = createDesignerBriefPlanForDesigner(designer, designerGridDimensions());
+  const minRawBrickCount = briefPlan.featureOnlyMinimum ?? bounds.minRaw;
+  const minPlayableBrickCount = briefPlan.featureOnlyMinimum ?? bounds.min;
 
   const rawBrickCount = Array.isArray(raw.grid)
     ? countCompactGridGlyphs(raw.grid, designerGridDimensions())
     : countRowsBrickSpecs(raw.rows);
-  if (rawBrickCount < bounds.minRaw) {
+  if (rawBrickCount < minRawBrickCount) {
     return {
       ok: false,
-      reason: `SDK grid is too sparse (${rawBrickCount} occupied cells; need at least ${bounds.minRaw}).`,
+      reason: `SDK grid is too sparse (${rawBrickCount} occupied cells; need at least ${minRawBrickCount}).`,
       rawBrickCount
     };
   }
@@ -314,10 +270,10 @@ export function validateAndNormalizeSdkLevel(input: unknown, request: LevelReque
 
   const rows = normalizedRows;
   const brickCount = countBricks(rows);
-  if (brickCount < bounds.min || brickCount > bounds.max) {
+  if (brickCount < minPlayableBrickCount || brickCount > bounds.max) {
     return {
       ok: false,
-      reason: `Playable brick count ${brickCount} is outside ${bounds.min}-${bounds.max}.`,
+      reason: `Playable brick count ${brickCount} is outside ${minPlayableBrickCount}-${bounds.max}.`,
       rawBrickCount
     };
   }
@@ -336,7 +292,7 @@ export function validateAndNormalizeSdkLevel(input: unknown, request: LevelReque
     rows
   };
 
-  const fidelity = validateCreativeFidelity(level, designer.brief, designer.visualPreset);
+  const fidelity = validateCreativeFidelity(level, designer.brief, designer.visualPreset, designer);
   if (!fidelity.ok) {
     return { ok: false, reason: fidelity.reason, rawBrickCount: brickCount };
   }
@@ -418,7 +374,7 @@ function compactGridCell(char: string, legend: Record<string, unknown>, defaultK
   if (code === "." || code === "_" || code === "-" || code.trim().length === 0) return null;
   const legendEntry = legend[char] ?? legend[code];
   const kind = brickKindValue(legendEntry) ?? COMPACT_GRID_KINDS[code] ?? defaultKind ?? "basic";
-  const brick = brickForKind(kind, designer, level);
+  const brick = brickForKind(kind, designer.difficulty, level);
   const hp = hpValue(legendEntry);
   return hp === undefined ? brick : { kind, hp };
 }
@@ -454,18 +410,18 @@ export function normalizeDesignerIntent(input: unknown): BoardDesignerIntent {
 }
 
 export function classifyDesignerBrief(brief: string, visualPreset: DesignerVisualPreset = "arcade"): DesignerBriefClassification {
-  const text = brief.toLowerCase();
+  const text = normalizeBriefText(brief);
   const silhouetteKeywords =
     /\b(face|smiley|smile|grin|emoji|icon|logo|silhouette|portrait|symbol|letter|outline|figure|character|mask|mascot|pixel art)\b/.test(text) ||
     /\b(shaped|shape of|looks like|look like)\b/.test(text);
-  const effectiveSilhouette = visualPreset === "icon" || silhouetteKeywords;
+  const negativeSpaceKeywords = /\b(face|smiley|smile|grin|emoji|icon|logo|silhouette|portrait|symbol|letter|outline|figure|character|mask|mascot|pixel art|hollow|empty center|open center|negative space|ring outline|donut)\b/.test(text);
+  const effectiveSilhouette = visualPreset === "icon" || silhouetteKeywords || Boolean(shapeFromBrief(text));
   const mentionedKinds = brickKindsFromBrief(text);
   const wantsMixedKinds =
     mentionedKinds.length > 1 ||
     /\b(eyes?|mouth|cheeks?|only the|except|but the|accent|highlights?)\b/.test(text) ||
     (mentionedKinds.length === 1 && /\b(eyes?|center|core|corners?|edges?)\b/.test(text));
-  const wantsNegativeSpace =
-    effectiveSilhouette || /\b(hollow|empty center|open center|negative space|outline|ring outline|donut)\b/.test(text);
+  const wantsNegativeSpace = negativeSpaceKeywords;
   return {
     mode: effectiveSilhouette ? "silhouette" : "arcade",
     wantsMixedKinds,
@@ -504,79 +460,22 @@ export function generationBrickBounds(designer: BoardDesignerIntent): { min: num
 export function validateCreativeFidelity(
   level: LevelBlueprint,
   brief: string,
-  visualPreset: DesignerVisualPreset = "arcade"
+  visualPreset: DesignerVisualPreset = "arcade",
+  designer?: BoardDesignerIntent
 ): { ok: true } | { ok: false; reason: string } {
   const trimmed = brief.trim();
   if (trimmed.length === 0) return { ok: true };
 
-  const text = trimmed.toLowerCase();
   const classification = classifyDesignerBrief(trimmed, visualPreset);
-  const analysis = analyzeDesignerBrief(trimmed);
   const rows = level.rows;
-  const brickCount = countBricks(rows);
-
-  if (classification.mode === "silhouette") {
-    if (brickCount > MAX_SILHOUETTE_BRICKS) {
-      return {
-        ok: false,
-        reason: `Silhouette prompt produced an overfilled wall (${brickCount} bricks; target at most ${MAX_SILHOUETTE_BRICKS}).`
-      };
-    }
-    if (classification.wantsNegativeSpace && centerRegionEmptyRatio(rows) < 0.28) {
-      return { ok: false, reason: "Silhouette prompt needs more open center space for the motif to read." };
-    }
-  }
-
-  if (/\b(face|smiley|smile|grin|emoji)\b/.test(text) && /\b(explod|bomb|blast|detonat)/.test(text)) {
-    if (countKind(rows, "bomb") < 2) {
-      return { ok: false, reason: "Face prompt with exploding eyes needs at least two bomb bricks." };
-    }
-  }
-
-  if (analysis.exclusiveKind && analysis.exclusiveKind !== "bomb") {
-    const mismatched = rows.flat().filter((brick) => brick && brick.kind !== analysis.exclusiveKind).length;
-    if (mismatched > 0) {
-      return { ok: false, reason: `Prompt requires every occupied brick to be ${analysis.exclusiveKind}.` };
-    }
-  }
-  if (analysis.exclusiveKind === "bomb") {
-    const bricks = rows.flat().filter((brick): brick is NonNullable<typeof brick> => brick !== null);
-    const bombCount = countKind(rows, "bomb");
-    if (bombCount < 2) {
-      return { ok: false, reason: "Bomb-heavy prompts need at least two bomb bricks." };
-    }
-    if (bombCount / bricks.length < 0.5) {
-      return { ok: false, reason: "Bomb-heavy prompts should keep at least half the wall as bombs." };
-    }
-  }
-
-  return { ok: true };
-}
-
-function centerRegionEmptyRatio(rows: BrickCell[][]): number {
-  const columns = rows[0]?.length ?? BRICK_COLUMNS;
-  const rowCount = rows.length;
-  const minX = Math.max(1, Math.floor(columns * 0.21));
-  const maxX = Math.min(columns - 2, Math.ceil(columns * 0.79) - 1);
-  const minY = Math.max(1, Math.floor(rowCount * 0.22));
-  const maxY = Math.min(rowCount - 2, Math.ceil(rowCount * 0.78) - 1);
-  let total = 0;
-  let empty = 0;
-  for (let y = minY; y <= maxY; y += 1) {
-    for (let x = minX; x <= maxX; x += 1) {
-      total += 1;
-      if (!rows[y]?.[x]) empty += 1;
-    }
-  }
-  return total === 0 ? 0 : empty / total;
-}
-
-function countKind(rows: BrickCell[][], kind: BrickKind): number {
-  return rows.flat().filter((brick) => brick?.kind === kind).length;
-}
-
-export function designerStyleLabel(style: DesignerStyle): string {
-  return STYLE_LABELS[style];
+  const plan = designer
+    ? createDesignerBriefPlanForDesigner(designer, { columns: rows[0]?.length ?? BRICK_COLUMNS, rows: rows.length })
+    : createDesignerBriefPlan(trimmed, { columns: rows[0]?.length ?? BRICK_COLUMNS, rows: rows.length });
+  return validateDesignerBriefRows(rows, plan, {
+    maxSilhouetteBricks: MAX_SILHOUETTE_BRICKS,
+    silhouette: classification.mode === "silhouette",
+    wantsNegativeSpace: classification.wantsNegativeSpace
+  });
 }
 
 export function designerStyleGoal(style: DesignerStyle): string {
@@ -633,8 +532,11 @@ export function nextDesignerSeed(seed: string, request: LevelRequest, nonce = Da
 export function fallbackLevel(request: LevelRequest): LevelBlueprint {
   const designer = normalizeDesignerIntent(request.designer);
   const targets = designerTargetsForGeneration(designer, request.level);
-  const rows = applyDesignerBriefConstraints(repairBrickCount(buildFallbackRows(request, designer), request.level), designer);
-  const brief = analyzeDesignerBrief(designer.brief);
+  const plan = createDesignerBriefPlanForDesigner(designer, designerGridDimensions());
+  const brief = plan.analysis;
+  const initialRows = repairBrickCount(buildFallbackRows(request, designer, plan), request.level);
+  const constrainedRows = applyDesignerBriefConstraints(initialRows, plan, designer, brickBoundsForGrid(initialRows[0]?.length ?? BRICK_COLUMNS, initialRows.length).max);
+  const rows = repairConstrainedFallback(constrainedRows, request.level, plan, designer, generationBrickBounds(designer).min);
 
   return {
     name: brief.shape ? `${shapeLabel(brief.shape)} Prompt ${request.level}` : `Generated Sector ${request.level}`,
@@ -647,12 +549,13 @@ export function fallbackLevel(request: LevelRequest): LevelBlueprint {
   };
 }
 
-function buildFallbackRows(request: LevelRequest, designer: BoardDesignerIntent): BrickCell[][] {
+function buildFallbackRows(request: LevelRequest, designer: BoardDesignerIntent, plan: DesignerBriefPlan): BrickCell[][] {
   const { columns, rows: rowCount } = designerGridDimensions();
   const rows = Array.from({ length: rowCount }, () => Array.from({ length: columns }, () => null as BrickCell));
   const targets = designerTargetsForGeneration(designer, request.level);
   const seed = hashText(`${request.level}:${request.score}:${designer.style}:${designer.seed}`);
-  const brief = analyzeDesignerBrief(designer.brief);
+  const brief = plan.analysis;
+  const excludedKinds = new Set(brief.excludedKinds);
   const candidates: { x: number; y: number; score: number }[] = [];
   const laneSkipA = Math.round((2 / (BRICK_COLUMNS - 1)) * (columns - 1));
   const laneSkipB = Math.round((11 / (BRICK_COLUMNS - 1)) * (columns - 1));
@@ -667,7 +570,11 @@ function buildFallbackRows(request: LevelRequest, designer: BoardDesignerIntent)
   }
   candidates.sort((a, b) => a.score - b.score);
 
-  const selected = selectFallbackCells(candidates, brief, targets.brickTarget);
+  const selected = selectFallbackCells(candidates, brief, targets.brickTarget, MAX_DESIGNER_BRICKS);
+  const featureKinds = new Set(plan.localizedFeatures.map((feature) => feature.kind));
+  const nonFeatureExcludedKinds = new Set(excludedKinds);
+  for (const featureKind of featureKinds) nonFeatureExcludedKinds.add(featureKind);
+  const defaultFillKind = plan.fillPolicy.nonFeatureFillKind;
   const specialCells = new Set(
     [...selected]
       .sort((a, b) => hashNumber(seed + 1_037, a.x, a.y) - hashNumber(seed + 1_037, b.x, b.y))
@@ -678,193 +585,33 @@ function buildFallbackRows(request: LevelRequest, designer: BoardDesignerIntent)
     [...selected]
       .filter((cell) => !specialCells.has(cellKey(cell)))
       .sort((a, b) => hashNumber(seed + 2_071, a.x, a.y) - hashNumber(seed + 2_071, b.x, b.y))
-      .slice(0, targets.hardTarget)
+      .slice(0, nonFeatureExcludedKinds.has("hard") ? 0 : targets.hardTarget)
       .map(cellKey)
   );
 
   for (const cell of selected) {
     const key = cellKey(cell);
     if (brief.exclusiveKind) {
-      rows[cell.y][cell.x] = brickForKind(brief.exclusiveKind, designer, request.level);
+      rows[cell.y][cell.x] = brickForKind(brief.exclusiveKind, designer.difficulty, request.level);
     } else if (specialCells.has(key)) {
-      rows[cell.y][cell.x] = { kind: brief.preferredKind ?? pickSpecialKind(designer.style, seed, cell.x, cell.y), hp: 1 };
+      const specialKind = brief.preferredKind ?? pickSpecialKindAvoiding(designer.style, seed, cell.x, cell.y, nonFeatureExcludedKinds, defaultFillKind);
+      rows[cell.y][cell.x] = specialKind ? brickForKind(specialKind, designer.difficulty, request.level) : null;
     } else if (hardCells.has(key)) {
-      rows[cell.y][cell.x] = { kind: "hard", hp: clamp(1 + Math.ceil(designer.difficulty / 2), 2, 4) };
+      rows[cell.y][cell.x] = brickForKind("hard", designer.difficulty, request.level);
     } else {
-      rows[cell.y][cell.x] = { kind: "basic", hp: 1 };
+      rows[cell.y][cell.x] = defaultFillKind ? brickForKind(defaultFillKind, designer.difficulty, request.level) : null;
     }
   }
 
-  if (designer.style === "boss-core" || (request.level % 5 === 0 && designer.difficulty >= 4)) {
-    const bossX = Math.round(centerX - 0.5);
-    const bossY = Math.max(2, Math.round(rowCount * 0.22));
-    for (const [x, y] of [
-      [bossX, bossY],
-      [bossX + 1, bossY],
-      [bossX, bossY + 1],
-      [bossX + 1, bossY + 1]
-    ]) {
-      if (y < rowCount && x < columns) rows[y][x] = { kind: "boss", hp: clamp(4 + designer.difficulty + Math.floor(request.level / 4), 5, 12) };
+  if (!nonFeatureExcludedKinds.has("boss") && (designer.style === "boss-core" || (request.level % 5 === 0 && designer.difficulty >= 4))) {
+    for (const { x, y } of designerFeatureCells("core", columns, rowCount)) {
+      if (y < rowCount && x < columns) rows[y][x] = brickForKind("boss", designer.difficulty, request.level);
     }
   }
   return rows;
 }
 
-export type DesignerBriefShape = "heart" | "diamond" | "circle" | "triangle" | "cross" | "x";
-
-export interface DesignerBriefAnalysis {
-  exclusiveKind?: BrickKind;
-  preferredKind?: BrickKind;
-  mentionedKinds: BrickKind[];
-  shape?: DesignerBriefShape;
-}
-
-export function analyzeDesignerBrief(brief: string): DesignerBriefAnalysis {
-  const text = brief.toLowerCase();
-  const kinds = brickKindsFromBrief(text);
-  const kind = kinds[0];
-  const exclusive = kind && /\b(all|only|nothing but|entirely|exclusively|just)\b/.test(text);
-  return {
-    exclusiveKind: exclusive ? kind : undefined,
-    preferredKind: !exclusive && kinds.length === 1 ? kind : undefined,
-    mentionedKinds: kinds,
-    shape: shapeFromBrief(text)
-  };
-}
-
-function brickKindsFromBrief(text: string): BrickKind[] {
-  const matches: BrickKind[] = [];
-  const add = (kind: BrickKind, pattern: RegExp) => {
-    if (pattern.test(text) && !matches.includes(kind)) matches.push(kind);
-  };
-  add("bomb", /\b(explod|bomb|blast|detonat)/);
-  add("boss", /\b(boss|core|bosses)\b/);
-  add("hard", /\b(hard|metal|armou?r|shield)/);
-  add("prize", /\b(prize|reward|gift|green)/);
-  add("penalty", /\b(penalty|hazard|red|bad)\b/);
-  add("laser", /\b(laser|beam)\b/);
-  add("grab", /\b(grab|catch|sticky)\b/);
-  add("fire", /\b(fire|flame|burn)\b/);
-  add("thru", /\b(thru|ghost|phase|pierc)/);
-  add("split", /\b(split|multi[- ]?ball|multiball)\b/);
-  add("wide", /\b(wide|expand|big paddle)\b/);
-  add("slow", /\b(slow|brake|chill)\b/);
-  add("basic", /\b(basic|plain|normal)\b/);
-  return matches;
-}
-
-function shapeFromBrief(text: string): DesignerBriefShape | undefined {
-  if (/\b(heart|love|valentine)\b/.test(text)) return "heart";
-  if (/\b(diamond|gem|rhombus)\b/.test(text)) return "diamond";
-  if (/\b(circle|round|orb|circular)\b/.test(text)) return "circle";
-  if (/\b(triangle|pyramid)\b/.test(text)) return "triangle";
-  if (/\b(cross|plus)\b/.test(text)) return "cross";
-  if (/\b(x[- ]?shape|letter x|big x)\b/.test(text)) return "x";
-  return undefined;
-}
-
-function selectFallbackCells(candidates: { x: number; y: number; score: number }[], brief: DesignerBriefAnalysis, targetCount: number) {
-  if (!brief.shape) return candidates.slice(0, targetCount);
-  const shaped = embedPackCellsOnDesignerGrid(cellsForShape(brief.shape));
-  if (shaped.length >= MIN_SILHOUETTE_BRICKS && shaped.length <= MAX_DESIGNER_BRICKS) return shaped;
-  if (shaped.length > MAX_DESIGNER_BRICKS) return shaped.slice(0, MAX_DESIGNER_BRICKS);
-  const selected = new Map(shaped.map((cell) => [cellKey(cell), cell]));
-  for (const cell of candidates) {
-    if (selected.size >= MIN_SILHOUETTE_BRICKS) break;
-    selected.set(cellKey(cell), cell);
-  }
-  return [...selected.values()];
-}
-
-function embedPackCellsOnDesignerGrid(cells: { x: number; y: number }[]): { x: number; y: number }[] {
-  const offsetX = Math.floor((DESIGNER_BRICK_COLUMNS - BRICK_COLUMNS) / 2);
-  const offsetY = Math.floor((DESIGNER_BRICK_ROWS - BRICK_ROWS) / 2);
-  return cells.map((cell) => ({ x: cell.x + offsetX, y: cell.y + offsetY }));
-}
-
-function cellsForShape(shape: DesignerBriefShape): { x: number; y: number }[] {
-  const cells: { x: number; y: number }[] = [];
-  for (let y = 0; y < BRICK_ROWS; y += 1) {
-    for (let x = 0; x < BRICK_COLUMNS; x += 1) {
-      if (shapeIncludesCell(shape, x, y)) cells.push({ x, y });
-    }
-  }
-  return cells;
-}
-
-function shapeIncludesCell(shape: DesignerBriefShape, x: number, y: number): boolean {
-  const cx = x - (BRICK_COLUMNS - 1) / 2;
-  const cy = y - (BRICK_ROWS - 1) / 2;
-  if (shape === "heart") {
-    const rowExtents = [
-      [3, 5],
-      [2, 11],
-      [1, 12],
-      [0, 13],
-      [1, 12],
-      [2, 11],
-      [3, 10],
-      [4, 9],
-      [5, 8]
-    ] as const;
-    const range = rowExtents[y];
-    if (!range) return false;
-    if (y === 0) return (x >= 3 && x <= 5) || (x >= 8 && x <= 10);
-    return x >= range[0] && x <= range[1];
-  }
-  if (shape === "diamond") return Math.abs(cx) / 6.5 + Math.abs(cy) / 4 <= 1;
-  if (shape === "circle") return cx * cx / 40 + cy * cy / 16 <= 1;
-  if (shape === "triangle") return y >= 1 && y <= 8 && Math.abs(cx) <= y * 0.82;
-  if (shape === "cross") return (x >= 5 && x <= 8 && y <= 8) || (y >= 3 && y <= 5 && x >= 1 && x <= 12);
-  return Math.abs(cx - cy * 1.35) <= 1.1 || Math.abs(cx + cy * 1.35) <= 1.1;
-}
-
-function shapeLabel(shape: DesignerBriefShape): string {
-  return shape === "x" ? "X-Shaped" : `${shape[0]?.toUpperCase() ?? ""}${shape.slice(1)}`;
-}
-
-function applyDesignerBriefConstraints(rows: BrickCell[][], designer: BoardDesignerIntent): BrickCell[][] {
-  const brief = analyzeDesignerBrief(designer.brief);
-  const exclusiveKind = brief.exclusiveKind;
-  const fillKind = exclusiveKind ?? brief.preferredKind ?? "basic";
-  let constrained = rows.map((row) => [...row]);
-
-  if (brief.shape) {
-    const shapeCells = new Set(embedPackCellsOnDesignerGrid(cellsForShape(brief.shape)).map(cellKey));
-    constrained = constrained.map((row, y) =>
-      row.map((brick, x) => {
-        if (!shapeCells.has(cellKey({ x, y }))) return null;
-        return brick ?? brickForKind(fillKind, designer, 1);
-      })
-    );
-  }
-
-  if (exclusiveKind === "bomb") {
-    constrained = constrained.map((row, y) =>
-      row.map((brick, x) => {
-        if (!brick) return null;
-        const preferBomb = (x + y) % 10 < 7;
-        return brickForKind(preferBomb ? "bomb" : "basic", designer, 1);
-      })
-    );
-  } else if (exclusiveKind) {
-    constrained = constrained.map((row) => row.map((brick) => (brick ? brickForKind(exclusiveKind, designer, 1) : null)));
-  }
-
-  return constrained;
-}
-
-function brickForKind(kind: BrickKind, designer: BoardDesignerIntent, level: number): BrickSpec {
-  if (kind === "hard") return { kind, hp: clamp(1 + Math.ceil(designer.difficulty / 2), 2, 4) };
-  if (kind === "boss") return { kind, hp: clamp(4 + designer.difficulty + Math.floor(level / 4), 5, 12) };
-  return { kind, hp: 1 };
-}
-
-function cellKey(cell: { x: number; y: number }): string {
-  return `${cell.x}:${cell.y}`;
-}
-
-function pickSpecialKind(style: DesignerStyle, seed: number, x: number, y: number): BrickKind {
+function specialKindPool(style: DesignerStyle): BrickKind[] {
   const pools: Record<DesignerStyle, BrickKind[]> = {
     balanced: ["prize", "wide", "split", "laser", "bomb", "slow", "grab", "fire", "thru"],
     "open-lanes": ["wide", "slow", "grab", "split", "prize", "thru"],
@@ -872,8 +619,12 @@ function pickSpecialKind(style: DesignerStyle, seed: number, x: number, y: numbe
     precision: ["thru", "grab", "slow", "laser", "prize"],
     "boss-core": ["fire", "laser", "thru", "split", "bomb", "prize", "penalty"]
   };
-  const pool = pools[style];
-  return pool[hashNumber(seed, x + 13, y + 29) % pool.length] ?? "prize";
+  return pools[style];
+}
+
+function pickSpecialKindAvoiding(style: DesignerStyle, seed: number, x: number, y: number, excludedKinds: ReadonlySet<BrickKind>, fallbackKind: BrickKind | undefined): BrickKind | undefined {
+  const pool = specialKindPool(style).filter((kind) => !excludedKinds.has(kind));
+  return pool[hashNumber(seed, x + 13, y + 29) % pool.length] ?? fallbackKind;
 }
 
 function hintForDesignerStyle(style: DesignerStyle): string {
@@ -915,10 +666,6 @@ function normalizeBrick(input: unknown): BrickCell {
   if (typeof kind !== "string" || !BRICK_KINDS.has(kind as BrickKind)) return null;
   const hp = clamp(Math.round(numberValue(input.hp, kind === "hard" ? 2 : 1)), 1, kind === "boss" ? 12 : 4);
   return { kind: kind as BrickKind, hp };
-}
-
-function countBricks(rows: BrickCell[][]): number {
-  return rows.flat().filter(Boolean).length;
 }
 
 function repairBrickCount(rows: BrickCell[][], level: number): BrickCell[][] {

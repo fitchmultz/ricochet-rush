@@ -1,6 +1,7 @@
 import { Agent, type Run, type SDKMessage } from "@cursor/sdk";
-import { CURSOR_MODEL, normalizeLevelRequest, type ComposerStreamStats } from "../shared/evolution.js";
+import { normalizeLevelRequest, type ComposerStreamStats } from "../shared/evolution.js";
 import { buildPrompt } from "./cursorAgent.js";
+import { readCursorModelSelectionFromEnv } from "./cursorModel.js";
 import { parseLevelJsonFromCandidates } from "./levelJson.js";
 import { appendAssistantTextChunk } from "./streamText.js";
 
@@ -13,10 +14,12 @@ if (!apiKey) {
   throw new Error("CURSOR_API_KEY is required for Cursor SDK level generation.");
 }
 
+const model = readCursorModelSelectionFromEnv();
+
 const agent = await Agent.create({
   apiKey,
   name: "Ricochet Rush Level Designer",
-  model: CURSOR_MODEL,
+  model,
   local: {
     cwd: process.cwd(),
     sandboxOptions: { enabled: true },
@@ -38,7 +41,7 @@ process.once("SIGINT", handleSigint);
 const startAt = Date.now();
 try {
   const run = await agent.send(buildPrompt(request), {
-    model: CURSOR_MODEL,
+    model,
     local: { force: true }
   });
   activeRun = run;

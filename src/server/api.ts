@@ -99,6 +99,9 @@ async function serveStatic(staticDir: string, pathname: string, response: Server
   } catch {
     throw new HttpError(404, "Not found");
   }
+  if (/\p{Cc}/u.test(decodedPath)) {
+    throw new HttpError(404, "Not found");
+  }
   const segments = decodedPath.split(/[/\\]/).filter(Boolean);
   if (segments.some((segment) => segment === ".." || segment === ".")) {
     throw new HttpError(404, "Not found");

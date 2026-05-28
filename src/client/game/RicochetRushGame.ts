@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import {
   BRICK_COLUMNS,
-  BRICK_ROWS,
   DEFAULT_DESIGNER_INTENT,
   type BoardDesignerIntent,
   type BrickKind,
@@ -67,9 +66,7 @@ import {
   normalizeLoopRiskVelocity,
   type LoopRiskVelocity,
   type LoopRiskVelocityInput,
-  type PaddleRebound,
-  type PaddleReboundInput,
-  type StuckBallLaunchInput
+  type PaddleRebound
 } from "./physics";
 import { penaltyPowerupPool, powerupToneFor, prizePowerupPool, type PowerupKind, type PowerupPoolInput, type PowerupTone } from "./powerups";
 import { LAUNCH_LOSS_GRACE_SECONDS } from "./tuning";
@@ -234,19 +231,7 @@ function computeLevelLayout(level: LevelBlueprint): LevelLayout {
 const PADDLE_Y = HEIGHT - 52;
 const PADDLE_SPEED = 620;
 const MAX_PADDLE_VELOCITY = 920;
-const PADDLE_ACCELERATION = 1.018;
-const PADDLE_EDGE_INFLUENCE = 0.74;
-const PADDLE_SPIN_INFLUENCE = 0.22;
-const LAUNCH_SIDE_SPEED = 190;
-const LAUNCH_OFFSET_INFLUENCE = 300;
-const LAUNCH_SPIN_INFLUENCE = 0.1;
-const LAUNCH_UPWARD_SPEED = 410;
-const LAUNCH_CENTER_OFFSET_THRESHOLD = 0.08;
-const MIN_BALL_SPEED = 420;
 const MAX_BALL_SPEED = 860;
-const MAX_LAUNCH_SPEED = 760;
-const MIN_REBOUND_X_RATIO = 0.18;
-const MAX_REBOUND_X_RATIO = 0.84;
 const MIN_COLLISION_X_RATIO = 0.16;
 const MIN_COLLISION_Y_RATIO = 0.16;
 const POWERUP_ATLAS_COLUMNS = 5;
@@ -1410,7 +1395,7 @@ export class RicochetRushGame {
       this.resetBall();
     }
     if (!savedBricksFitLevel && this.bricks.length > 0) {
-      this.saveCheckpoint("Saved board rebuilt.", true);
+      this.saveCheckpoint("Saved board rebuilt.", true, "technical");
     }
     this.refreshHud("Saved run restored.");
   }
@@ -2139,7 +2124,7 @@ export class RicochetRushGame {
       score: this.score,
       lives: this.lives,
       clearedLevels: this.clearedLevels,
-      recentEvents: gameEventsToStrings(this.recentEvents).slice(0, 5),
+      recentEvents: gameEventsToStrings(this.recentEvents.filter((event) => event.audience === "player")).slice(0, 5),
       designer: resolveDesignerIntentForGeneration({
         ...this.designerIntent,
         seed: this.designerIntent.seed
@@ -2430,7 +2415,7 @@ export class RicochetRushGame {
     if (this.bricks.length === 0 || this.autosaveSuppressed) {
       localStorage.removeItem(SAVE_KEY);
       this.hasSave = false;
-      if (event) this.pushEvent(event);
+      if (event) this.pushEvent(event, audience);
       return;
     }
     const save: GameSave = {
@@ -2459,7 +2444,7 @@ export class RicochetRushGame {
     };
     writeJson(SAVE_KEY, save);
     this.hasSave = true;
-    if (event) this.pushEvent(event);
+    if (event) this.pushEvent(event, audience);
   }
 
   private applySettingsClass() {
@@ -2965,6 +2950,7 @@ export class RicochetRushGame {
   }
 
   private showRunSummaryOverlay(mode: "clear" | "gameOver", content: { title: string; body: string; actions: SummaryAction[] }) {
+    this.hud.closeToolPanel();
     this.previouslyFocusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const stage = this.mount.closest<HTMLElement>(".stage");
     stage?.classList.add("has-visible-overlay", "has-priority-overlay");

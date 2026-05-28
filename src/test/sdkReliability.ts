@@ -87,7 +87,7 @@ if (creative.source !== "cursor-sdk") {
   console.error(`creative probe FALLBACK: ${creative.warning ?? "unknown warning"}`);
   process.exit(1);
 }
-const creativeFidelity = validateCreativeFidelity(creative.level, creativeDesigner.brief, creativeDesigner.visualPreset);
+const creativeFidelity = validateCreativeFidelity(creative.level, creativeDesigner.brief, creativeDesigner.visualPreset, creativeDesigner);
 if (!creativeFidelity.ok) {
   console.error(`creative probe fidelity failed: ${creativeFidelity.reason}`);
   process.exit(1);

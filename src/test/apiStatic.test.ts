@@ -67,4 +67,13 @@ describe("static file confinement", () => {
       expect(response.status).toBe(404);
     });
   });
+
+  it("rejects encoded control-character paths before filesystem reads", async () => {
+    await withStaticServer({ "index.html": "<html>ok</html>", "\u0080": "control" }, async (baseUrl) => {
+      const nulResponse = await fetch(`${baseUrl}/%00`);
+      expect(nulResponse.status).toBe(404);
+      const c1Response = await fetch(`${baseUrl}/%C2%80`);
+      expect(c1Response.status).toBe(404);
+    });
+  });
 });

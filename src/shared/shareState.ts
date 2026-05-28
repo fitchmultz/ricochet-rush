@@ -1,4 +1,4 @@
-import { BRICK_COLUMNS, BRICK_ROWS, normalizeLevel, type BrickKind, type LevelBlueprint, type LevelRequest } from "./evolution";
+import { normalizeLevel, type BrickKind, type LevelBlueprint, type LevelRequest } from "./evolution";
 import { previewRowsFromLevel } from "./boardPacks";
 import { isRecord } from "./util";
 
