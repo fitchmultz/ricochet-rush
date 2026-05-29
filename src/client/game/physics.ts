@@ -29,6 +29,24 @@ export interface PaddleReboundInput {
   incomingVy: number;
 }
 
+export interface PaddleContactInput {
+  ballX: number;
+  ballY: number;
+  ballRadius: number;
+  ballVy: number;
+  paddleCenterX: number;
+  paddleWidth: number;
+  paddleY: number;
+  topTolerance: number;
+  bottomTolerance: number;
+}
+
+export interface PaddleContact {
+  hitZone: number;
+  closestX: number;
+  closestY: number;
+}
+
 export interface LoopRiskVelocityInput {
   vx: number;
   vy: number;
@@ -68,6 +86,25 @@ export function calculatePaddleRebound(input: PaddleReboundInput): PaddleRebound
   const desiredVx = hitZone * speed * PADDLE_EDGE_INFLUENCE + paddleVelocityX * PADDLE_SPIN_INFLUENCE;
   const fallbackSign = Math.sign(desiredVx) || Math.sign(input.incomingVx) || 1;
   return upwardVelocity(speed, desiredVx, fallbackSign);
+}
+
+export function detectPaddleContact(input: PaddleContactInput): PaddleContact | null {
+  if (input.ballVy <= 0) return null;
+
+  const paddleLeft = input.paddleCenterX - input.paddleWidth / 2;
+  const paddleRight = input.paddleCenterX + input.paddleWidth / 2;
+  const paddleTop = input.paddleY - input.topTolerance;
+  const paddleBottom = input.paddleY + input.bottomTolerance;
+  const closestX = clamp(input.ballX, paddleLeft, paddleRight);
+  const closestY = clamp(input.ballY, paddleTop, paddleBottom);
+  const distanceSquared = (input.ballX - closestX) ** 2 + (input.ballY - closestY) ** 2;
+  if (distanceSquared > input.ballRadius ** 2) return null;
+
+  return {
+    hitZone: clamp((closestX - input.paddleCenterX) / (input.paddleWidth / 2), -1, 1),
+    closestX,
+    closestY
+  };
 }
 
 export function normalizeLoopRiskVelocity(input: LoopRiskVelocityInput): LoopRiskVelocity {

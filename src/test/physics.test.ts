@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   calculatePaddleRebound,
   computeStuckBallLaunch,
+  detectPaddleContact,
   normalizeLoopRiskVelocity
 } from "../client/game/physics";
 import { LAUNCH_LOSS_GRACE_SECONDS } from "../client/game/tuning";
@@ -84,5 +85,38 @@ describe("Ricochet Rush paddle feel", () => {
 
     expect(corrected.changed).toBe(true);
     expect(Math.abs(corrected.vy)).toBeGreaterThanOrEqual(corrected.speed * 0.16 - 0.001);
+  });
+
+  it("detects paddle edge hits when only the ball radius overlaps", () => {
+    const contact = detectPaddleContact({
+      ballX: 421,
+      ballY: 582,
+      ballRadius: 10,
+      ballVy: 500,
+      paddleCenterX: 480,
+      paddleWidth: 116,
+      paddleY: 588,
+      topTolerance: 8,
+      bottomTolerance: 12
+    });
+
+    expect(contact).not.toBeNull();
+    expect(contact?.hitZone).toBe(-1);
+  });
+
+  it("ignores near-edge paddle misses outside the ball radius", () => {
+    const contact = detectPaddleContact({
+      ballX: 411.9,
+      ballY: 582,
+      ballRadius: 10,
+      ballVy: 500,
+      paddleCenterX: 480,
+      paddleWidth: 116,
+      paddleY: 588,
+      topTolerance: 8,
+      bottomTolerance: 12
+    });
+
+    expect(contact).toBeNull();
   });
 });

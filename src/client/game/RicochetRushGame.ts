@@ -57,6 +57,7 @@ import { isLevelGenerationNetworkError, levelGenerationServerHint, requestGenera
 import {
   calculatePaddleRebound,
   computeStuckBallLaunch,
+  detectPaddleContact,
   normalizeLoopRiskVelocity,
   type LoopRiskVelocity,
   type LoopRiskVelocityInput,
@@ -1085,9 +1086,19 @@ export class RicochetRushGame {
   private collidePaddle(ball: Ball) {
     const paddleLeft = this.paddleX - this.paddleWidth / 2;
     const paddleRight = this.paddleX + this.paddleWidth / 2;
-    if (ball.vy <= 0 || ball.y + ball.radius < PADDLE_Y - 8 || ball.y - ball.radius > PADDLE_Y + 12) return;
-    if (ball.x < paddleLeft || ball.x > paddleRight) return;
-    const hit = clamp((ball.x - this.paddleX) / (this.paddleWidth / 2), -1, 1);
+    const contact = detectPaddleContact({
+      ballX: ball.x,
+      ballY: ball.y,
+      ballRadius: ball.radius,
+      ballVy: ball.vy,
+      paddleCenterX: this.paddleX,
+      paddleWidth: this.paddleWidth,
+      paddleY: PADDLE_Y,
+      topTolerance: 8,
+      bottomTolerance: 12
+    });
+    if (!contact) return;
+    const hit = contact.hitZone;
     if (this.grabTimer > 0) {
       const catchX = clamp(ball.x, paddleLeft + ball.radius, paddleRight - ball.radius);
       ball.stuck = true;
