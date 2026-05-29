@@ -837,6 +837,11 @@ export class RicochetRushGame {
   private saveCurrentBoardToPack() {
     if (this.boardContext.source !== "generated" || this.loadingLevel) return;
     const levelBlueprint = cloneLevelBlueprint(this.levelBlueprint);
+    if (this.currentGeneratedBoardSaved()) {
+      this.showSavedBoardConfirmation(levelBlueprint.name, false);
+      return;
+    }
+
     const now = new Date();
     const entry: SavedBoardEntry = {
       id: `saved-${now.getTime()}`,
@@ -851,7 +856,31 @@ export class RicochetRushGame {
     this.packProgress = normalizePackProgress(this.packProgress, this.savedBoards.length);
     writeJson(PACK_PROGRESS_KEY, this.packProgress);
     this.pushEvent(`${levelBlueprint.name} saved to Saved Designs.`);
-    this.refreshHud("Board saved to Saved Designs.");
+    this.showSavedBoardConfirmation(levelBlueprint.name, true);
+  }
+
+  private currentGeneratedBoardSaved() {
+    if (this.boardContext.source !== "generated") return false;
+    const currentFingerprint = blueprintFingerprint(this.levelBlueprint);
+    return this.savedBoards.some((board) => blueprintFingerprint(board.levelBlueprint) === currentFingerprint);
+  }
+
+  private showSavedBoardConfirmation(levelName: string, newlySaved: boolean) {
+    const status = newlySaved ? "Board saved to Saved Designs." : "Board is already in Saved Designs.";
+    if (newlySaved) this.addFloatingText(WIDTH / 2, HEIGHT / 2 - 74, "Board saved", "status");
+    this.announce(status);
+    if (this.phase === "levelComplete") {
+      this.showRunSummaryOverlay("clear", {
+        title: newlySaved ? "Board Saved" : "Board Already Saved",
+        body: `${levelName} is in Saved Designs. Open Boards whenever you want to replay it.`,
+        actions: [
+          { label: "Continue", primary: true, action: () => void this.continueToNextLevel() },
+          { label: "Replay Run", action: () => void this.restartRun() },
+          { label: "View Saved Boards", action: () => this.openBoardPicker() }
+        ]
+      });
+    }
+    this.refreshHud(status);
   }
 
   private updateDesignerIntent(intent: BoardDesignerIntent) {
@@ -1625,7 +1654,10 @@ export class RicochetRushGame {
       { label: "Retry Run", action: () => void this.restartRun() },
       { label: "Choose Board", action: () => this.openBoardPicker() }
     ];
-    if (completedContext.source === "generated") actions.splice(1, 0, { label: "Keep Board", action: () => this.saveCurrentBoardToPack() });
+    if (completedContext.source === "generated") {
+      const savedAlready = this.currentGeneratedBoardSaved();
+      actions.splice(1, 0, { label: savedAlready ? "Saved in Boards" : "Keep Board", disabled: savedAlready, action: () => this.saveCurrentBoardToPack() });
+    }
     actions.push({ label: "Share Hook Soon", disabled: true, action: () => undefined });
     this.showRunSummaryOverlay("clear", {
       title: "Level Cleared",
@@ -1818,7 +1850,7 @@ export class RicochetRushGame {
       activePowers: collectActivePowers(this.hudSnapshot()),
       powerupPrimerDismissed: this.powerupPrimerDismissed,
       packs: collectPackItems(this.packHudSnapshot()),
-      canSaveBoard: this.boardContext.source === "generated" && this.bricks.length > 0,
+      canSaveBoard: this.boardContext.source === "generated" && this.bricks.length > 0 && !this.currentGeneratedBoardSaved(),
       boardSource: this.boardContext.source,
       designer: {
         intent: this.designerIntent,

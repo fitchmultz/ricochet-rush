@@ -285,7 +285,11 @@ try {
   assert(await page.locator('[data-action="save-board"]').isEnabled(), "Expected restored generated board to stay keepable.");
   await assertLaunchSurvivalWindow(page, "generated center launch");
   await page.locator('[data-action="save-board"]').click();
+  await page.waitForFunction(() => document.querySelector<HTMLButtonElement>('[data-action="save-board"]')?.disabled === true);
+  assert((await page.locator('[data-action="save-board"]').innerText()) === "Saved in Boards", "Expected Keep board to become a clear saved state after saving.");
   assert(await hasLocalStorageKey(page, "ricochet-rush-saved-boards"), "Expected kept generated board to persist in Saved Designs.");
+  const savedBoardsAfterKeep = await page.evaluate(() => JSON.parse(localStorage.getItem("ricochet-rush-saved-boards") ?? "[]").length as number);
+  assert(savedBoardsAfterKeep === 1, `Expected one kept generated board, got ${savedBoardsAfterKeep}.`);
   assert(!(await page.locator('[data-pack-id="saved-designs"]').isDisabled()), "Expected Saved Designs to unlock after keeping a board.");
   await page.locator('[data-tool-panel="packs"]').click();
   assert((await page.locator("[data-tool-title]").innerText()) === "Board Select", "Expected Board Select title after switching tools.");

@@ -582,6 +582,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       designerPending.textContent = `Shaping Level ${state.level}. The game is paused while the Designer builds a playable wall.`;
       gameActions.hidden = state.boardSource !== "generated";
       saveBoard.hidden = state.boardSource !== "generated";
+      saveBoard.textContent = state.canSaveBoard ? "Keep board" : "Saved in Boards";
       saveBoard.disabled = state.pending || !state.canSaveBoard;
       reset.disabled = state.pending || !state.hasSave;
       sidebarToggle.textContent = state.sidebarCollapsed ? "⟩" : "⟨";
