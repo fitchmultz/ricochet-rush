@@ -47,6 +47,23 @@ export interface PaddleContact {
   closestY: number;
 }
 
+export interface BrickContactInput {
+  previousX: number;
+  previousY: number;
+  ballX: number;
+  ballY: number;
+  ballRadius: number;
+  brickX: number;
+  brickY: number;
+  brickWidth: number;
+  brickHeight: number;
+}
+
+export interface BrickContact {
+  axis: "x" | "y";
+  travelT: number;
+}
+
 export interface LoopRiskVelocityInput {
   vx: number;
   vy: number;
@@ -107,6 +124,32 @@ export function detectPaddleContact(input: PaddleContactInput): PaddleContact | 
   };
 }
 
+export function detectBrickContact(input: BrickContactInput): BrickContact | null {
+  const expandedLeft = input.brickX - input.ballRadius;
+  const expandedRight = input.brickX + input.brickWidth + input.ballRadius;
+  const expandedTop = input.brickY - input.ballRadius;
+  const expandedBottom = input.brickY + input.brickHeight + input.ballRadius;
+  const dx = input.ballX - input.previousX;
+  const dy = input.ballY - input.previousY;
+  const swept = sweptPointAgainstRect(input.previousX, input.previousY, dx, dy, expandedLeft, expandedRight, expandedTop, expandedBottom);
+  if (swept) {
+    const hitX = input.previousX + dx * swept.travelT;
+    const hitY = input.previousY + dy * swept.travelT;
+    const closestX = clamp(hitX, input.brickX, input.brickX + input.brickWidth);
+    const closestY = clamp(hitY, input.brickY, input.brickY + input.brickHeight);
+    if ((hitX - closestX) ** 2 + (hitY - closestY) ** 2 <= input.ballRadius ** 2 + 0.001) return swept;
+  }
+
+  const closestX = clamp(input.ballX, input.brickX, input.brickX + input.brickWidth);
+  const closestY = clamp(input.ballY, input.brickY, input.brickY + input.brickHeight);
+  const distanceSquared = (input.ballX - closestX) ** 2 + (input.ballY - closestY) ** 2;
+  if (distanceSquared > input.ballRadius ** 2) return null;
+
+  const overlapX = Math.min(input.ballX + input.ballRadius - input.brickX, input.brickX + input.brickWidth - (input.ballX - input.ballRadius));
+  const overlapY = Math.min(input.ballY + input.ballRadius - input.brickY, input.brickY + input.brickHeight - (input.ballY - input.ballRadius));
+  return { axis: overlapX < overlapY ? "x" : "y", travelT: 1 };
+}
+
 export function normalizeLoopRiskVelocity(input: LoopRiskVelocityInput): LoopRiskVelocity {
   const speed = Math.hypot(input.vx, input.vy);
   if (speed <= 0) return { vx: input.vx, vy: input.vy, speed, changed: false };
@@ -138,6 +181,33 @@ export function normalizeLoopRiskVelocity(input: LoopRiskVelocityInput): LoopRis
   }
 
   return { vx, vy, speed, changed };
+}
+
+function sweptPointAgainstRect(
+  previousX: number,
+  previousY: number,
+  dx: number,
+  dy: number,
+  left: number,
+  right: number,
+  top: number,
+  bottom: number
+): BrickContact | null {
+  const xRange = sweptAxis(previousX, dx, left, right);
+  const yRange = sweptAxis(previousY, dy, top, bottom);
+  if (!xRange || !yRange) return null;
+
+  const entryT = Math.max(xRange.entry, yRange.entry);
+  const exitT = Math.min(xRange.exit, yRange.exit);
+  if (entryT > exitT || entryT < 0 || entryT > 1) return null;
+  return { axis: xRange.entry > yRange.entry ? "x" : "y", travelT: entryT };
+}
+
+function sweptAxis(position: number, delta: number, min: number, max: number): { entry: number; exit: number } | null {
+  if (delta === 0) return position >= min && position <= max ? { entry: Number.NEGATIVE_INFINITY, exit: Number.POSITIVE_INFINITY } : null;
+  const first = (min - position) / delta;
+  const second = (max - position) / delta;
+  return { entry: Math.min(first, second), exit: Math.max(first, second) };
 }
 
 function upwardVelocity(speed: number, desiredVx: number, fallbackSign: number): PaddleRebound {

@@ -123,9 +123,9 @@ export function createHud(root: HTMLDivElement | null): HudApi {
             </div>
             <div data-active-powers class="active-powers" hidden></div>
           </div>
+          <div data-combo class="combo-badge" hidden></div>
           <div data-status class="status"></div>
         </div>
-        <div data-combo class="combo-badge" hidden></div>
         <div class="touch-controls" aria-label="Touch controls">
           <button type="button" data-touch-action="left" aria-label="Move paddle left" aria-keyshortcuts="ArrowLeft">←</button>
           <button type="button" data-touch-action="primary" class="touch-primary" aria-keyshortcuts="Space Enter">Launch</button>
@@ -148,6 +148,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
           <strong data-level-name>Starter Wall</strong>
           <span data-hint>Keep the ball angled. Flat returns are a trap.</span>
         </div>
+        <div data-console-active-powers class="console-active-powers" hidden></div>
         <div data-compact-generation-summary class="compact-summary" hidden></div>
         <section data-powerup-primer class="powerup-primer" aria-label="Power-up primer">
           <div>
@@ -364,6 +365,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
   const boardBackplate = querySelect(root, '[data-cosmetic="boardBackplate"]');
   const cosmeticStatus = query(root, "[data-cosmetic-status]");
   const activePowersEl = query(root, "[data-active-powers]");
+  const consoleActivePowersEl = query(root, "[data-console-active-powers]");
   const packList = query(root, "[data-pack-list]");
   const liveAnnouncement = query(root, "[data-live-announcement]");
   const toolSurface = query(root, "[data-tool-surface]");
@@ -622,11 +624,16 @@ export function createHud(root: HTMLDivElement | null): HudApi {
       if (activePowersKey !== previousActivePowersKey) {
         previousActivePowersKey = activePowersKey;
         if (state.activePowers.length > 0) {
+          const activePowersMarkup = state.activePowers.map(renderPower).join("");
           activePowersEl.hidden = false;
-          activePowersEl.innerHTML = state.activePowers.map(renderPower).join("");
+          consoleActivePowersEl.hidden = false;
+          activePowersEl.innerHTML = activePowersMarkup;
+          consoleActivePowersEl.innerHTML = activePowersMarkup;
         } else {
           activePowersEl.hidden = true;
+          consoleActivePowersEl.hidden = true;
           activePowersEl.innerHTML = "";
+          consoleActivePowersEl.innerHTML = "";
         }
       }
       liveAnnouncement.textContent = state.announcement;

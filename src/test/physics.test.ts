@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   calculatePaddleRebound,
   computeStuckBallLaunch,
+  detectBrickContact,
   detectPaddleContact,
   normalizeLoopRiskVelocity
 } from "../client/game/physics";
@@ -118,5 +119,41 @@ describe("Ricochet Rush paddle feel", () => {
     });
 
     expect(contact).toBeNull();
+  });
+
+  it("detects fast brick hits even when the ball tunnels past the brick in one frame", () => {
+    const contact = detectBrickContact({
+      previousX: 150,
+      previousY: 95,
+      ballX: 150,
+      ballY: 135,
+      ballRadius: 5,
+      brickX: 120,
+      brickY: 104,
+      brickWidth: 60,
+      brickHeight: 20
+    });
+
+    expect(contact).not.toBeNull();
+    expect(contact?.axis).toBe("y");
+    expect(contact?.travelT).toBeGreaterThan(0);
+    expect(contact?.travelT).toBeLessThan(1);
+  });
+
+  it("uses the swept entry side for brick direction instead of late overlap depth", () => {
+    const contact = detectBrickContact({
+      previousX: 90,
+      previousY: 110,
+      ballX: 150,
+      ballY: 122,
+      ballRadius: 5,
+      brickX: 120,
+      brickY: 104,
+      brickWidth: 60,
+      brickHeight: 20
+    });
+
+    expect(contact).not.toBeNull();
+    expect(contact?.axis).toBe("x");
   });
 });

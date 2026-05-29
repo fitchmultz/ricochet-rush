@@ -605,7 +605,8 @@ export class GameSceneView {
       node.style.top = `${((text.y - lift) / HEIGHT) * 100}%`;
       node.style.opacity = String(clamp(text.life / text.duration, 0, 1));
       const baseScale = text.kind === "combo" ? 1.16 : text.kind.startsWith("powerup") ? 1.08 : 1;
-      node.style.transform = `translate(-50%, -50%) scale(${frame.settings.reducedMotion ? baseScale : baseScale + (1 - progress) * 0.12})`;
+      const scale = text.kind === "combo" || frame.settings.reducedMotion ? baseScale : baseScale + (1 - progress) * 0.12;
+      node.style.transform = `translate(-50%, -50%) scale(${scale})`;
     }
   }
 

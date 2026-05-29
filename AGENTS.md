@@ -8,3 +8,5 @@
 - Generated bitmap assets live in `public/assets/`.
 - Canonical roadmap: `docs/ROADMAP.html`.
 - Playwright smoke and UX audits mount `window.__ricochetRushGame` for debug snapshots; production builds do not mount this hook unless explicitly enabled.
+- UI/layout changes must protect the playfield as the dominant surface. Do not patch visual regressions one symptom at a time; if a fix makes the UI feel worse, stop, reassess the layout from first principles, and prefer reverting the bad direction over stacking more CSS.
+- Before calling UI work done, inspect screenshots at representative desktop, short-wide, tablet, and mobile viewports for human visual hierarchy, not only overlap, bounding-box, or CI/audit pass/fail checks.

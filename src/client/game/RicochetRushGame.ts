@@ -57,6 +57,7 @@ import { isLevelGenerationNetworkError, levelGenerationServerHint, requestGenera
 import {
   calculatePaddleRebound,
   computeStuckBallLaunch,
+  detectBrickContact,
   detectPaddleContact,
   normalizeLoopRiskVelocity,
   type LoopRiskVelocity,
@@ -80,7 +81,6 @@ import {
   WALL,
   WIDTH,
   bricksFitLevel,
-  circleRect,
   computeLevelLayout,
   materializeLevelBricks
 } from "./gameArena";
@@ -579,11 +579,13 @@ export class RicochetRushGame {
       ball.thruTimer = Math.max(0, ball.thruTimer - delta);
       ball.megaTimer = Math.max(0, ball.megaTimer - delta);
       ball.radius = ball.megaTimer > 0 ? 14 : Math.max(5, ball.radius);
+      const previousX = ball.x;
+      const previousY = ball.y;
       ball.x += ball.vx * delta;
       ball.y += ball.vy * delta;
-      this.collideWalls(ball);
+      const wallHit = this.collideWalls(ball);
       this.collidePaddle(ball);
-      this.collideBricks(ball);
+      this.collideBricks(ball, wallHit ? ball.x : previousX, wallHit ? ball.y : previousY);
     }
 
     this.updatePowerups(delta);
@@ -1110,6 +1112,7 @@ export class RicochetRushGame {
     }
     if (hitSideWall) this.normalizeBallForLoopRisk(ball, "wall", { minYRatio: MIN_COLLISION_Y_RATIO, fallbackYSign: ball.vy || 1 });
     if (hitTopWall) this.normalizeBallForLoopRisk(ball, "wall", { minXRatio: MIN_COLLISION_X_RATIO, fallbackXSign: ball.vx || 1 });
+    return hitSideWall || hitTopWall;
   }
 
   private collidePaddle(ball: Ball) {
@@ -1158,17 +1161,30 @@ export class RicochetRushGame {
     this.combo = Math.max(1, this.combo - 0.15);
   }
 
-  private collideBricks(ball: Ball) {
+  private collideBricks(ball: Ball, previousX: number, previousY: number) {
     const maxSteps = 32;
     for (let step = 0; step < maxSteps; step += 1) {
-      const brick = this.bricks.find((candidate) => circleRect(ball, candidate));
-      if (!brick) return;
+      let hit: { brick: Brick; axis: "x" | "y"; travelT: number } | null = null;
+      for (const candidate of this.bricks) {
+        const contact = detectBrickContact({
+          previousX,
+          previousY,
+          ballX: ball.x,
+          ballY: ball.y,
+          ballRadius: ball.radius,
+          brickX: candidate.x,
+          brickY: candidate.y,
+          brickWidth: candidate.width,
+          brickHeight: candidate.height
+        });
+        if (contact && (!hit || contact.travelT < hit.travelT)) hit = { brick: candidate, ...contact };
+      }
+      if (!hit) return;
 
-      const overlapX = Math.min(ball.x + ball.radius - brick.x, brick.x + brick.width - (ball.x - ball.radius));
-      const overlapY = Math.min(ball.y + ball.radius - brick.y, brick.y + brick.height - (ball.y - ball.radius));
+      const { brick } = hit;
       const piercing = ball.thruTimer > 0 || ball.fireTimer > 0 || ball.megaTimer > 0;
       if (!piercing) {
-        if (overlapX < overlapY) {
+        if (hit.axis === "x") {
           ball.vx *= -1;
           this.normalizeBallForLoopRisk(ball, "brick", { minYRatio: MIN_COLLISION_Y_RATIO, fallbackYSign: ball.vy || 1 });
         } else {
@@ -1185,11 +1201,13 @@ export class RicochetRushGame {
         }
       }
       if (!piercing) return;
-      if (overlapX < overlapY) {
+      if (hit.axis === "x") {
         ball.x = ball.vx >= 0 ? brick.x + brick.width + ball.radius + 0.5 : brick.x - ball.radius - 0.5;
       } else {
         ball.y = ball.vy >= 0 ? brick.y + brick.height + ball.radius + 0.5 : brick.y - ball.radius - 0.5;
       }
+      previousX = ball.x;
+      previousY = ball.y;
     }
   }
 
@@ -2154,8 +2172,8 @@ export class RicochetRushGame {
 }
 
 export { LAUNCH_LOSS_GRACE_SECONDS } from "./tuning";
-export { calculatePaddleRebound, computeStuckBallLaunch, normalizeLoopRiskVelocity } from "./physics";
-export type { LoopRiskVelocity, LoopRiskVelocityInput, PaddleRebound, PaddleReboundInput, StuckBallLaunchInput } from "./physics";
+export { calculatePaddleRebound, computeStuckBallLaunch, detectBrickContact, normalizeLoopRiskVelocity } from "./physics";
+export type { BrickContact, BrickContactInput, LoopRiskVelocity, LoopRiskVelocityInput, PaddleRebound, PaddleReboundInput, StuckBallLaunchInput } from "./physics";
 export { penaltyPowerupPool, powerupToneFor, prizePowerupPool } from "./powerups";
 export type { PowerupKind, PowerupPoolInput, PowerupTone } from "./powerups";
 

@@ -173,6 +173,7 @@ body {
 .shell.is-high-contrast .meter-card,
 .shell.is-high-contrast .combo-badge,
 .shell.is-high-contrast .active-powers,
+.shell.is-high-contrast .console-active-powers,
 .shell.is-high-contrast .status,
 .shell.is-high-contrast .hint,
 .shell.is-high-contrast .compact-summary,
@@ -191,6 +192,7 @@ body {
   position: absolute;
   inset: 0;
   z-index: 1;
+  container-type: size;
   display: grid;
   place-items: center;
   background:
@@ -203,9 +205,16 @@ body {
   width: min(100%, calc((100vh - 24px) * 1.5));
   height: auto;
   max-height: 100%;
+  aspect-ratio: 3 / 2;
   border-radius: 4px;
   box-shadow: 0 18px 80px rgba(0, 0, 0, 0.4);
   touch-action: none;
+}
+
+@supports (width: 100cqw) {
+  .game canvas {
+    width: min(100cqw, 150cqh);
+  }
 }
 
 .game canvas:focus-visible {
@@ -240,10 +249,12 @@ body {
 }
 
 .floating-text.is-combo {
+  min-width: 9.5em;
   border: 1px solid rgba(126, 241, 255, 0.38);
   background: rgba(6, 24, 34, 0.86);
   color: #7ef1ff;
   font-size: 1.08rem;
+  text-align: center;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   animation: combo-glow 0.42s ease-out;
@@ -516,6 +527,7 @@ body {
 
 .hud {
   position: absolute;
+  z-index: 2;
   top: 12px;
   left: 12px;
   right: 12px;
@@ -598,6 +610,7 @@ body {
 .combo-badge {
   position: absolute;
   top: 66px;
+  min-width: 9.5em;
   left: 50%;
   z-index: 3;
   min-height: 0;
@@ -616,7 +629,8 @@ body {
   display: none;
 }
 
-.active-powers {
+.active-powers,
+.console-active-powers {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -632,7 +646,12 @@ body {
   backdrop-filter: blur(8px);
 }
 
-.active-powers[hidden] {
+.console-active-powers {
+  display: none;
+}
+
+.active-powers[hidden],
+.console-active-powers[hidden] {
   display: none;
 }
 
