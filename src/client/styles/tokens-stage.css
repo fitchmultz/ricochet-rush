@@ -55,7 +55,7 @@ body {
 
 .shell {
   --panel-width: 288px;
-  --panel-collapsed-width: 34px;
+  --panel-collapsed-width: 44px;
   --active-panel-width: var(--panel-width);
   position: relative;
   display: grid;
@@ -81,11 +81,16 @@ body {
   --stage-border-color: rgba(126, 241, 255, 0.24);
   --stage-glow-color: rgba(126, 241, 255, 0.18);
   position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: clamp(4px, 0.9vh, 8px);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   overscroll-behavior: contain;
   touch-action: none;
+  box-sizing: border-box;
+  padding: clamp(6px, 0.9vw, 12px);
   border: 1px solid transparent;
   border-radius: 8px;
   background:
@@ -189,32 +194,43 @@ body {
 
 
 .game {
-  position: absolute;
-  inset: 0;
+  position: relative;
   z-index: 1;
+  grid-row: 2;
   container-type: size;
+  min-width: 0;
+  min-height: 0;
   display: grid;
-  place-items: center;
+  place-items: start center;
   background:
     radial-gradient(ellipse at 50% 42%, rgba(126, 241, 255, 0.07), transparent 58%),
     radial-gradient(ellipse at 50% 100%, rgba(8, 14, 22, 0.55), transparent 62%);
 }
 
-.game canvas {
-  display: block;
+.game canvas,
+.game-effects,
+.game-overlay {
+  grid-area: 1 / 1;
   width: min(100%, calc((100vh - 24px) * 1.5));
-  height: auto;
+  max-width: 100%;
   max-height: 100%;
   aspect-ratio: 3 / 2;
-  border-radius: 4px;
-  box-shadow: 0 18px 80px rgba(0, 0, 0, 0.4);
-  touch-action: none;
 }
 
 @supports (width: 100cqw) {
-  .game canvas {
+  .game canvas,
+  .game-effects,
+  .game-overlay {
     width: min(100cqw, 150cqh);
   }
+}
+
+.game canvas {
+  display: block;
+  height: auto;
+  border-radius: 4px;
+  box-shadow: 0 18px 80px rgba(0, 0, 0, 0.4);
+  touch-action: none;
 }
 
 .game canvas:focus-visible {
@@ -223,8 +239,8 @@ body {
 }
 
 .game-effects {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  z-index: 2;
   pointer-events: none;
 }
 
@@ -356,13 +372,13 @@ body {
 }
 
 .game-overlay {
-  position: absolute;
-  inset: 0;
+  position: relative;
   z-index: 3;
   display: none;
   place-items: center;
+  box-sizing: border-box;
   padding: 18px;
-  background: rgba(3, 6, 12, 0.62);
+  background: rgba(3, 6, 12, 0.72);
   pointer-events: none;
 }
 
@@ -386,12 +402,16 @@ body {
   animation: overlay-scrim-in 0.22s ease-out;
 }
 
+.stage.has-visible-overlay .game-effects {
+  opacity: 0;
+}
+
 .overlay-card {
   width: min(440px, calc(100vw - 48px));
   padding: 18px;
   border: 1px solid rgba(126, 241, 255, 0.32);
   border-radius: 8px;
-  background: rgba(6, 10, 17, 0.88);
+  background: #060a11;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.46);
   backdrop-filter: blur(12px);
 }
@@ -526,19 +546,18 @@ body {
 }
 
 .hud {
-  position: absolute;
+  position: relative;
   z-index: 2;
-  top: 12px;
-  left: 12px;
-  right: 12px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  grid-row: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: start;
+  gap: clamp(6px, 1vw, 12px);
   pointer-events: none;
 }
 
 .hud-primary {
+  grid-column: 1;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -548,8 +567,8 @@ body {
 
 .meters {
   display: grid;
-  grid-template-columns: minmax(118px, auto) minmax(78px, auto) minmax(120px, auto);
-  gap: 8px;
+  grid-template-columns: repeat(3, max-content);
+  gap: 6px;
   align-items: stretch;
 }
 
@@ -557,27 +576,28 @@ body {
 .status,
 .hint,
 .combo-badge {
-  min-height: 32px;
-  padding: 7px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  background: rgba(6, 10, 17, 0.74);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  min-height: 28px;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  background: rgba(6, 10, 17, 0.72);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
   color: #edf4ef;
-  font-size: 0.85rem;
-  line-height: 1.2;
+  font-size: 0.78rem;
+  line-height: 1.15;
   backdrop-filter: blur(8px);
 }
 
 .meter-card {
   display: grid;
-  gap: 2px;
-  min-height: 46px;
+  gap: 1px;
+  min-width: 76px;
+  min-height: 34px;
 }
 
 .meter-card span {
   color: #7ef1ff;
-  font-size: 0.62rem;
+  font-size: 0.54rem;
   font-weight: 850;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -585,13 +605,13 @@ body {
 
 .meter-card strong {
   color: #ffffff;
-  font-size: 0.96rem;
+  font-size: 0.82rem;
   font-weight: 900;
 }
 
 .meter-score em {
   color: #aab8b5;
-  font-size: 0.68rem;
+  font-size: 0.58rem;
   font-style: normal;
   font-weight: 750;
 }
@@ -602,25 +622,26 @@ body {
 }
 
 .status {
-  max-width: min(42vw, 390px);
+  grid-column: 3;
+  justify-self: end;
+  max-width: min(28vw, 280px);
   color: #ffe066;
   text-align: right;
 }
 
 .combo-badge {
-  position: absolute;
-  top: 66px;
-  min-width: 9.5em;
-  left: 50%;
+  grid-column: 2;
+  justify-self: center;
   z-index: 3;
+  min-width: 7.5em;
   min-height: 0;
-  transform: translateX(-50%);
   border-color: rgba(255, 224, 102, 0.42);
-  background: linear-gradient(135deg, rgba(255, 224, 102, 0.2), rgba(126, 241, 255, 0.12));
+  background: linear-gradient(135deg, rgba(255, 224, 102, 0.18), rgba(126, 241, 255, 0.1));
   color: #ffe066;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   font-weight: 950;
   letter-spacing: 0.02em;
+  text-align: center;
   pointer-events: none;
   text-transform: uppercase;
 }
@@ -646,8 +667,12 @@ body {
   backdrop-filter: blur(8px);
 }
 
-.console-active-powers {
+.active-powers {
   display: none;
+}
+
+.console-active-powers {
+  display: flex;
 }
 
 .active-powers[hidden],
@@ -756,11 +781,15 @@ body {
 }
 
 .hint {
-  position: absolute;
-  left: 14px;
-  bottom: 12px;
+  position: relative;
+  z-index: 5;
+  grid-row: 3;
+  justify-self: stretch;
+  overflow: hidden;
   color: #c8d4d1;
   pointer-events: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .panel {

@@ -800,8 +800,17 @@
     order: 0;
   }
 
-  .tool-dock {
+  .board-card {
     order: 1;
+  }
+
+  .console-active-powers {
+    order: 2;
+    display: flex;
+  }
+
+  .tool-dock {
+    order: 3;
     position: static;
     z-index: auto;
     padding: 6px;
@@ -811,23 +820,14 @@
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
   }
 
-  .board-card {
-    order: 2;
-  }
-
-  .console-active-powers {
-    order: 3;
-    display: flex;
+  .powerup-primer {
+    order: 4;
+    max-height: min(28vh, 220px);
+    overflow: auto;
   }
 
   .compact-summary {
-    order: 4;
-  }
-
-  .powerup-primer {
     order: 5;
-    max-height: min(28vh, 220px);
-    overflow: auto;
   }
 
   .actions {
@@ -844,70 +844,9 @@
     min-width: 0;
   }
 
-  .stage {
-    display: grid;
-    grid-template-rows: max-content minmax(0, 1fr);
-    gap: clamp(6px, 1vh, 10px);
-    padding: 8px;
-  }
-
-  .game {
-    position: relative;
-    inset: auto;
-    grid-row: 2;
-    align-items: start;
-    width: 100%;
-    height: 100%;
-    min-height: 0;
-  }
-
-  .game canvas {
-    width: min(100%, calc((100vh - 24px) * 1.5));
-    height: auto;
-    max-width: 100%;
-    max-height: 100%;
-  }
-
-  @supports (width: 100cqw) {
-    .game canvas {
-      width: min(100cqw, 150cqh);
-    }
-  }
-
   .status {
     max-width: 45vw;
     font-size: 0.78rem;
-  }
-
-  .hud {
-    position: relative;
-    top: auto;
-    right: auto;
-    left: auto;
-    grid-row: 1;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-    align-items: start;
-  }
-
-  .hud-primary {
-    grid-column: 1;
-  }
-
-  .active-powers {
-    display: none;
-  }
-
-  .combo-badge {
-    position: static;
-    grid-column: 2;
-    justify-self: center;
-    transform: none;
-  }
-
-  .status {
-    grid-column: 3;
-    justify-self: end;
   }
 
   .meters {
@@ -929,8 +868,8 @@
   }
 
   .hint {
-    right: 14px;
-    bottom: 8px;
+    right: auto;
+    bottom: auto;
     min-height: 0;
     padding: 5px 10px;
     font-size: 0.8rem;
@@ -1003,92 +942,31 @@
   }
 }
 
-@media (max-height: 760px) and (min-width: 861px) {
-  .stage {
-    display: grid;
-    grid-template-rows: max-content minmax(0, 1fr);
-    gap: clamp(6px, 1vh, 10px);
-    padding: 12px;
-  }
-
-  .hud {
-    position: relative;
-    top: auto;
-    right: auto;
-    left: auto;
-    grid-row: 1;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-    align-items: start;
-  }
-
-  .hud-primary {
-    grid-column: 1;
-  }
-
-  .combo-badge {
-    position: static;
-    grid-column: 2;
-    justify-self: center;
-    transform: none;
-  }
-
-  .status {
-    grid-column: 3;
-    justify-self: end;
-  }
-
-  .game {
-    position: relative;
-    inset: auto;
-    grid-row: 2;
-    align-items: start;
-    width: 100%;
-    height: 100%;
-    min-height: 0;
-  }
-
-  .game canvas {
-    width: min(100%, calc((100vh - 24px) * 1.5));
-    height: auto;
-    max-width: 100%;
-    max-height: 100%;
-  }
-
-  @supports (width: 100cqw) {
-    .game canvas {
-      width: min(100cqw, 150cqh);
-    }
-  }
-
-  .meters {
-    max-width: calc(100% - 180px);
-    grid-template-columns: minmax(150px, auto) minmax(112px, auto) minmax(150px, auto);
-  }
-
-  .meter-card {
-    min-height: 40px;
-  }
-
-  .active-powers {
-    display: none;
-  }
-
-  .console-active-powers {
-    display: flex;
-  }
-}
-
 @media (max-width: 520px) {
   .shell {
-    gap: 8px;
+    display: block;
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
 
   .stage {
-    min-height: 390px;
+    grid-template-rows: auto auto auto;
+    min-height: 0;
+    margin-bottom: 8px;
     padding: 6px 0 0;
     border-width: 0;
+  }
+
+  .game {
+    width: 100%;
+    height: auto;
+    min-height: calc(100vw * 2 / 3);
+    aspect-ratio: 3 / 2;
+  }
+
+  .game canvas,
+  .game-effects,
+  .game-overlay {
+    width: 100%;
   }
 
   .touch-controls {
@@ -1171,11 +1049,17 @@
   }
 
   .hint {
-    left: 8px;
-    right: 8px;
+    position: relative;
+    grid-row: 3;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    justify-self: stretch;
+    margin: 0 8px 8px;
     padding: 4px 8px;
     font-size: 0.68rem;
     text-align: center;
+    white-space: normal;
   }
 }
 
