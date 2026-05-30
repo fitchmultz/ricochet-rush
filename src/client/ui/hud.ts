@@ -132,7 +132,7 @@ export function createHud(root: HTMLDivElement | null): HudApi {
           <button type="button" data-touch-action="right" aria-label="Move paddle right" aria-keyshortcuts="ArrowRight">→</button>
           <button type="button" data-touch-action="pause" aria-keyshortcuts="KeyP Escape">Pause</button>
         </div>
-        <div class="hint">A/D or arrows move - Space/Enter launch or continue - P/Escape pause - N design or reroll</div>
+        <div class="hint">Move: A/D or arrows · Launch: Space/Enter · Pause: P/Esc · Design: N</div>
         <div data-live-announcement class="sr-only" aria-live="polite" aria-atomic="true"></div>
       </section>
       <aside class="panel play-console" aria-label="Play console">
