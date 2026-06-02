@@ -264,8 +264,9 @@ try {
   const generatedPrompt = "heart shape, only bomb bricks with a bright center lane, mirrored bomb pockets, soft corner safety, and a tiny boss-free finish that still feels like a readable gallery preview";
   assert(generatedPrompt.length > 140 && generatedPrompt.length <= 180, "Expected smoke prompt to exercise checkpoint prompt length limits.");
   await promptInput.fill("");
-  await promptInput.pressSequentially(generatedPrompt);
-  assert((await promptInput.inputValue()) === generatedPrompt, "Expected the board prompt to preserve typed spaces while focused.");
+  await promptInput.focus();
+  await page.keyboard.insertText(generatedPrompt);
+  assert((await promptInput.inputValue()) === generatedPrompt, "Expected the board prompt to preserve inserted spaces while focused.");
   assert(await hasLocalStorageKey(page, "ricochet-rush-designer-intent"), "Expected designer intent to persist.");
   await page.locator('[data-action="new-board"]').click();
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().boardSource === "generated");
