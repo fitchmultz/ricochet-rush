@@ -34,6 +34,11 @@ export interface HudSnapshot {
   dailyProgress: DailyProgressState;
   packProgress: PackProgressState;
   savedBoards: SavedBoardEntry[];
+  agentMode: {
+    enabled: boolean;
+    timeScale: number;
+    paddleMode: "manual" | "auto";
+  };
 }
 
 export function buildHudUpdateSignature(snapshot: HudSnapshot): string {
@@ -69,7 +74,10 @@ export function buildHudUpdateSignature(snapshot: HudSnapshot): string {
     snapshot.settings.musicVolume,
     snapshot.settings.particles,
     snapshot.settings.reducedMotion,
-    snapshot.settings.highContrast
+    snapshot.settings.highContrast,
+    snapshot.agentMode.enabled,
+    snapshot.agentMode.timeScale,
+    snapshot.agentMode.paddleMode
   ].join("§");
 }
 

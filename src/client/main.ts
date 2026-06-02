@@ -1,4 +1,5 @@
 import "./styles.css";
+import { resolveAgentMode } from "./game/agentMode";
 import { createHud } from "./ui/hud";
 import type { RicochetRushGame as RicochetRushGameInstance } from "./game/RicochetRushGame";
 
@@ -15,9 +16,10 @@ if (!mount) {
   throw new Error("Missing #game mount");
 }
 
+const agentMode = resolveAgentMode(window.location.search, window.localStorage);
 const { RicochetRushGame } = await import("./game/RicochetRushGame");
-const game = new RicochetRushGame(mount, hud);
-if (isDebugSurfaceEnabled()) {
+const game = new RicochetRushGame(mount, hud, { agentMode });
+if (agentMode.enabled || isDebugSurfaceEnabled()) {
   window.__ricochetRushGame = game;
 }
 game.start();
