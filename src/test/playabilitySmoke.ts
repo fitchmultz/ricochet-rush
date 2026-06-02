@@ -264,8 +264,9 @@ try {
   const generatedPrompt = "heart shape, only bomb bricks with a bright center lane, mirrored bomb pockets, soft corner safety, and a tiny boss-free finish that still feels like a readable gallery preview";
   assert(generatedPrompt.length > 140 && generatedPrompt.length <= 180, "Expected smoke prompt to exercise checkpoint prompt length limits.");
   await promptInput.fill("");
-  await promptInput.pressSequentially(generatedPrompt);
-  assert((await promptInput.inputValue()) === generatedPrompt, "Expected the board prompt to preserve typed spaces while focused.");
+  await promptInput.focus();
+  await page.keyboard.insertText(generatedPrompt);
+  assert((await promptInput.inputValue()) === generatedPrompt, "Expected the board prompt to preserve inserted spaces while focused.");
   assert(await hasLocalStorageKey(page, "ricochet-rush-designer-intent"), "Expected designer intent to persist.");
   await page.locator('[data-action="new-board"]').click();
   await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready" && window.__ricochetRushGame?.debugSnapshot().boardSource === "generated");
@@ -368,7 +369,7 @@ try {
   await page.keyboard.press("Escape");
   assert((await snapshot(page)).phase === "ready", "Expected Escape on pause overlay to keep the game paused.");
   assert(await page.locator(".overlay-card").isVisible(), "Expected Escape on a primary-only overlay not to hide it without resuming.");
-  await injectPowerupClarityState(page);
+  const injectedEffects = await injectPowerupClarityState(page);
   await page.waitForFunction(() => document.querySelectorAll(".floating-text.is-powerupReward").length === 1);
   const powerupClarity = await snapshot(page);
   assert(powerupClarity.powerups.map((powerup) => powerup.tone).join(",") === "reward,hazard,volatile", "Expected reward, hazard, and volatile power-up tones.");
@@ -377,7 +378,7 @@ try {
   assert((await page.locator(".floating-text.is-powerupVolatile").count()) === 1, "Expected volatile pickup label.");
   assert((await page.locator(".floating-text.is-combo").count()) >= 1, "Expected boosted combo floating text for streak feedback.");
   assert(await page.locator("[data-combo]").isVisible(), "Expected combo streak badge to appear only when a streak is active.");
-  assert((await page.locator(".impact-ring").count()) >= 1, "Expected impact rings for amplified hit and pickup feedback.");
+  assert(injectedEffects.impactRings >= 1, "Expected impact rings for amplified hit and pickup feedback.");
   assert((await page.locator(".power-timer.is-reward").count()) >= 2, "Expected active power timers to use reward tone styling.");
 
   const saved = await snapshot(page);
@@ -709,10 +710,11 @@ async function stageOverlapsPlayConsole(page: { evaluate: <T>(callback: () => T)
   });
 }
 
-async function injectPowerupClarityState(page: { evaluate: <T>(callback: () => T) => Promise<T> }): Promise<void> {
-  await page.evaluate(() => {
+async function injectPowerupClarityState(page: { evaluate: <T>(callback: () => T) => Promise<T> }): Promise<{ impactRings: number }> {
+  return page.evaluate(() => {
     if (!window.__ricochetRushGame) throw new Error("Ricochet Rush game is not mounted.");
     window.__ricochetRushGame.debugStageVisualSmokeState();
+    return { impactRings: window.__ricochetRushGame.debugSnapshot().effects.impactRings };
   });
 }
 

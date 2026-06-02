@@ -18,7 +18,7 @@
     "deps:verify": "tsx src/test/dependencyContracts.ts"
   },
   "dependencies": {
-    "@cursor/sdk": "^1.0.15",
+    "@cursor/sdk": "1.0.17",
     "three": "0.184.0",
     "vite": "8.0.14"
   },
