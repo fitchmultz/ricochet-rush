@@ -6,6 +6,7 @@ import type { Ball } from "./gameEntityTypes";
 import { POWER_DURATIONS } from "./gameVisualConfig";
 import type { PowerupTone } from "./powerups";
 import { powerupToneFor } from "./powerups";
+import type { PlayMode } from "./playSession";
 import type { BoardContext, GamePhase } from "./gameEntityTypes";
 
 export interface HudSnapshot {
@@ -34,6 +35,7 @@ export interface HudSnapshot {
   dailyProgress: DailyProgressState;
   packProgress: PackProgressState;
   savedBoards: SavedBoardEntry[];
+  playMode: PlayMode;
 }
 
 export function buildHudUpdateSignature(snapshot: HudSnapshot): string {
@@ -69,7 +71,8 @@ export function buildHudUpdateSignature(snapshot: HudSnapshot): string {
     snapshot.settings.musicVolume,
     snapshot.settings.particles,
     snapshot.settings.reducedMotion,
-    snapshot.settings.highContrast
+    snapshot.settings.highContrast,
+    snapshot.playMode
   ].join("§");
 }
 

@@ -44,7 +44,7 @@ import {
 import { gameEventsToStrings, normalizeGameEvents } from "../shared/gameEvents";
 import { DEFAULT_COSMETICS, DEFAULT_SETTINGS, SAVE_VERSION, normalizeCosmetics, normalizeSaveState, normalizeSettings } from "../shared/saveState";
 import { BOARD_EXPORT_VERSION, createBoardExportPayload, encodeBoardExport, parseBoardExport } from "../shared/shareState";
-import { createApiServer } from "../server/api";
+import { withApiServer } from "./helpers/apiServer";
 import { buildGenerationSummary, buildPrompt, parseWorkerOutput, requestEvolution, runCursorWorker, summarizeLevelError } from "../server/cursorAgent";
 import { parseLevelJsonFromCandidates } from "../server/levelJson";
 import { appendAssistantTextChunk } from "../server/streamText";
@@ -182,25 +182,6 @@ function withFakeAudioWindow<T>(run: (context: FakeAudioContext) => T): T {
     } else {
       Reflect.deleteProperty(globalThis, "window");
     }
-  }
-}
-
-async function withApiServer<T>(run: (baseUrl: string) => Promise<T>): Promise<T> {
-  const server = createApiServer();
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  try {
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("API test server did not expose a TCP port.");
-    return await run(`http://127.0.0.1:${address.port}`);
-  } finally {
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => {
-        if (error) reject(error);
-        else resolve();
-      });
-    });
   }
 }
 

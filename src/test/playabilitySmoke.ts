@@ -1,6 +1,7 @@
 import { once } from "node:events";
 import { resolve } from "node:path";
-import { chromium, type Page } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
+import type { PlayMode } from "../client/game/playSession";
 import { LAUNCH_LOSS_GRACE_SECONDS } from "../client/game/tuning";
 import { createApiServer } from "../server/api";
 
@@ -82,6 +83,7 @@ interface DebugSnapshot {
   powerupPrimerDismissed: boolean;
   recentEvents: string[];
   announcement: string;
+  playMode?: PlayMode;
 }
 
 const server = createApiServer({ staticDir: resolve("dist") });
@@ -103,6 +105,32 @@ try {
     "Expected production preview to omit the debug game surface unless explicitly enabled."
   );
   await productionPage.close();
+
+  const { page: agentPage, ready: agentReady } = await bootAgentPage(browser, baseUrl, "agentMode=1");
+  assert(agentReady.playMode === "agent-manual", "Expected agent mode URL to select manual agent play.");
+  assert((await agentPage.evaluate(() => "__ricochetRushGame" in window)) === true, "Expected agent mode URL to expose the debug game surface.");
+  assert((await agentPage.locator("[data-board-meta]").textContent())?.includes("Agent mode") === true, "Expected agent mode to be visible in the HUD.");
+  await agentPage.mouse.move(420, 500);
+  const afterHover = await snapshot(agentPage);
+  assert(afterHover.paddleX === agentReady.paddleX, "Expected agent mode to ignore passive pointer hover so agents must intentionally move the paddle.");
+  const startY = agentReady.balls[0]?.y ?? 0;
+  await agentPage.keyboard.press("Space");
+  await agentPage.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "playing");
+  await agentPage.waitForTimeout(300);
+  const agentMoving = await snapshot(agentPage);
+  const agentTravel = Math.abs((agentMoving.balls[0]?.y ?? startY) - startY);
+  assert(agentMoving.paddleX === agentReady.paddleX, "Expected manual agent mode not to move the paddle without explicit input.");
+  assert(agentTravel > 10 && agentTravel < 70, `Expected agent mode launch to move slowly enough for interactive play; travelled ${agentTravel.toFixed(1)}px.`);
+  await agentPage.close();
+
+  const { page: autoPaddlePage, ready: autoReady } = await bootAgentPage(browser, baseUrl, "agentMode=1&agentPaddle=auto");
+  assert(autoReady.playMode === "agent-auto", "Expected debug auto paddle to be opt-in and visible in debug state.");
+  await autoPaddlePage.keyboard.press("Space");
+  await autoPaddlePage.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "playing");
+  await autoPaddlePage.waitForTimeout(1000);
+  const autoMoving = await snapshot(autoPaddlePage);
+  assert(Math.abs(autoMoving.paddleX - autoReady.paddleX) > 5, "Expected opt-in debug auto paddle to move itself.");
+  await autoPaddlePage.close();
 
   const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
   const browserFailures: string[] = [];
@@ -649,6 +677,16 @@ async function assertLaunchGraceExpiresAfterWindow(page: Page, label: string): P
 
 async function focusedSummaryActionIndex(page: Page): Promise<string | null> {
   return page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute("data-summary-action") ?? null);
+}
+
+async function bootAgentPage(browser: Browser, baseUrl: string, query: string): Promise<{ page: Page; ready: DebugSnapshot }> {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
+  await page.goto(`${baseUrl}/?${query}`, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => localStorage.clear());
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
+  return { page, ready: await snapshot(page) };
 }
 
 async function snapshot(page: { evaluate: <T>(callback: () => T) => Promise<T> }): Promise<DebugSnapshot> {

@@ -76,7 +76,6 @@ import {
   MAX_PADDLE_VELOCITY,
   MIN_COLLISION_X_RATIO,
   MIN_COLLISION_Y_RATIO,
-  PADDLE_SPEED,
   PADDLE_Y,
   WALL,
   WIDTH,
@@ -157,6 +156,16 @@ import {
   soundForPowerup,
   toSavedRunStats
 } from "./gameRuntimeHelpers";
+import type { PlayMode } from "./playSession";
+import { blockPassiveMouseHover, playClockScale } from "./playSession";
+import { chooseAutoPaddleTarget } from "./autoPaddleStrategy";
+import {
+  decayPaddleVelocity,
+  keyboardPaddleDirection,
+  keyboardPaddleTargetX,
+  movePaddle,
+  type PaddleMotionState
+} from "./paddleControl";
 import { GameSceneView, type SceneFrame } from "./gameSceneView";
 import {
   BALL_TRAIL_MIN_SPEED,
@@ -168,11 +177,16 @@ import {
   POWER_DURATIONS
 } from "./gameVisualConfig";
 
+interface RicochetRushGameOptions {
+  playMode?: PlayMode;
+}
+
 export class RicochetRushGame {
   private readonly mount: HTMLDivElement;
   private readonly hud: HudApi;
   private readonly sceneView: GameSceneView;
   private readonly gameOverlay: GameOverlay;
+  private readonly playMode: PlayMode;
   private readonly overlay = document.createElement("div");
   private readonly effectsLayer = document.createElement("div");
   private readonly keys = new Set<string>();
@@ -238,9 +252,10 @@ export class RicochetRushGame {
   private powerupPrimerDismissed = false;
   private latestGenerationSummary?: GenerationSummary;
 
-  constructor(mount: HTMLDivElement, hud: HudApi) {
+  constructor(mount: HTMLDivElement, hud: HudApi, options: RicochetRushGameOptions = {}) {
     this.mount = mount;
     this.hud = hud;
+    this.playMode = options.playMode ?? "normal";
     this.settings = readSettings();
     this.cosmetics = readJson(COSMETICS_KEY, normalizeCosmetics) ?? DEFAULT_COSMETICS;
     this.savedBoards = readJson(SAVED_BOARDS_KEY, normalizeSavedBoards) ?? [];
@@ -293,6 +308,20 @@ export class RicochetRushGame {
       this.startPack("starter", "Starter pack loaded.");
     }
     this.applySettingsClass();
+    switch (this.playMode) {
+      case "agent-auto":
+        this.pushEvent("Debug auto paddle enabled at normal speed.", "technical");
+        break;
+      case "agent-manual":
+        this.pushEvent("Agent mode enabled: game clock slowed for interactive agent play.", "technical");
+        break;
+      case "normal":
+        break;
+      default: {
+        const unreachable: never = this.playMode;
+        throw unreachable;
+      }
+    }
     this.audio.setSfxVolume(this.settings.sfxVolume);
     this.audio.setMusicVolume(this.settings.musicVolume);
     window.requestAnimationFrame(this.loop);
@@ -332,6 +361,7 @@ export class RicochetRushGame {
       designerIntent: this.designerIntent,
       generationSummary: this.latestGenerationSummary,
       settings: this.settings,
+      playMode: this.playMode,
       cosmetics: this.cosmetics,
       cosmeticOptions: collectCosmeticOptions(this.hudSnapshot()),
       audio: this.audio.debugSnapshot(),
@@ -417,14 +447,15 @@ export class RicochetRushGame {
       if (now < this.lastKeyboardAt) return;
       const rect = this.sceneView.renderer.domElement.getBoundingClientRect();
       const nextX = ((clientX - rect.left) / rect.width) * WIDTH;
-      const elapsedSeconds = this.lastPointerAt > 0 ? (now - this.lastPointerAt) / 1000 : 1 / 60;
+      const realElapsed = this.lastPointerAt > 0 ? (now - this.lastPointerAt) / 1000 : 1 / 60;
+      const elapsedSeconds = realElapsed * playClockScale(this.playMode);
       this.lastPointerAt = now;
-      this.setPaddleX(nextX, elapsedSeconds);
+      this.applyPaddleMotion(movePaddle(this.paddleMotionState(), nextX, elapsedSeconds));
     };
     let activeTouchPointerId: number | null = null;
     const stage = this.mount.closest<HTMLElement>(".stage");
     this.sceneView.renderer.domElement.addEventListener("pointermove", (event) => {
-      if (event.pointerType === "touch") return;
+      if (event.pointerType !== "touch" && blockPassiveMouseHover(this.playMode)) return;
       applyPointerPaddle(event.clientX);
     });
     this.sceneView.renderer.domElement.addEventListener("pointerdown", (event) => {
@@ -545,9 +576,9 @@ export class RicochetRushGame {
   }
 
   private loop = (time: number) => {
-    const delta = Math.min((time - this.lastTime) / 1000 || 0, 0.03);
+    const realDelta = Math.min((time - this.lastTime) / 1000 || 0, 0.03);
     this.lastTime = time;
-    this.update(delta);
+    this.update(realDelta * playClockScale(this.playMode));
     this.render();
     window.requestAnimationFrame(this.loop);
   };
@@ -604,14 +635,29 @@ export class RicochetRushGame {
   }
 
   private updatePaddle(delta: number) {
-    const direction = Number(this.keys.has("ArrowRight") || this.keys.has("KeyD")) - Number(this.keys.has("ArrowLeft") || this.keys.has("KeyA"));
+    const direction = keyboardPaddleDirection(this.keys);
     if (direction !== 0) this.lastKeyboardAt = performance.now();
+
+    let nextState: PaddleMotionState;
     if (direction !== 0) {
-      this.setPaddleX(this.paddleX + direction * PADDLE_SPEED * delta, delta);
+      nextState = movePaddle(this.paddleMotionState(), keyboardPaddleTargetX(this.paddleMotionState(), direction, delta), delta);
+    } else if (this.playMode === "agent-auto" && this.phase === "playing") {
+      const target = chooseAutoPaddleTarget({
+        balls: this.balls,
+        bricks: this.bricks,
+        powerups: this.powerups,
+        paddleX: this.paddleX,
+        paddleWidth: this.paddleWidth
+      });
+      nextState =
+        target.kind === "idle"
+          ? { ...this.paddleMotionState(), paddleVelocityX: 0 }
+          : movePaddle(this.paddleMotionState(), target.x, 0, { snap: true });
     } else {
-      this.paddleVelocityX *= Math.max(0, 1 - delta * 12);
-      if (Math.abs(this.paddleVelocityX) < 1) this.paddleVelocityX = 0;
+      nextState = { ...this.paddleMotionState(), paddleVelocityX: decayPaddleVelocity(this.paddleVelocityX, delta) };
     }
+
+    this.applyPaddleMotion(nextState);
     for (const ball of this.balls) {
       if (ball.stuck) {
         ball.x = clamp(this.paddleX + ball.stuckOffset, WALL + ball.radius, WIDTH - WALL - ball.radius);
@@ -620,11 +666,18 @@ export class RicochetRushGame {
     }
   }
 
-  private setPaddleX(nextX: number, elapsedSeconds: number) {
-    const previousX = this.paddleX;
-    this.paddleX = clamp(nextX, WALL + this.paddleWidth / 2, WIDTH - WALL - this.paddleWidth / 2);
-    const rawVelocity = elapsedSeconds > 0 ? (this.paddleX - previousX) / elapsedSeconds : 0;
-    this.paddleVelocityX = clamp(rawVelocity, -MAX_PADDLE_VELOCITY, MAX_PADDLE_VELOCITY);
+  private paddleMotionState(): PaddleMotionState {
+    return {
+      paddleX: this.paddleX,
+      paddleWidth: this.paddleWidth,
+      paddleVelocityX: this.paddleVelocityX
+    };
+  }
+
+  private applyPaddleMotion(state: PaddleMotionState) {
+    this.paddleX = state.paddleX;
+    this.paddleWidth = state.paddleWidth;
+    this.paddleVelocityX = state.paddleVelocityX;
   }
 
   private handlePrimaryAction() {
@@ -1863,6 +1916,7 @@ export class RicochetRushGame {
       agentTrace: this.latestAgentTrace,
       sidebarCollapsed: this.sidebarCollapsed,
       settings: this.settings,
+      playMode: this.playMode,
       cosmetics: this.cosmetics,
       cosmeticOptions: collectCosmeticOptions(this.hudSnapshot()),
       activePowers: collectActivePowers(this.hudSnapshot()),
@@ -2083,6 +2137,7 @@ export class RicochetRushGame {
       latestGenerationSummary: this.latestGenerationSummary,
       powerupPrimerDismissed: this.powerupPrimerDismissed,
       settings: this.settings,
+      playMode: this.playMode,
       dailyProgress: this.dailyProgress,
       packProgress: this.packProgress,
       savedBoards: this.savedBoards

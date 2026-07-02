@@ -1,3 +1,4 @@
+import { agentModeBoardMetaSuffix, type PlayMode } from "../game/playSession";
 import {
   DEFAULT_DESIGNER_INTENT,
   type BoardDesignerIntent,
@@ -63,6 +64,7 @@ export interface HudState {
   events: GameEventRecord[];
   announcement: string;
   sidebarCollapsed?: boolean;
+  playMode?: PlayMode;
   agentTrace?: ComposerAgentTrace;
 }
 
@@ -716,10 +718,11 @@ function playerStatusFor(state: HudState): string {
 }
 
 function renderBoardMeta(state: HudState): string {
-  if (state.boardSource === "generated") return "Custom board";
+  const suffix = agentModeBoardMetaSuffix(state.playMode ?? "normal");
+  if (state.boardSource === "generated") return `Custom board${suffix}`;
   const activePack = state.packs.find((pack) => pack.active);
-  if (!activePack) return "Curated board";
-  return `${activePack.name} - ${activePack.progressLabel}`;
+  if (!activePack) return `Curated board${suffix}`;
+  return `${activePack.name} - ${activePack.progressLabel}${suffix}`;
 }
 
 function renderCompactSummary(element: HTMLElement, _state: HudState) {

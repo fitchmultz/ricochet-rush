@@ -18,6 +18,10 @@ export const MAX_BALL_SPEED = 860;
 export const MIN_COLLISION_X_RATIO = 0.16;
 export const MIN_COLLISION_Y_RATIO = 0.16;
 
+export function clampPaddleCenterX(x: number, paddleWidth: number): number {
+  return clamp(x, WALL + paddleWidth / 2, WIDTH - WALL - paddleWidth / 2);
+}
+
 export function brickWidthForColumns(columns: number): number {
   return (WIDTH - WALL * 2 - BRICK_GAP * (columns - 1)) / columns;
 }

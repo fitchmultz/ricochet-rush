@@ -23,6 +23,12 @@ npm run dev
 
 Open `http://127.0.0.1:4177`.
 
+### Agent mode
+
+Open `http://127.0.0.1:4177/?agentMode=1` to slow the whole game simulation for interactive agent play: ball movement, paddle movement, lasers, power-ups, timers, effects, and run logic all use the same slower game clock. This mode is meant for a human-watched headed browser session, such as telling a pi agent to start the server, open the URL with `agent_browser`, and play by observing the page and sending normal inputs. It does not start an outside autoplay script, and default agent mode leaves paddle control manual.
+
+Agent mode also exposes `window.__ricochetRushGame` for the active browser session so agents can inspect the current state while they play. Add `&agentPaddle=auto` only when you explicitly want the in-game debug paddle assist to snap to the projected ball path by itself; that debug assist runs at normal game speed.
+
 ## Controls
 
 - `A/D` or arrow keys: move paddle

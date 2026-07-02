@@ -12,7 +12,7 @@ npm approve-scripts --allow-scripts-pending
 npm run ci
 ```
 
-`npm run ci` starts with `npm run deps:verify`, which exercises the reviewed runtime override surfaces: sqlite opens an in-memory database, Connect Node initializes its transport, and Cursor SDK exports the expected Agent API.
+`npm run ci` starts with `npm run deps:verify`, which exercises the reviewed runtime override surfaces: Cursor SDK sqlite storage opens and disposes, Connect Node initializes its transport, and Cursor SDK exports the expected Agent API.
 
 Optional live Cursor SDK verification, when `CURSOR_API_KEY` is available:
 
@@ -25,13 +25,11 @@ Before merging changes that affect Cursor generation behavior, maintainers shoul
 
 ## Reviewed Overrides
 
-Reviewed on May 27, 2026 by the project maintainer. Overrides are scoped to the dependency branch that needs them.
+Reviewed on July 1, 2026 by the project maintainer. Overrides are scoped to the dependency branch that needs them.
 
 | Override | Scope | Why it exists | Cleanup trigger |
-| --- | --- | --- |
-| `sqlite3` → `npm:@appthreat/sqlite3@8.0.2` | `@cursor/sdk` → `sqlite3` | Replaces Cursor SDK's deprecated `sqlite3` native-binary path, which pulls deprecated `prebuild-install`, with the maintained API-compatible AppThreat sqlite3 fork. | Remove when `@cursor/sdk` depends on a maintained sqlite package that does not pull deprecated tooling. |
-| `undici@8.3.0` | `@cursor/sdk` → `@connectrpc/connect-node` → `undici` | Keeps the Connect Node transport polyfill dependency on the current Undici release. This requires Node `>=22.19.0`. | Remove when `@connectrpc/connect-node` or `@cursor/sdk` resolves Undici 8+ without an override. |
-| `tar@7.5.15` | `sqlite3` / `node-gyp` tar paths | Keeps native-build tar handling on the current tar release across sqlite/node-gyp paths. | Remove when no installed dependency resolves an older tar. |
+| --- | --- | --- | --- |
+| `undici@8.5.0` | `@cursor/sdk` → `@connectrpc/connect-node` → `undici` | Keeps the Connect Node transport polyfill dependency on the current Undici release. This requires Node `>=22.19.0`. | Remove when `@connectrpc/connect-node` or `@cursor/sdk` resolves Undici 8+ without an override. |
 
 `npm ci` must not emit deprecation warnings. If a dependency update introduces one, treat it as release-blocking dependency debt and replace, upgrade, or remove the source before shipping.
 
@@ -41,10 +39,9 @@ Reviewed on May 27, 2026 by the project maintainer. Overrides are scoped to the 
 
 Current approvals:
 
-- `esbuild@0.28.0`
+- `esbuild@0.28.1`
 - `fsevents@2.3.2`
 - `fsevents@2.3.3`
-- `@appthreat/sqlite3@8.0.2`
 
 ## Cursor SDK Model Contract
 
