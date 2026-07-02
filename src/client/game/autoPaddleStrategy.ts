@@ -1,4 +1,5 @@
 import { clamp } from "../../shared/util";
+import { clampPaddleCenterX } from "./gameArena";
 import type { Ball, Brick, Powerup } from "./gameEntityTypes";
 import { MAX_BALL_SPEED, PADDLE_Y, WALL, WIDTH } from "./gameArena";
 import { powerupToneFor } from "./powerups";
@@ -33,7 +34,7 @@ export function chooseAutoPaddleTarget(input: AutoPaddleInput): AutoPaddleTarget
   if (ball && timeToPaddle(ball) <= BALL_DANGER_SECONDS) return ballTarget(input, ball);
 
   const powerup = selectPowerup(input);
-  if (powerup) return { kind: "powerup", x: clampPaddleX(powerup.x, input.paddleWidth), powerup };
+  if (powerup) return { kind: "powerup", x: clampPaddleCenterX(powerup.x, input.paddleWidth), powerup };
 
   if (ball) return ballTarget(input, ball);
   return { kind: "idle", x: input.paddleX };
@@ -64,7 +65,7 @@ function ballTarget(input: AutoPaddleInput, ball: Ball): AutoPaddleTarget {
   const aim = chooseBrickAim(input.bricks, ball, interceptX);
   const hitZone = aim?.hitZone ?? 0;
   const paddleCenterX = interceptX - hitZone * (input.paddleWidth / 2);
-  return { kind: "ball", x: clampPaddleX(paddleCenterX, input.paddleWidth), ball, hitZone, targetBrick: aim?.brick ?? null };
+  return { kind: "ball", x: clampPaddleCenterX(paddleCenterX, input.paddleWidth), ball, hitZone, targetBrick: aim?.brick ?? null };
 }
 
 function chooseBrickAim(bricks: readonly Brick[], ball: Ball, interceptX: number): BrickAim | null {
@@ -116,8 +117,4 @@ function reflectBetween(value: number, min: number, max: number): number {
   const period = range * 2;
   const offset = ((value - min) % period + period) % period;
   return offset <= range ? min + offset : max - (offset - range);
-}
-
-function clampPaddleX(x: number, paddleWidth: number): number {
-  return clamp(x, WALL + paddleWidth / 2, WIDTH - WALL - paddleWidth / 2);
 }

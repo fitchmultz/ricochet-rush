@@ -1,6 +1,7 @@
 import { once } from "node:events";
 import { resolve } from "node:path";
-import { chromium, type Page } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
+import type { PlayMode } from "../client/game/playSession";
 import { LAUNCH_LOSS_GRACE_SECONDS } from "../client/game/tuning";
 import { createApiServer } from "../server/api";
 
@@ -82,11 +83,7 @@ interface DebugSnapshot {
   powerupPrimerDismissed: boolean;
   recentEvents: string[];
   announcement: string;
-  agentMode?: {
-    enabled: boolean;
-    timeScale: number;
-    paddleMode: "manual" | "auto";
-  };
+  playMode?: PlayMode;
 }
 
 const server = createApiServer({ staticDir: resolve("dist") });
@@ -109,16 +106,9 @@ try {
   );
   await productionPage.close();
 
-  const agentPage = await browser.newPage({ viewport: { width: 1280, height: 820 } });
-  await agentPage.goto(`${baseUrl}/?agentMode=1`, { waitUntil: "domcontentloaded" });
-  await agentPage.evaluate(() => localStorage.clear());
-  await agentPage.reload({ waitUntil: "domcontentloaded" });
-  await agentPage.waitForSelector('[data-testid="ricochet-rush-canvas"]');
-  await agentPage.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
-  const agentReady = await snapshot(agentPage);
-  assert(agentReady.agentMode?.enabled === true, "Expected agent mode to expose the debug game surface and mark itself enabled.");
-  assert(agentReady.agentMode.timeScale < 1, "Expected agent mode to reduce game simulation time scale.");
-  assert(agentReady.agentMode.paddleMode === "manual", "Expected default agent mode to leave paddle control manual.");
+  const { page: agentPage, ready: agentReady } = await bootAgentPage(browser, baseUrl, "agentMode=1");
+  assert(agentReady.playMode === "agent-manual", "Expected agent mode URL to select manual agent play.");
+  assert((await agentPage.evaluate(() => "__ricochetRushGame" in window)) === true, "Expected agent mode URL to expose the debug game surface.");
   assert((await agentPage.locator("[data-board-meta]").textContent())?.includes("Agent mode") === true, "Expected agent mode to be visible in the HUD.");
   await agentPage.mouse.move(420, 500);
   const afterHover = await snapshot(agentPage);
@@ -133,14 +123,8 @@ try {
   assert(agentTravel > 10 && agentTravel < 70, `Expected agent mode launch to move slowly enough for interactive play; travelled ${agentTravel.toFixed(1)}px.`);
   await agentPage.close();
 
-  const autoPaddlePage = await browser.newPage({ viewport: { width: 1280, height: 820 } });
-  await autoPaddlePage.goto(`${baseUrl}/?agentMode=1&agentPaddle=auto`, { waitUntil: "domcontentloaded" });
-  await autoPaddlePage.evaluate(() => localStorage.clear());
-  await autoPaddlePage.reload({ waitUntil: "domcontentloaded" });
-  await autoPaddlePage.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
-  const autoReady = await snapshot(autoPaddlePage);
-  assert(autoReady.agentMode?.paddleMode === "auto", "Expected debug auto paddle to be opt-in and visible in debug state.");
-  assert(autoReady.agentMode.timeScale === 1, "Expected debug auto paddle to run at normal speed.");
+  const { page: autoPaddlePage, ready: autoReady } = await bootAgentPage(browser, baseUrl, "agentMode=1&agentPaddle=auto");
+  assert(autoReady.playMode === "agent-auto", "Expected debug auto paddle to be opt-in and visible in debug state.");
   await autoPaddlePage.keyboard.press("Space");
   await autoPaddlePage.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "playing");
   await autoPaddlePage.waitForTimeout(1000);
@@ -692,6 +676,16 @@ async function assertLaunchGraceExpiresAfterWindow(page: Page, label: string): P
 
 async function focusedSummaryActionIndex(page: Page): Promise<string | null> {
   return page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute("data-summary-action") ?? null);
+}
+
+async function bootAgentPage(browser: Browser, baseUrl: string, query: string): Promise<{ page: Page; ready: DebugSnapshot }> {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
+  await page.goto(`${baseUrl}/?${query}`, { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => localStorage.clear());
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="ricochet-rush-canvas"]');
+  await page.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "ready");
+  return { page, ready: await snapshot(page) };
 }
 
 async function snapshot(page: { evaluate: <T>(callback: () => T) => Promise<T> }): Promise<DebugSnapshot> {

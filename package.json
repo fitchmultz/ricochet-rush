@@ -15,43 +15,35 @@
     "sdk:reliability": "tsx src/test/sdkReliability.ts",
     "test": "vitest run",
     "ci": "npm run deps:verify && npm run build && npm run test && npm run smoke && npm run ux:preview",
-    "deps:verify": "tsx src/test/dependencyContracts.ts"
+    "deps:verify": "vitest run src/test/dependencyContracts.test.ts"
   },
   "dependencies": {
-    "@cursor/sdk": "^1.0.15",
-    "three": "0.184.0",
-    "vite": "8.0.14"
+    "@cursor/sdk": "1.0.22",
+    "three": "0.185.1",
+    "vite": "8.1.2"
   },
   "overrides": {
     "@cursor/sdk": {
       "@connectrpc/connect-node": {
-        "undici": "8.3.0"
-      },
-      "sqlite3": "npm:@appthreat/sqlite3@8.0.2"
-    },
-    "sqlite3": {
-      "tar": "7.5.15",
-      "node-gyp": {
-        "tar": "7.5.15"
+        "undici": "8.5.0"
       }
     }
   },
   "devDependencies": {
-    "@types/node": "25.9.1",
-    "@types/three": "0.184.1",
-    "playwright": "1.60.0",
-    "tsx": "4.22.3",
+    "@types/node": "26.1.0",
+    "@types/three": "0.185.0",
+    "playwright": "1.61.1",
+    "tsx": "4.22.4",
     "typescript": "6.0.3",
-    "vitest": "4.1.7"
+    "vitest": "4.1.9"
   },
   "engines": {
     "node": ">=22.19.0"
   },
   "allowScripts": {
-    "esbuild@0.28.0": true,
+    "esbuild@0.28.1": true,
     "fsevents@2.3.2": true,
-    "fsevents@2.3.3": true,
-    "@appthreat/sqlite3@8.0.2": true
+    "fsevents@2.3.3": true
   },
   "packageManager": "npm@11.16.0"
 }

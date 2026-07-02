@@ -1,5 +1,6 @@
 import "./styles.css";
-import { resolveAgentMode } from "./game/agentMode";
+import { isDebugSurfaceEnabled } from "./game/debugSurface";
+import { isRecognizedAgentModeUrl, persistAgentModePreference, resolvePlayMode } from "./game/playSession";
 import { createHud } from "./ui/hud";
 import type { RicochetRushGame as RicochetRushGameInstance } from "./game/RicochetRushGame";
 
@@ -16,20 +17,14 @@ if (!mount) {
   throw new Error("Missing #game mount");
 }
 
-const agentMode = resolveAgentMode(window.location.search, window.localStorage);
+const search = window.location.search;
+const storage = window.localStorage;
+const playMode = resolvePlayMode(search, storage);
+persistAgentModePreference(search, storage);
+const debugSurfaceEnabled = isRecognizedAgentModeUrl(search) || isDebugSurfaceEnabled(search, storage);
 const { RicochetRushGame } = await import("./game/RicochetRushGame");
-const game = new RicochetRushGame(mount, hud, { agentMode });
-if (agentMode.enabled || isDebugSurfaceEnabled()) {
+const game = new RicochetRushGame(mount, hud, { playMode });
+if (debugSurfaceEnabled) {
   window.__ricochetRushGame = game;
 }
 game.start();
-
-function isDebugSurfaceEnabled(): boolean {
-  const params = new URLSearchParams(window.location.search);
-  if (params.has("debugGame")) return true;
-  try {
-    return window.localStorage.getItem("ricochet-rush-debug") === "1";
-  } catch {
-    return false;
-  }
-}

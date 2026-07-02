@@ -1,3 +1,4 @@
+import { agentModeBoardMetaSuffix, type PlayMode } from "../game/playSession";
 import {
   DEFAULT_DESIGNER_INTENT,
   type BoardDesignerIntent,
@@ -63,11 +64,7 @@ export interface HudState {
   events: GameEventRecord[];
   announcement: string;
   sidebarCollapsed?: boolean;
-  agentMode?: {
-    enabled: boolean;
-    timeScale: number;
-    paddleMode: "manual" | "auto";
-  };
+  playMode?: PlayMode;
   agentTrace?: ComposerAgentTrace;
 }
 
@@ -721,7 +718,7 @@ function playerStatusFor(state: HudState): string {
 }
 
 function renderBoardMeta(state: HudState): string {
-  const suffix = state.agentMode?.enabled ? ` • Agent mode${state.agentMode.paddleMode === "auto" ? " auto paddle" : ""}` : "";
+  const suffix = agentModeBoardMetaSuffix(state.playMode ?? "normal");
   if (state.boardSource === "generated") return `Custom board${suffix}`;
   const activePack = state.packs.find((pack) => pack.active);
   if (!activePack) return `Curated board${suffix}`;
