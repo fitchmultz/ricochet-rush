@@ -18,32 +18,32 @@
     "deps:verify": "vitest run src/test/dependencyContracts.test.ts"
   },
   "dependencies": {
-    "@cursor/sdk": "1.0.22",
+    "@cursor/sdk": "1.0.23",
     "three": "0.185.1",
-    "vite": "8.1.2"
+    "vite": "8.1.5"
   },
   "overrides": {
     "@cursor/sdk": {
       "@connectrpc/connect-node": {
-        "undici": "8.5.0"
+        "undici": "8.7.0"
       }
     }
   },
   "devDependencies": {
-    "@types/node": "26.1.0",
-    "@types/three": "0.185.0",
+    "@types/node": "26.1.1",
+    "@types/three": "0.185.1",
     "playwright": "1.61.1",
-    "tsx": "4.22.4",
-    "typescript": "6.0.3",
-    "vitest": "4.1.9"
+    "tsx": "4.23.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
   },
   "engines": {
-    "node": ">=22.19.0"
+    "node": "^22.19.0 || >=24.0.0"
   },
   "allowScripts": {
     "esbuild@0.28.1": true,
     "fsevents@2.3.2": true,
     "fsevents@2.3.3": true
   },
-  "packageManager": "npm@11.16.0"
+  "packageManager": "npm@11.18.0"
 }

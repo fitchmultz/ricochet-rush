@@ -14,7 +14,7 @@ The game includes curated board packs for repeatable runs, plus a prompt-first b
 
 ## Run
 
-Requires Node.js 22.19.0 or newer and npm 11.16.0 (pinned by `packageManager`).
+Requires Node.js 22.19.0 or newer on the Node 22 line, or Node.js 24 or newer, plus npm 11.18.0 (pinned by `packageManager`).
 
 ```sh
 npm install
