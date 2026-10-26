@@ -18,16 +18,10 @@
     "deps:verify": "vitest run src/test/dependencyContracts.test.ts"
   },
   "dependencies": {
-    "@cursor/sdk": "1.0.23",
+    "@cursor/sdk": "1.0.40",
     "three": "0.185.1",
-    "vite": "8.3.5"
-  },
-  "overrides": {
-    "@cursor/sdk": {
-      "@connectrpc/connect-node": {
-        "undici": "8.7.0"
-      }
-    }
+    "vite": "8.3.5",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "26.1.1",
