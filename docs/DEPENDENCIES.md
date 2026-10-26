@@ -1,6 +1,7 @@
 # Dependency Policy
 
 This project keeps runtime and tooling dependencies exact-pinned in `package.json` and locked in `package-lock.json`. Use the pinned `packageManager` value, `npm@11.18.0`, for install-script policy and lockfile updates.
+`zod` is root-pinned at `4.6.7` to satisfy the `@cursor/sdk` peer dependency with the release patched for GHSA-mrhx-c7xc-m3w5.
 
 ## Local Gate
 
@@ -12,7 +13,7 @@ npm approve-scripts --allow-scripts-pending
 npm run ci
 ```
 
-`npm run ci` starts with `npm run deps:verify`, which exercises the reviewed runtime override surfaces: Cursor SDK sqlite storage opens and disposes, Connect Node initializes its transport, and Cursor SDK exports the expected Agent API.
+`npm run ci` starts with `npm run deps:verify`, which exercises the reviewed runtime dependency surfaces: Cursor SDK sqlite storage opens and disposes, and Cursor SDK exports the expected Agent API.
 
 Optional live Cursor SDK verification, when `CURSOR_API_KEY` is available:
 
@@ -25,11 +26,7 @@ Before merging changes that affect Cursor generation behavior, maintainers shoul
 
 ## Reviewed Overrides
 
-Reviewed on July 17, 2026. Overrides are scoped to the dependency branch that needs them.
-
-| Override | Scope | Why it exists | Cleanup trigger |
-| --- | --- | --- | --- |
-| `undici@8.7.0` | `@cursor/sdk` → `@connectrpc/connect-node` → `undici` | Keeps the Connect Node transport polyfill dependency on the current Undici release. This requires Node `>=22.19.0`. | Remove when `@connectrpc/connect-node` or `@cursor/sdk` resolves Undici 8+ without an override. |
+None currently. The `undici@8.7.0` override scoped to `@cursor/sdk` → `@connectrpc/connect-node` → `undici` was removed on October 26, 2026: `@cursor/sdk` 1.0.40 dropped `@connectrpc/connect-node` from its dependency tree, firing the override's documented cleanup trigger.
 
 `npm ci` must not emit deprecation warnings. If a dependency update introduces one, treat it as release-blocking dependency debt and replace, upgrade, or remove the source before shipping.
 
