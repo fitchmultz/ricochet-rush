@@ -127,9 +127,20 @@ try {
   assert(autoReady.playMode === "agent-auto", "Expected debug auto paddle to be opt-in and visible in debug state.");
   await autoPaddlePage.keyboard.press("Space");
   await autoPaddlePage.waitForFunction(() => window.__ricochetRushGame?.debugSnapshot().phase === "playing");
-  await autoPaddlePage.waitForTimeout(1000);
-  const autoMoving = await snapshot(autoPaddlePage);
-  assert(Math.abs(autoMoving.paddleX - autoReady.paddleX) > 5, "Expected opt-in debug auto paddle to move itself.");
+  const autoPaddleMoved = await autoPaddlePage
+    .waitForFunction(
+      (startX) => {
+        const game = window.__ricochetRushGame;
+        return game !== undefined && Math.abs(game.debugSnapshot().paddleX - startX) > 5;
+      },
+      autoReady.paddleX,
+      { polling: "raf", timeout: 5000 }
+    )
+    .then(
+      () => true,
+      () => false
+    );
+  assert(autoPaddleMoved, "Expected opt-in debug auto paddle to move itself.");
   await autoPaddlePage.close();
 
   const page = await browser.newPage({ viewport: { width: 1280, height: 820 } });
